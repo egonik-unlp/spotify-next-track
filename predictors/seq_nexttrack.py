@@ -17,6 +17,30 @@ predicts the latent of the following item. Loss is either
 
 Early stopping watches the same loss on a held-out slice of the TRAIN sessions.
 
+Network TOPOLOGY hyperparameters (for the topology experiment; all default to
+the original single-layer unidirectional network so existing configs are
+unchanged):
+
+  * `num_layers`   : stacked GRU/LSTM (torch applies `dropout` between layers
+                     when num_layers>1).
+  * `bidirectional`: bidirectional encoder. See the LEAKAGE caveat below.
+  * `residual`     : inter-layer residual connections for a manual stack of
+                     single-layer cells (only meaningful with num_layers>1).
+
+LEAKAGE caveat — per-step teacher forcing (predict item t+1 from the prefix
+up to t) is only leak-free with a *unidirectional* RNN: a bidirectional RNN's
+per-step output at t already sees items t+1.. from the backward pass, so it
+would trivially copy the target. Therefore the training OBJECTIVE depends on
+`bidirectional`:
+
+  * `bidirectional=false` (default): the existing per-step teacher forcing over
+    every next-step pair, head Linear(hidden -> 64).
+  * `bidirectional=true`: a leak-free LAST-ITEM objective — encode the FULL
+    prefix (all-but-last) bidirectionally, take the concat of both directions'
+    final states (dim 2*hidden), head Linear(2*hidden -> 64), and predict ONLY
+    the held-out next (last) item's latent. No intermediate steps are forced.
+    This mirrors how eval already works (prefix -> next), so it is consistent.
+
 CLI (mirrors the other predictors' arg shape; the registry passes a
 `--hyperparams` FILE, but an inline JSON string is also accepted):
 
@@ -48,7 +72,9 @@ from seq_common import (
 DEFAULTS = {
     "hidden": 128,          # GRU/LSTM hidden width (128 / 256 typical)
     "arch": "gru",          # "gru" | "lstm"
-    "layers": 1,            # recurrent layers
+    "num_layers": 1,        # stacked recurrent layers (topology)
+    "bidirectional": False, # bidirectional encoder -> last-item objective (topology)
+    "residual": False,      # inter-layer residuals in a manual stack (topology)
     "dropout": 0.1,
     "loss": "cosine",       # "cosine" | "infonce"
     "tau": 0.07,            # InfoNCE temperature
@@ -67,9 +93,18 @@ def load_hp(spec: str) -> dict:
     JSON string (the task's literal `--hyperparams '<json>'`)."""
     p = Path(spec)
     raw = p.read_text() if p.exists() else spec
-    hp = {**DEFAULTS, **json.loads(raw)}
+    user = json.loads(raw)
+    hp = {**DEFAULTS, **user}
+    # Backward-compat: the network depth used to be the `layers` key. Honor it
+    # when a caller set `layers` but not the new canonical `num_layers`.
+    if "num_layers" not in user and "layers" in user:
+        hp["num_layers"] = int(user["layers"])
+    hp["num_layers"] = int(hp["num_layers"])
+    hp["bidirectional"] = bool(hp["bidirectional"])
+    hp["residual"] = bool(hp["residual"])
     assert hp["arch"] in ("gru", "lstm"), "arch must be gru|lstm"
     assert hp["loss"] in ("cosine", "infonce"), "loss must be cosine|infonce"
+    assert hp["num_layers"] >= 1, "num_layers must be >= 1"
     assert hp["epochs"] >= 1 and hp["batch_size"] >= 1
     return hp
 
@@ -80,34 +115,129 @@ def load_hp(spec: str) -> dict:
 class SeqNextLatent(nn.Module):
     """Recurrent encoder over prefix latents -> predicted next latent.
 
-    Input  : (batch, T, latent_dim) padded prefix latents.
-    Output : (batch, T, latent_dim) per-step predicted next latent (train) or
-             (batch, latent_dim) final-step prediction (eval)."""
+    Topology is controlled by (num_layers, bidirectional, residual):
+
+    * Unidirectional (bidirectional=False) — the default. Produces a per-step
+      output (batch, T, hidden) that the head maps to (batch, T, latent_dim);
+      trained with per-step teacher forcing. Depth is `num_layers`:
+        - residual=False -> torch's native stacked RNN (inter-layer `dropout`
+          when num_layers>1);
+        - residual=True & num_layers>1 -> a MANUAL stack of `num_layers`
+          single-layer cells with an inter-layer residual `out = layer(x) + x`
+          between equal-width layers (torch's native multi-layer RNN has no
+          inter-layer residual). The first layer maps latent_dim -> hidden; its
+          residual is SKIPPED unless latent_dim == hidden (dim mismatch). With
+          num_layers==1 residual is a no-op (falls back to the native path).
+
+    * Bidirectional (bidirectional=True) — a native stacked bidirectional RNN.
+      To stay LEAK-FREE (see the module docstring) it exposes only a LAST-ITEM
+      prediction: the concat of both directions' final hidden states (dim
+      2*hidden) mapped by the head to latent_dim. There is no per-step output,
+      so it is trained on the held-out last item alone. `residual` does not
+      apply to this path.
+
+    forward()      -> (batch, T, latent_dim) per-step preds (unidirectional).
+    predict_next() -> (batch, latent_dim) final next-latent (both modes; used
+                      for eval, and for training in bidirectional mode)."""
 
     def __init__(self, latent_dim: int, hidden: int, arch: str,
-                 layers: int, dropout: float):
+                 num_layers: int, dropout: float,
+                 bidirectional: bool = False, residual: bool = False):
         super().__init__()
-        rnn_cls = nn.GRU if arch == "gru" else nn.LSTM
-        self.rnn = rnn_cls(
-            input_size=latent_dim,
-            hidden_size=hidden,
-            num_layers=layers,
-            batch_first=True,
-            dropout=dropout if layers > 1 else 0.0,
-        )
-        self.drop = nn.Dropout(dropout)
-        self.head = nn.Linear(hidden, latent_dim)
+        self.latent_dim = latent_dim
+        self.hidden = hidden
+        self.arch = arch
+        self.num_layers = num_layers
+        self.bidirectional = bool(bidirectional)
+        self.residual = bool(residual)
+        # Bidirectional => leak-free last-item objective (no per-step forcing).
+        self.last_item_only = self.bidirectional
+        # A manual residual stack is only built when it is meaningful.
+        self.manual_stack = (self.residual and num_layers > 1
+                             and not self.bidirectional)
 
-    def forward(self, x: torch.Tensor, lengths: torch.Tensor | None = None):
-        # x: (B, T, D). Pack to skip padding when lengths are given.
+        rnn_cls = nn.GRU if arch == "gru" else nn.LSTM
+        self.drop = nn.Dropout(dropout)
+
+        if self.bidirectional:
+            self.rnn = rnn_cls(
+                input_size=latent_dim, hidden_size=hidden,
+                num_layers=num_layers, batch_first=True,
+                dropout=dropout if num_layers > 1 else 0.0,
+                bidirectional=True)
+            self.head = nn.Linear(2 * hidden, latent_dim)
+        elif self.manual_stack:
+            self.cells = nn.ModuleList([
+                rnn_cls(input_size=(latent_dim if li == 0 else hidden),
+                        hidden_size=hidden, num_layers=1, batch_first=True)
+                for li in range(num_layers)
+            ])
+            self.head = nn.Linear(hidden, latent_dim)
+        else:
+            self.rnn = rnn_cls(
+                input_size=latent_dim, hidden_size=hidden,
+                num_layers=num_layers, batch_first=True,
+                dropout=dropout if num_layers > 1 else 0.0)
+            self.head = nn.Linear(hidden, latent_dim)
+
+    @staticmethod
+    def _run(cell, x, lengths):
+        """Run one RNN cell, packing to skip padding when lengths are given."""
         if lengths is not None:
             packed = nn.utils.rnn.pack_padded_sequence(
                 x, lengths.cpu(), batch_first=True, enforce_sorted=False)
-            out, _ = self.rnn(packed)
+            out, state = cell(packed)
             out, _ = nn.utils.rnn.pad_packed_sequence(out, batch_first=True)
         else:
-            out, _ = self.rnn(x)
-        return self.head(self.drop(out))  # (B, T, D)
+            out, state = cell(x)
+        return out, state
+
+    def _encode_seq(self, x: torch.Tensor, lengths: torch.Tensor | None):
+        """Per-step encoder output (B, T, hidden) for the unidirectional paths."""
+        if self.manual_stack:
+            h = x
+            for li, cell in enumerate(self.cells):
+                inp = h
+                out, _ = self._run(cell, inp, lengths)
+                # Inter-layer residual between equal-width layers; the first
+                # layer changes width (latent_dim -> hidden) so skip unless the
+                # dims already match.
+                if li == 0:
+                    if self.latent_dim == self.hidden:
+                        out = out + inp
+                else:
+                    out = out + inp
+                # Dropout between layers (not after the last), as torch does.
+                if li < self.num_layers - 1:
+                    out = self.drop(out)
+                h = out
+            return h
+        out, _ = self._run(self.rnn, x, lengths)
+        return out
+
+    def forward(self, x: torch.Tensor, lengths: torch.Tensor | None = None):
+        # Per-step next-latent prediction (unidirectional teacher forcing).
+        assert not self.bidirectional, (
+            "bidirectional model has no per-step output; use predict_next()")
+        out = self._encode_seq(x, lengths)          # (B, T, hidden)
+        return self.head(self.drop(out))            # (B, T, D)
+
+    def predict_next(self, x: torch.Tensor, lengths: torch.Tensor | None = None):
+        """Final predicted next-latent (B, latent_dim) for a prefix batch."""
+        if self.bidirectional:
+            _, state = self._run(self.rnn, x, lengths)
+            h_n = state[0] if self.arch == "lstm" else state
+            # h_n: (num_layers*2, B, hidden). Last layer's forward = -2, its
+            # backward = -1; concat both directions -> (B, 2*hidden).
+            rep = torch.cat([h_n[-2], h_n[-1]], dim=1)
+            return self.head(self.drop(rep))        # (B, D)
+        out = self._encode_seq(x, lengths)          # (B, T, hidden)
+        if lengths is not None:
+            idx = (lengths.to(out.device) - 1).clamp(min=0)
+            last = out[torch.arange(out.size(0), device=out.device), idx]
+        else:
+            last = out[:, -1, :]
+        return self.head(self.drop(last))           # (B, D)
 
 
 # --------------------------------------------------------------------------- #
@@ -165,6 +295,15 @@ def step_loss(pred: torch.Tensor, y: torch.Tensor, mask: torch.Tensor,
     return torch.nn.functional.cross_entropy(logits, labels)
 
 
+def last_item_loss(pred: torch.Tensor, y: torch.Tensor,
+                   loss_kind: str, tau: float) -> torch.Tensor:
+    """Leak-free last-item loss for the bidirectional path: one (pred, target)
+    pair per session. Reuses the exact cosine / in-batch-InfoNCE objective as
+    the per-step loss (a full-True mask over a single step)."""
+    mask = torch.ones(pred.shape[0], 1, dtype=torch.bool, device=pred.device)
+    return step_loss(pred.unsqueeze(1), y.unsqueeze(1), mask, loss_kind, tau)
+
+
 # --------------------------------------------------------------------------- #
 # Train                                                                       #
 # --------------------------------------------------------------------------- #
@@ -191,14 +330,31 @@ def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
           f"dataset {art.manifest['dataset_id']}: {art.n_sessions} sessions, "
           f"{art.n_items} items, dim {D}; train pairs {len(tr_seqs)} / "
           f"val {len(va_seqs)} / test sessions {int(art.test_sessions.size)}"})
+    topo = (f"{'bi' if hp['bidirectional'] else 'uni'}dir"
+            f"{', residual' if hp['residual'] and hp['num_layers'] > 1 else ''}")
     emit({"kind": "log", "msg":
-          f"{hp['arch']} hidden {hp['hidden']} x{hp['layers']}, "
+          f"{hp['arch']} hidden {hp['hidden']} x{hp['num_layers']} ({topo}), "
           f"loss {hp['loss']}, dropout {hp['dropout']}, lr {hp['lr']}, "
-          f"batch {hp['batch_size']}, {hp['epochs']} epochs"})
+          f"batch {hp['batch_size']}, {hp['epochs']} epochs; objective "
+          f"{'last-item (leak-free)' if hp['bidirectional'] else 'per-step teacher forcing'}"})
 
-    model = SeqNextLatent(D, hp["hidden"], hp["arch"], hp["layers"], hp["dropout"])
+    model = SeqNextLatent(D, hp["hidden"], hp["arch"], hp["num_layers"],
+                          hp["dropout"], bidirectional=hp["bidirectional"],
+                          residual=hp["residual"])
     opt = torch.optim.Adam(model.parameters(), lr=hp["lr"])
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    def batch_loss(x, y, mask, lengths):
+        """Loss for one padded batch + its sample weight, branching on the
+        training objective: per-step teacher forcing (unidirectional) or the
+        leak-free last-item objective (bidirectional)."""
+        if model.last_item_only:
+            pred = model.predict_next(x, lengths)          # (B, D)
+            idx = (lengths - 1).clamp(min=0)
+            y_last = y[torch.arange(y.shape[0]), idx]      # (B, D) last-item latent
+            return last_item_loss(pred, y_last, hp["loss"], hp["tau"]), y.shape[0]
+        pred = model(x, lengths)                           # (B, T, D)
+        return step_loss(pred, y, mask, hp["loss"], hp["tau"]), int(mask.sum())
 
     def val_loss() -> float:
         model.eval()
@@ -206,10 +362,9 @@ def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
         with torch.no_grad():
             for x, y, mask, lengths in make_batches(
                     va_seqs, latents, hp["batch_size"], rng, shuffle=False):
-                pred = model(x, lengths)
-                nsteps = int(mask.sum())
-                tot += float(step_loss(pred, y, mask, hp["loss"], hp["tau"])) * nsteps
-                n += nsteps
+                loss, w = batch_loss(x, y, mask, lengths)
+                tot += float(loss) * w
+                n += w
         return tot / max(n, 1)
 
     best_val = float("inf")
@@ -221,13 +376,11 @@ def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
         for x, y, mask, lengths in make_batches(
                 tr_seqs, latents, hp["batch_size"], rng, shuffle=True):
             opt.zero_grad()
-            pred = model(x, lengths)
-            loss = step_loss(pred, y, mask, hp["loss"], hp["tau"])
+            loss, w = batch_loss(x, y, mask, lengths)
             loss.backward()
             opt.step()
-            nsteps = int(mask.sum())
-            tot += float(loss.detach()) * nsteps
-            n += nsteps
+            tot += float(loss.detach()) * w
+            n += w
         tr_loss = tot / max(n, 1)
         vl = val_loss()
         emit({"kind": "epoch", "epoch": epoch, "total_epochs": hp["epochs"],
@@ -254,7 +407,7 @@ def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
     def score_fn(prefix: np.ndarray) -> np.ndarray:
         x = torch.from_numpy(latents[prefix][None, :, :])  # (1, T, D)
         with torch.no_grad():
-            pred = model(x)[:, -1, :]                       # final-step prediction
+            pred = model.predict_next(x)                    # (1, D) prefix -> next
             pred = torch.nn.functional.normalize(pred, dim=1)
             scores = (pred @ item_norm.t()).squeeze(0)      # (n_items,)
         return scores.numpy()

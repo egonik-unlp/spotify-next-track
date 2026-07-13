@@ -1781,6 +1781,26 @@ default = 5
 min = 0
 max = 10000
 
+[[predictors.params]]
+name = "num_layers"
+label = "stacked recurrent layers"
+type = "int"
+default = 1
+min = 1
+max = 8
+
+[[predictors.params]]
+name = "bidirectional"
+label = "bidirectional encoder (switches to leak-free last-item objective)"
+type = "bool"
+default = false
+
+[[predictors.params]]
+name = "residual"
+label = "inter-layer residual connections (needs num_layers>1)"
+type = "bool"
+default = false
+
 [[predictors]]
 name = "seq-markov"
 display_name = "Next-track Markov (baseline)"

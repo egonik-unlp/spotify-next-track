@@ -41,17 +41,26 @@ chronological split 5,723 train / 1,431 test @ cut 2024-08-24; cold-item rate
 | model | Recall@10 [95% CI] | MRR | note |
 |---|---|---|---|
 | **B2 first-order Markov (bar)** | **0.107** [0.092, 0.124] | **0.069** | `transit.rs::affinity`, train-only; the app's incumbent |
-| GRU h128 **infonce** (best model) | 0.089 [0.076, 0.104] | 0.039 | ties B2 on Recall@10 (paired-Δ CI incl. 0); loses on MRR |
-| GRU h256 cosine | 0.041 | 0.020 | |
-| GRU h128 cosine | 0.039 | 0.016 | |
-| LSTM h128 cosine | 0.038 | 0.014 | |
+| GRU infonce **h256** (topology best) | 0.096 [0.080, 0.110] | 0.041 | width; TIES B2 on R@10 (paired-Δ CI incl. 0), loses MRR |
+| GRU infonce depth-2 h128 | 0.092 [0.076, 0.106] | 0.040 | depth flat vs 1-layer |
+| GRU infonce h128 (1-layer) | 0.089 [0.076, 0.104] | 0.039 | sweep's infonce arm, reproduced |
+| GRU infonce depth-3 h128 | 0.083 [0.069, 0.096] | 0.037 | depth-3 HURTS (loses to bar) |
+| GRU infonce bidirectional h128 | 0.048 [0.037, 0.059] | 0.023 | leak-free last-item objective (~13× fewer train targets); loses |
+| GRU h128 cosine (1-layer) | 0.039 | 0.016 | cosine ≈ 0.4× infonce |
 | B0 popularity / B1 recency | 0.001 | — | floors |
 
-Read: **no WIN — first-order co-listening transitions hold.** InfoNCE is the
-dominant lever (~2.3× cosine); capacity/cell barely move it. Best GRU (infonce)
-reaches a statistical tie with the Markov bar on Recall@10 but loses on MRR and
-Recall@20 → not beaten, no deploy. The GRU's value is a COMPLEMENT (candidate
-generation / an "extend-a-session" demo), not a replacement for the bigram.
+Read: **no WIN — first-order co-listening transitions hold, across BOTH loss and
+topology sweeps.** InfoNCE is the dominant lever (~2.3× cosine); **network
+topology is flat/spent** — width (h256) is the only marginal mover (R@10 0.096,
+still a tie vs the bar and losing on MRR), depth is flat then HURTS at 3 layers,
+residual adds nothing, and bidirectional collapses (mostly an objective artifact:
+the leak-free last-item objective starves training ~13×). The transferable
+latent-retrieval signal caps ~R@10 0.09–0.10 regardless of architecture. The
+GRU's value is a COMPLEMENT (candidate generation / "extend-a-session" demo), not
+a replacement. The only unexplored lever is the training objective / candidate
+framing — esp. **blending GRU-infonce candidate scores WITH the Markov bigram**
+(the app's A* transition slot) — the most promising path to actually beat it.
+Source: `experiments/2026-07-13-nexttrack-topology-scan.md`.
 
 ## Noise / significance
 
