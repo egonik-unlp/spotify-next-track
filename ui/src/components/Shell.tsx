@@ -8,6 +8,10 @@ const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform)
 
 export default function Shell() {
   const domain = useDomain()
+  // Interpretability (scalar-target probes) and Predict (scalar consensus) are
+  // pointwise-only; a ranking instance predicts a next-item ordering, so they
+  // don't apply. Hide them from the spine (the views also guard direct URLs).
+  const isRanking = domain.target.task === 'ranking'
   // Tone-step the topbar's bottom hairline once content scrolls under it
   // (flat elevation: a border step, never a resting shadow).
   const [stuck, setStuck] = useState(false)
@@ -65,15 +69,19 @@ export default function Shell() {
             <NavLink to="/models" className="nav-link">
               Models
             </NavLink>
-            <NavLink to="/predict" className="nav-link">
-              Predict
-            </NavLink>
+            {!isRanking && (
+              <NavLink to="/predict" className="nav-link">
+                Predict
+              </NavLink>
+            )}
             <NavLink to="/pathfinder" className="nav-link">
               Pathfinder
             </NavLink>
-            <NavLink to="/interpretability" className="nav-link">
-              Interpretability
-            </NavLink>
+            {!isRanking && (
+              <NavLink to="/interpretability" className="nav-link">
+                Interpretability
+              </NavLink>
+            )}
           </nav>
           <button
             className="topbar-search"

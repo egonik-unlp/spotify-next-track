@@ -2,6 +2,10 @@
 
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted' | 'stopped'
 
+/** Learning task a dataset/run targets. Drives task-aware metric formatting and
+ *  view rendering. Absent ⇒ regression (the historical default). */
+export type TaskKind = 'regression' | 'binary' | 'multiclass' | 'ranking'
+
 /** Task-dependent test metrics: regression keys (mae/rmse/r2/mape/medape) for
  *  regression runs, classification keys (accuracy/logloss/auc/brier or
  *  macro_f1) for classifier runs. All optional except `n_test`; which are
@@ -24,6 +28,20 @@ export interface Metrics {
   brier?: number
   /** multiclass classification: macro-averaged F1 */
   macro_f1?: number
+  /** ranking: fraction of test queries whose held-out item is in the top-K
+   *  (K = the run's configured cutoff, e.g. recall@10). 0..1, higher better. */
+  recall_at_k?: number
+  /** ranking: recall at a fixed cutoff of 10, when reported alongside recall_at_k. */
+  recall_at_10?: number
+  /** ranking: recall at a fixed cutoff of 20, when reported. */
+  recall_at_20?: number
+  /** ranking: mean reciprocal rank of the held-out item. 0..1, higher better. */
+  mrr?: number
+  /** ranking: hit rate — fraction of queries with at least one hit in top-K
+   *  (equals recall_at_k for a single held-out item). 0..1, higher better. */
+  hit_rate?: number
+  /** ranking: normalized discounted cumulative gain, when reported. 0..1. */
+  ndcg?: number
   n_test: number
 }
 
@@ -56,6 +74,10 @@ export interface Prediction {
    *  K-vector. `predicted` is then P(class1) (binary) / the argmax class id
    *  (multiclass); `actual` is the class id. */
   proba?: number[]
+  /** Ranking only: the top-K predicted ITEM indices for this query, best-first.
+   *  Index into the dataset's `items.json`. `predicted` is `top_k_ids[0]`;
+   *  `actual` is the held-out true next-item index. */
+  top_k_ids?: number[]
 }
 
 export type ProgressEvent =
@@ -110,19 +132,35 @@ export interface Manifest {
   /** Optional display name; the slug `dataset_id` stays the stable identity. */
   name?: string | null
   created_at: string
-  source: { qdrant_url: string; collection: string; filter: string }
+  /** Absent on SEQUENCE datasets (their summary carries no source block). */
+  source?: { qdrant_url: string; collection: string; filter: string }
   n_rows: number
   n_cols: number
   columns: ColumnDesc[]
   pca: {
     dims: number
     mean: number[]
-    components_shape: [number, number]
+    /** Absent on SEQUENCE datasets (no PCA reduction). */
+    components_shape?: [number, number]
     explained_variance_ratio: number[]
   }
-  target: { field: string; transform: 'log1p' | 'none' }
-  split: { test_ratio: number; seed: number; n_train: number; n_test: number }
-  feature_config: FeatureConfig
+  target: { field: string; transform: 'log1p' | 'none'; task?: TaskKind }
+  split: {
+    test_ratio: number
+    seed: number
+    n_train: number
+    n_test: number
+    /** "random" (default) or a chronological strategy label. */
+    strategy?: string
+  }
+  /** Absent on SEQUENCE datasets (no flat feature matrix). */
+  feature_config?: FeatureConfig
+  /** Dataset family. Absent ⇒ pointwise (flat feature matrix + scalar target).
+   *  "sequence" is a next-item/ranking dataset with per-item latents instead. */
+  kind?: 'pointwise' | 'sequence'
+  /** Present only for `kind === 'sequence'`: item-vocabulary size and the
+   *  Qdrant collection the per-item latents were taken from. */
+  sequence?: { n_items: number; latent_source: string }
   quality?: QualityReport | null
   /** Cumulative explained-variance curve over the full spectrum (train split). */
   cumulative_evr?: number[]

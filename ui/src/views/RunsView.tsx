@@ -176,10 +176,7 @@ export default function RunsView() {
             </button>
           </div>
         ) : !loading && sorted.length === 0 ? (
-          <EmptyRuns
-            targetNoun={domain.project.target_noun}
-            entityNounPl={domain.project.entity_noun_plural}
-          />
+          <EmptyRuns domain={domain} />
         ) : (
           <>
       <table
@@ -450,36 +447,46 @@ function LiveStatusCell({ runId, onFinished }: { runId: string; onFinished: () =
   )
 }
 
-function EmptyRuns({
-  targetNoun,
-  entityNounPl,
-}: {
-  targetNoun: string
-  entityNounPl: string
-}) {
+function EmptyRuns({ domain }: { domain: Domain }) {
+  const entityNoun = domain.project.entity_noun
+  const entityNounPl = domain.project.entity_noun_plural
+  const targetNoun = domain.project.target_noun
+  const isRanking = domain.target.task === 'ranking'
   return (
     <section className="empty-state" aria-label="No runs yet">
       <LatticeMark />
       <h1>No runs yet</h1>
       <p>
-        This bench trains models that predict a track’s <strong>{targetNoun}</strong> — how well
-        it fits your listening habits — from its co-listening embedding. That score is what the
-        playlist pathfinder uses to rank candidate tracks when building a sequence between two
-        songs. The loop:
+        {isRanking ? (
+          <>
+            This bench trains models that predict which {entityNoun} comes{' '}
+            <strong>next</strong> in a listening session, ranking the whole {entityNoun}{' '}
+            vocabulary and scoring how often the true next {entityNoun} lands near the top. The
+            loop:
+          </>
+        ) : (
+          <>
+            This bench trains models that predict a {entityNoun}&rsquo;s{' '}
+            <strong>{targetNoun}</strong> from its learned embedding, then lets you drill from the
+            headline metrics into the individual predictions behind them. The loop:
+          </>
+        )}
       </p>
       <ol className="empty-steps">
         <li>
-          <strong>Build a dataset</strong> — fetch {entityNounPl} from Qdrant, reduce the
-          co-listening embeddings with PCA, freeze a train/test split.
+          <strong>Build a dataset</strong> —{' '}
+          {isRanking
+            ? `assemble listening sessions over the ${entityNoun} vocabulary and freeze a train/test split of sessions.`
+            : `fetch ${entityNounPl} from Qdrant, reduce the embeddings, freeze a train/test split.`}
         </li>
         <li>
-          <strong>Pick a predictor</strong> — an MLP, a CNN, ridge regression, the median
+          <strong>Pick a predictor</strong> — {isRanking ? 'a sequence model or a ' : 'an MLP, ridge regression, the median '}
           baseline, or any executable implementing the contract.
         </li>
         <li>
-          <strong>Train and inspect</strong> — watch loss live, then drill from metrics into
-          the individual {targetNoun} predictions behind them. Promote the best as the model
-          the pathfinder scores with.
+          <strong>Train and inspect</strong> — watch progress, then drill from the metrics into
+          the {isRanking ? 'per-query ranked predictions' : `individual ${targetNoun} predictions`}{' '}
+          behind them, and promote the best.
         </li>
       </ol>
       <Link to="/new" className="btn btn-primary">

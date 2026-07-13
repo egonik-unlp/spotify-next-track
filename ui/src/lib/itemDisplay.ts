@@ -65,6 +65,31 @@ export function itemLabel(domain: Domain, item: Item | null | undefined): string
   return s.length > 38 ? `${s.slice(0, 37)}…` : s
 }
 
+/** Adapt a SEQUENCE dataset's compact item record — items.json there is keyed
+ *  {uri, name, artist, genre, play_count}, not by the domain field names — onto
+ *  the domain's title/byline/tag/ref fields, so the shared ItemIdentity, itemHref
+ *  and the name/byline filter present a next-item track exactly like a pointwise
+ *  corpus row. Only fills a target field when it's absent, so a fuller record is
+ *  left untouched. */
+export function sequenceItemForDisplay(domain: Domain, raw: Item | null): Item | null {
+  if (!raw) return null
+  const out: Record<string, unknown> = { ...raw }
+  const alias = (fieldName: string | undefined, value: unknown) => {
+    if (fieldName && value != null && out[fieldName] == null) out[fieldName] = value
+  }
+  alias(titleField(domain)?.name, (raw as Record<string, unknown>).name)
+  alias(bylineField(domain)?.name, (raw as Record<string, unknown>).artist)
+  alias(tagField(domain)?.name, (raw as Record<string, unknown>).genre)
+  const ref = domain.fields.find((f) => f.role === 'display' && isRefField(f))
+  alias(ref?.name, (raw as Record<string, unknown>).uri)
+  if (out.content == null) {
+    out.content = [(raw as Record<string, unknown>).name, (raw as Record<string, unknown>).artist]
+      .filter(Boolean)
+      .join(' — ')
+  }
+  return out as Item
+}
+
 /** External link for the entity, if a display field carries a known URI scheme.
  *  Spotify URIs ("spotify:track:ID") map to open.spotify.com; unknown schemes
  *  yield no link rather than a guess. */

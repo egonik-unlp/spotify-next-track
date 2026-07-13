@@ -302,6 +302,126 @@
   font-size: var(--text-dense);
 }
 
+/* ---------------- ranking (next-item) predictions ---------------- */
+
+.rank-blurb {
+  margin-top: var(--sp-2);
+  font-size: var(--text-dense);
+}
+
+.rank-miss-word {
+  color: var(--ink-secondary);
+  font-weight: 560;
+}
+
+/* Hit-rank badge in the per-query table: a hit reads as an accented rank, a
+   miss as a quiet muted chip. Shares the class-chip footprint. */
+.rank-badge {
+  display: inline-block;
+  min-width: 2.4em;
+  padding: 0.05em 0.5em;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--accent-border, var(--hairline-strong));
+  color: var(--accent, var(--ink));
+  background: var(--accent-soft, var(--surface-sunken));
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  line-height: 1.4;
+  font-weight: 560;
+}
+
+.rank-badge.is-miss {
+  border-color: var(--hairline);
+  color: var(--ink-faint);
+  background: var(--surface-sunken);
+  font-weight: 400;
+}
+
+/* Expanded ranked list: the model's full top-K for one query. */
+.rank-list-wrap {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.rank-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.rank-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+}
+
+/* The held-out true next item, wherever it landed: accented so the eye finds
+   it against the rest of the ranked list. */
+.rank-item.is-truth {
+  border-color: var(--accent-border, var(--accent));
+  background: var(--accent-soft, color-mix(in srgb, var(--accent) 8%, transparent));
+}
+
+.rank-item-n {
+  width: 2rem;
+  flex: none;
+  text-align: right;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-item-track {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Ordering-at-a-glance bar, mirroring the Pathfinder fit bar. */
+.rank-bar {
+  flex: none;
+  width: 6rem;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.rank-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--series-a);
+}
+
+.rank-item.is-truth .rank-bar-fill {
+  background: var(--accent, var(--series-a));
+}
+
+.rank-truth-tag {
+  flex: none;
+  font-size: var(--text-label);
+  font-weight: 560;
+  color: var(--accent, var(--ink));
+}
+
+.rank-miss-note {
+  margin: 0;
+  font-size: var(--text-dense);
+  color: var(--ink-secondary);
+  display: flex;
+  align-items: baseline;
+  gap: 0.6ch;
+  flex-wrap: wrap;
+}
+
+.rank-miss-item {
+  display: inline-flex;
+}
+
 /* "Save as definition" inline control next to the hyperparameter chips. */
 .save-def {
   display: inline-flex;

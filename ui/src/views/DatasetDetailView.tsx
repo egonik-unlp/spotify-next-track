@@ -67,7 +67,9 @@ export default function DatasetDetailView() {
   const split = splitAsync.loading ? null : splitAsync.data
 
   const rows = useMemo<Row[]>(() => {
-    if (!items) return []
+    // Sequence datasets carry no scalar target / categoricals to explore per
+    // row; their panel reads the item vocabulary directly, not these Row[].
+    if (!items || manifest.data?.kind === 'sequence') return []
     const train = new Set(split?.train ?? [])
     const test = new Set(split?.test ?? [])
     const targetField = domain.target.field
@@ -89,7 +91,7 @@ export default function DatasetDetailView() {
         cats,
       }
     })
-  }, [items, split, catFields, domain])
+  }, [items, split, catFields, domain, manifest.data])
 
   if (manifest.error) {
     return (
@@ -151,16 +153,28 @@ export default function DatasetDetailView() {
       <div className="view-body">
         <DatasetHeader m={m} onRenamed={manifest.reload} />
         <Lineage datasetId={m.dataset_id} />
-        {itemsError ? (
-          <div className="error-block" role="alert">
-            Could not load the corpus for exploration: {itemsError}
-          </div>
+        {m.kind === 'sequence' ? (
+          itemsError ? (
+            <div className="error-block" role="alert">
+              Could not load the item vocabulary: {itemsError}
+            </div>
+          ) : (
+            <SequencePanel m={m} items={items} loading={!items} domain={domain} />
+          )
         ) : (
-          <Exploration rows={rows} loading={!items} hasSplit={!!split} m={m} domain={domain} catFields={catFields} />
+          <>
+            {itemsError ? (
+              <div className="error-block" role="alert">
+                Could not load the corpus for exploration: {itemsError}
+              </div>
+            ) : (
+              <Exploration rows={rows} loading={!items} hasSplit={!!split} m={m} domain={domain} catFields={catFields} />
+            )}
+            <FeatureInventory columns={m.columns} />
+            {m.quality && <QualityReportPanel m={m} />}
+            <ExportPanel m={m} />
+          </>
         )}
-        <FeatureInventory columns={m.columns} />
-        {m.quality && <QualityReportPanel m={m} />}
-        <ExportPanel m={m} />
       </div>
     </section>
   )
@@ -169,6 +183,7 @@ export default function DatasetDetailView() {
 /* ---------------- A. header ---------------- */
 
 function DatasetHeader({ m, onRenamed }: { m: Manifest; onRenamed: () => void }) {
+  const seq = m.kind === 'sequence'
   return (
     <header className="run-header">
       <dl className="run-meta">
@@ -178,29 +193,51 @@ function DatasetHeader({ m, onRenamed }: { m: Manifest; onRenamed: () => void })
             <DatasetRef id={m.dataset_id} short={false} self copy />
           </dd>
         </div>
-        <div>
-          <dt>Source</dt>
-          <dd className="num">{m.source.collection}</dd>
-        </div>
-        <div>
-          <dt>Filter</dt>
-          <dd className="num source-filter" title={m.source.filter}>
-            {m.source.filter}
-          </dd>
-        </div>
-        <div>
-          <dt>Target</dt>
-          <dd className="num">
-            {m.target.field} · {m.target.transform === 'log1p' ? 'log1p' : 'raw'}
-          </dd>
-        </div>
-        <div>
-          <dt>Split</dt>
-          <dd className="num">
-            test {fmtPct(m.split.test_ratio, 0)} · seed {m.split.seed} ·{' '}
-            {m.split.n_train.toLocaleString()} train / {m.split.n_test.toLocaleString()} test
-          </dd>
-        </div>
+        {seq ? (
+          <>
+            <div>
+              <dt>Kind</dt>
+              <dd className="num">sequence · next-item ranking</dd>
+            </div>
+            <div>
+              <dt>Latent source</dt>
+              <dd className="num">{m.sequence?.latent_source ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>Split</dt>
+              <dd className="num">
+                {m.split.strategy ?? 'chronological'} · {m.split.n_train.toLocaleString()} train /{' '}
+                {m.split.n_test.toLocaleString()} test sessions
+              </dd>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <dt>Source</dt>
+              <dd className="num">{m.source?.collection}</dd>
+            </div>
+            <div>
+              <dt>Filter</dt>
+              <dd className="num source-filter" title={m.source?.filter}>
+                {m.source?.filter}
+              </dd>
+            </div>
+            <div>
+              <dt>Target</dt>
+              <dd className="num">
+                {m.target.field} · {m.target.transform === 'log1p' ? 'log1p' : 'raw'}
+              </dd>
+            </div>
+            <div>
+              <dt>Split</dt>
+              <dd className="num">
+                test {fmtPct(m.split.test_ratio, 0)} · seed {m.split.seed} ·{' '}
+                {m.split.n_train.toLocaleString()} train / {m.split.n_test.toLocaleString()} test
+              </dd>
+            </div>
+          </>
+        )}
       </dl>
       <RenameAction m={m} onRenamed={onRenamed} />
     </header>
@@ -291,7 +328,7 @@ function ExportPanel({ m }: { m: Manifest }) {
         name_suffix: suffix,
         quality: m.quality.config,
         currency: m.currency?.config,
-        source: m.source.collection,
+        source: m.source?.collection,
       })
       .then(
         (jobId) => {
@@ -328,7 +365,7 @@ function ExportPanel({ m }: { m: Manifest }) {
             <div className="hp-field">
               <label htmlFor="export-suffix">collection name</label>
               <div className="export-name">
-                <span className="num muted">{m.source.collection}-clean-</span>
+                <span className="num muted">{m.source?.collection}-clean-</span>
                 <input
                   id="export-suffix"
                   type="text"
@@ -687,7 +724,7 @@ function Exploration({
       <div className="panel">
         <h2 className="panel-title">PCA explained variance</h2>
         <p className="muted eda-blurb num">
-          {m.pca.dims} components over {m.pca.components_shape[1]}-dim embeddings ·{' '}
+          {m.pca.dims} components over {m.pca.components_shape?.[1] ?? '—'}-dim embeddings ·{' '}
           {fmtPct(m.pca.explained_variance_ratio.reduce((a, b) => a + b, 0))} captured
         </p>
         {m.cumulative_evr && m.cumulative_evr.length > m.pca.dims ? (
@@ -714,6 +751,97 @@ function Exploration({
 /** Corpus summary stat: the shared MetricCell vocabulary, never clickable. */
 function Stat({ label, value, hint }: { label: string; value: string; hint: string }) {
   return <MetricCell label={label} value={value} hint={hint} />
+}
+
+/* ---------------- sequence dataset panel ----------------
+ * A next-item dataset has no flat feature matrix, PCA spectrum or scalar-target
+ * distribution to explore. Instead it is sessions over an item vocabulary; this
+ * panel summarizes that shape and profiles the vocabulary (play-count spread,
+ * dominant genres) straight from items.json. */
+
+function SequencePanel({
+  m,
+  items,
+  loading,
+  domain,
+}: {
+  m: Manifest
+  items: Items | null
+  loading: boolean
+  domain: Domain
+}) {
+  const entries = useMemo(() => (items ? Object.values(items) : []), [items])
+  const playCounts = useMemo(
+    () => entries.map((it) => Number(it.play_count ?? 0)).filter((v) => v > 0),
+    [entries],
+  )
+  const genres = useMemo(
+    () =>
+      topCategories(
+        entries.map((it) => ({ key: String(it.genre ?? ''), value: Number(it.play_count ?? 0) })),
+        12,
+      ),
+    [entries],
+  )
+  const vocab = m.sequence?.n_items ?? entries.length
+  const strategy = m.split.strategy ?? 'chronological'
+  const nounPl = domain.project.entity_noun_plural
+
+  return (
+    <>
+      <div className="panel">
+        <h2 className="section-title">
+          Sequence dataset{' '}
+          <span className="muted num">next-item prediction over listening sessions</span>
+        </h2>
+        <div className="metrics-strip eda-strip" role="group" aria-label="Sequence dataset summary">
+          <Stat label="sessions" value={m.n_rows.toLocaleString()} hint="listening sessions" />
+          <Stat label="item vocabulary" value={vocab.toLocaleString()} hint={`distinct ${nounPl}`} />
+          <Stat label="latent dim" value={String(m.n_cols)} hint="per-item embedding" />
+          <Stat label="train sessions" value={m.split.n_train.toLocaleString()} hint={strategy} />
+          <Stat label="test sessions" value={m.split.n_test.toLocaleString()} hint="held-out" />
+        </div>
+        <p className="muted eda-blurb num">
+          latent source {m.sequence?.latent_source ?? '—'} · split {strategy}
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="panel">
+          <h2 className="section-title">Item vocabulary</h2>
+          <div className="skeleton" style={{ height: '14rem', marginTop: 'var(--sp-3)' }} />
+        </div>
+      ) : entries.length > 0 ? (
+        <div className="panel">
+          <h2 className="panel-title">Item vocabulary</h2>
+          <p className="muted eda-blurb">
+            The {vocab.toLocaleString()} distinct {nounPl} the sessions are drawn from — how often
+            each is played, and which genres dominate.
+          </p>
+          <div className="eda-grid">
+            {playCounts.length > 0 && (
+              <div>
+                <h3 className="panel-title">Plays per {domain.project.entity_noun}</h3>
+                <Histogram
+                  series={[{ label: nounPl, values: playCounts, style: 'fill' }]}
+                  log
+                  bins={40}
+                  xLabel="play count, log scale"
+                  tickFormat={fmtTick}
+                />
+              </div>
+            )}
+            {genres.length > 0 && (
+              <div>
+                <h3 className="panel-title">Top genres (top 12)</h3>
+                <CategoryBars data={genres} ariaLabel={`${nounPl} and median plays by genre`} />
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </>
+  )
 }
 
 /* ---------------- slice drill-down ---------------- */

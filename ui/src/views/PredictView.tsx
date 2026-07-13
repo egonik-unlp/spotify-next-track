@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { CorpusEntry, GroupPredictResponse } from '../api/types'
 import ViewHeader from '../components/ViewHeader'
+import NotApplicable from '../components/NotApplicable'
 import { useAsync } from '../hooks/useAsync'
 import { useDomain } from '../lib/DomainContext'
 import { type Domain } from '../lib/domain'
@@ -86,6 +87,22 @@ function identity(domain: Domain, display: Record<string, unknown>): { title: st
 }
 
 export default function PredictView() {
+  const domain = useDomain()
+  // Predict shows a single scalar consensus, which a ranking instance has no
+  // notion of — its models emit a next-item ordering. Guard the direct URL.
+  if (domain.target.task === 'ranking') {
+    return (
+      <NotApplicable
+        glyph="pr"
+        title="Predict"
+        reason="This instance ranks the next item in a sequence, so there is no single scalar to predict for one entity. Open a run to browse its ranked, per-query predictions instead."
+      />
+    )
+  }
+  return <PredictBody />
+}
+
+function PredictBody() {
   const domain = useDomain()
   useEffect(() => {
     document.title = `Predict · ${domain.project.title}`

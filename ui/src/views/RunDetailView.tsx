@@ -31,12 +31,13 @@ import {
   shortRunId,
 } from '../lib/format'
 import './rundetail.css'
-import { metricFormatter, metricValue } from '../lib/metrics'
+import { metricFormatter, metricValue, resolveTask } from '../lib/metrics'
 import { useDocTitle, useDomain } from '../lib/DomainContext'
-import { itemByline, itemLabel, itemTitle } from '../lib/itemDisplay'
+import { itemByline, itemLabel, itemTitle, sequenceItemForDisplay } from '../lib/itemDisplay'
 
 export default function RunDetailView() {
   const { runId } = useParams<{ runId: string }>()
+  const domain = useDomain()
   const { data: run, error, loading, reload } = useAsync(() => api.getRun(runId!), [runId])
   const predictors = useAsync(() => api.listPredictors(), [])
   const events = useRunEvents(runId ?? null)
@@ -173,9 +174,12 @@ export default function RunDetailView() {
         </div>
       )}
       {checkpointPromotable && <PromotePanel run={run} checkpointOnly />}
-      {(run.status === 'succeeded' || run.status === 'stopped') && (
-        <FinishedRun run={run} events={events} />
-      )}
+      {(run.status === 'succeeded' || run.status === 'stopped') &&
+        (resolveTask(domain, run.metrics) === 'ranking' ? (
+          <RankingRun run={run} events={events} />
+        ) : (
+          <FinishedRun run={run} events={events} />
+        ))}
       </div>
     </section>
   )
@@ -479,10 +483,11 @@ function FinishedRun({ run, events }: { run: RunMeta; events: ReturnType<typeof 
   const itemsAsync = useAsync(() => loadItems(run.dataset_id).catch((): Items => ({})), [run.dataset_id])
   const items = itemsAsync.data ?? null
   const m = run.metrics ?? ({} as Metrics)
-  // Task detection: a classifier run carries no regression error metrics but
-  // does report accuracy/auc. Drives the strip, the scatter and the
-  // suspicious-row (percentage-error) tooling, which are regression-only.
-  const isClassification = m.mae == null && (m.auc != null || m.accuracy != null)
+  // Task drives the strip, the scatter and the suspicious-row (percentage-error)
+  // tooling, which are regression-only. Ranking runs never reach here — they
+  // render through RankingRun — so this resolves to regression vs classifier.
+  const isClassification =
+    resolveTask(domain, m) === 'binary' || resolveTask(domain, m) === 'multiclass'
   const tableRef = useRef<HTMLDivElement>(null)
   const [sort, setSort] = useState<{ key: PredSort; dir: 1 | -1 }>(() => ({
     key: isClassification ? 'wrongness' : 'abs_err',
@@ -1151,5 +1156,467 @@ function PredRow({
         </tr>
       )}
     </>
+  )
+}
+
+/* ---------------- ranking (next-item) run ----------------
+ * A next-item ranker has no scalar prediction to scatter: each test query is a
+ * session whose held-out next item the model tries to surface in its top-K. We
+ * show the metrics strip (recall@k / mrr / hit@k), a hit-rank distribution
+ * (where in the top-K the true item landed, or a miss), and a per-query table
+ * of the ranked list with the true next item highlighted. Every id here indexes
+ * items.json (the item vocabulary), not the corpus point ids the pointwise
+ * views join by. */
+
+type RankItem = Items[string]
+
+interface RankRow {
+  /** Test-session index (the query). */
+  row_id: number
+  /** Held-out true next-item index into items.json. */
+  actualIdx: number
+  /** The model's top-1 item index. */
+  predictedIdx: number
+  /** Ordered top-K item indices, best-first. */
+  topK: number[]
+  /** 1-based position of the true item in the top-K, or null when it's a miss. */
+  hitRank: number | null
+}
+
+type RankSort = 'hit_rank' | 'row_id'
+
+function RankingRun({ run, events }: { run: RunMeta; events: ReturnType<typeof useRunEvents> }) {
+  const domain = useDomain()
+  const preds = useAsync(() => api.getPredictions(run.run_id), [run.run_id])
+  const predictors = useAsync(() => api.listPredictors(), [])
+  const itemsAsync = useAsync(() => loadItems(run.dataset_id).catch((): Items => ({})), [run.dataset_id])
+  const items = itemsAsync.data ?? null
+  const m = run.metrics ?? ({} as Metrics)
+
+  const pred = predictors.data?.find((p) => p.name === run.predictor)
+  const supportsPredict = !!pred?.predict_args
+
+  const tableRef = useRef<HTMLDivElement>(null)
+  const [sort, setSort] = useState<{ key: RankSort; dir: 1 | -1 }>({ key: 'hit_rank', dir: 1 })
+
+  const rows: RankRow[] = useMemo(
+    () =>
+      (preds.data ?? []).map((p) => {
+        const topK = p.top_k_ids ?? []
+        const actualIdx = Math.round(p.actual)
+        const pos = topK.indexOf(actualIdx)
+        return {
+          row_id: p.row_id,
+          actualIdx,
+          predictedIdx: Math.round(p.predicted),
+          topK,
+          hitRank: pos >= 0 ? pos + 1 : null,
+        }
+      }),
+    [preds.data],
+  )
+
+  // Cutoff K: the widest top-K the predictor handed back; 10 when none loaded.
+  const kCut = useMemo(() => rows.reduce((k, r) => Math.max(k, r.topK.length), 0) || 10, [rows])
+  const hits = useMemo(() => rows.filter((r) => r.hitRank != null).length, [rows])
+
+  const jumpToTable = useCallback(() => {
+    setSort({ key: 'hit_rank', dir: 1 })
+    tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
+
+  if (!run.metrics) {
+    return (
+      <p className="muted" role="status">
+        Metrics appear when the run finishes evaluating.
+      </p>
+    )
+  }
+
+  return (
+    <>
+      <MetricStrip
+        ariaLabel="Test-set ranking metrics; each opens the ranked predictions behind it"
+        metrics={[
+          ...domain.metrics.columns.map((col) => {
+            const v = metricValue(col, m)
+            return {
+              label: col,
+              value: v != null ? metricFormatter(col, domain)(v) : '—',
+              onClick: jumpToTable,
+            }
+          }),
+          { label: 'test queries', value: m.n_test.toLocaleString() },
+        ]}
+      />
+
+      {supportsPredict && <PromotePanel run={run} />}
+
+      <div className="charts-grid">
+        <div>
+          <h2 className="panel-title">Hit-rank distribution</h2>
+          <HitRankHistogram rows={rows} kCut={kCut} />
+          <p className="muted rank-blurb">
+            Where the held-out next {domain.project.entity_noun} landed in each query&rsquo;s top-
+            {kCut}; a <span className="rank-miss-word">miss</span> is a query whose true next{' '}
+            {domain.project.entity_noun} never appeared.
+          </p>
+        </div>
+        <div className="charts-col">
+          <div>
+            <h2 className="panel-title">Ranking outcome</h2>
+            <RankingSummary hits={hits} n={rows.length} kCut={kCut} entityNoun={domain.project.entity_noun} />
+          </div>
+          {events.epochs.length > 0 && (
+            <div>
+              <h2 className="panel-title">Loss</h2>
+              <LossChart epochs={events.epochs} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <RunArch run={run} canFallback={!!pred?.visualization} />
+
+      <div ref={tableRef}>
+        <RankedPredictionsTable
+          rows={rows}
+          items={items}
+          kCut={kCut}
+          loading={preds.loading}
+          error={preds.error}
+          retry={preds.reload}
+          sort={sort}
+          setSort={setSort}
+        />
+      </div>
+    </>
+  )
+}
+
+/** Hits/misses tally for the ranking run, in the shared MetricStrip vocabulary. */
+function RankingSummary({
+  hits,
+  n,
+  kCut,
+  entityNoun,
+}: {
+  hits: number
+  n: number
+  kCut: number
+  entityNoun: string
+}) {
+  if (n === 0) return <div className="chart-empty">No predictions</div>
+  const pct = (hits / n) * 100
+  return (
+    <>
+      <MetricStrip
+        ariaLabel={`Hits within the top ${kCut}`}
+        metrics={[
+          { label: `hits @${kCut}`, value: hits.toLocaleString() },
+          { label: 'misses', value: (n - hits).toLocaleString() },
+          { label: 'hit rate', value: `${pct.toFixed(1)}%` },
+        ]}
+      />
+      <p className="muted" style={{ marginTop: 'var(--sp-2)' }}>
+        A hit is a test query whose held-out next {entityNoun} the model ranked inside its top-{kCut}.
+      </p>
+    </>
+  )
+}
+
+/** Discrete distribution of the true item's rank across queries: one bar per
+ *  rank 1…K, plus a final quiet "miss" bar. Mirrors ProbabilityHistogram's SVG
+ *  idiom (same axes, grid, tokens). */
+function HitRankHistogram({ rows, kCut }: { rows: RankRow[]; kCut: number }) {
+  const W = 640
+  const H = 200
+  const M = { top: 18, right: 16, bottom: 32, left: 44 }
+  const counts = useMemo(() => {
+    // index 0…kCut-1 → rank 1…kCut; the final index tallies misses.
+    const c = new Array<number>(kCut + 1).fill(0)
+    for (const r of rows) {
+      if (r.hitRank != null && r.hitRank >= 1 && r.hitRank <= kCut) c[r.hitRank - 1]++
+      else c[kCut]++
+    }
+    return c
+  }, [rows, kCut])
+
+  if (rows.length === 0) return <div className="chart-empty">No predictions</div>
+
+  const nBars = kCut + 1
+  const maxCount = Math.max(1, ...counts)
+  const bw = (W - M.left - M.right) / nBars
+  const yMap = (v: number) => H - M.bottom - (v / maxCount) * (H - M.top - M.bottom)
+  const label = (i: number) => (i < kCut ? String(i + 1) : 'miss')
+
+  return (
+    <div
+      className="chart"
+      role="img"
+      aria-label={`Rank at which the held-out next item appeared across test queries, over the top ${kCut}; the last bar counts misses.`}
+    >
+      <svg viewBox={`0 0 ${W} ${H}`}>
+        {[0.25, 0.5, 0.75, 1].map((f) => (
+          <g key={f}>
+            <line className="grid-line" x1={M.left} x2={W - M.right} y1={yMap(f * maxCount)} y2={yMap(f * maxCount)} />
+            <text className="tick-label" x={M.left - 5} y={yMap(f * maxCount) + 3} textAnchor="end">
+              {Math.round(f * maxCount).toLocaleString()}
+            </text>
+          </g>
+        ))}
+        {counts.map((c, i) =>
+          c === 0 ? null : (
+            <rect
+              key={i}
+              x={M.left + i * bw + 0.5}
+              width={Math.max(0.5, bw - 1)}
+              y={yMap(c)}
+              height={H - M.bottom - yMap(c)}
+              fill={i < kCut ? 'var(--series-a)' : 'var(--ink-faint)'}
+              opacity={i < kCut ? 0.85 : 0.5}
+            />
+          ),
+        )}
+        <line className="axis-line" x1={M.left} x2={W - M.right} y1={H - M.bottom} y2={H - M.bottom} />
+        {counts.map((_, i) =>
+          nBars <= 12 || i % 2 === 0 || i === kCut ? (
+            <text key={i} className="tick-label" x={M.left + i * bw + bw / 2} y={H - M.bottom + 14} textAnchor="middle">
+              {label(i)}
+            </text>
+          ) : null,
+        )}
+        <text className="axis-title" x={W - M.right} y={H - 4} textAnchor="end">
+          hit rank
+        </text>
+      </svg>
+    </div>
+  )
+}
+
+const RANK_PAGE = 100
+
+function RankedPredictionsTable({
+  rows,
+  items,
+  kCut,
+  loading,
+  error,
+  retry,
+  sort,
+  setSort,
+}: {
+  rows: RankRow[]
+  items: Items | null
+  kCut: number
+  loading: boolean
+  error: string | null
+  retry: () => void
+  sort: { key: RankSort; dir: 1 | -1 }
+  setSort: (s: { key: RankSort; dir: 1 | -1 }) => void
+}) {
+  const domain = useDomain()
+  const [filter, setFilter] = useState('')
+  const [limit, setLimit] = useState(RANK_PAGE)
+  const [expanded, setExpanded] = useState<number | null>(null)
+
+  const lookup = useCallback(
+    (idx: number): RankItem | null => sequenceItemForDisplay(domain, items?.[String(idx)] ?? null),
+    [items, domain],
+  )
+
+  const sorted = useMemo(() => {
+    // Misses sort after every hit (rank K+1), so a hit_rank-ascending sort reads
+    // best calls first, misses last.
+    const val = (r: RankRow) => (sort.key === 'row_id' ? r.row_id : r.hitRank ?? kCut + 1)
+    const f = filter.trim().toLowerCase()
+    const match = (r: RankRow): boolean => {
+      const it = lookup(r.actualIdx)
+      if (!it) return String(r.row_id).includes(f)
+      return (
+        itemTitle(domain, it).toLowerCase().includes(f) ||
+        itemByline(domain, it).toLowerCase().includes(f)
+      )
+    }
+    const filtered = f === '' ? rows : rows.filter(match)
+    return [...filtered].sort((a, b) => (val(a) - val(b)) * sort.dir)
+  }, [rows, sort, filter, lookup, domain, kCut])
+
+  const visible = sorted.slice(0, limit)
+
+  const th = (key: RankSort, label: string, numCol = true) => (
+    <th
+      className={numCol ? 'num-col' : ''}
+      aria-sort={sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}
+    >
+      <button
+        className="sort"
+        onClick={() => setSort({ key, dir: sort.key === key ? ((-sort.dir) as 1 | -1) : 1 })}
+        aria-label={`Sort by ${label}`}
+      >
+        {label}
+        {sort.key === key && <span className="sort-arrow">{sort.dir === 1 ? '▲' : '▼'}</span>}
+      </button>
+    </th>
+  )
+
+  if (error) {
+    return (
+      <div className="error-block" role="alert">
+        Could not load predictions: {error}{' '}
+        <button className="btn" onClick={retry}>
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <section aria-label="Per-query ranked predictions">
+      <div className="pred-head">
+        <h2 className="panel-title">
+          Ranked predictions{' '}
+          <span className="muted">({sorted.length.toLocaleString()} test queries, best rank first)</span>
+        </h2>
+        <input
+          type="text"
+          className="mono-input pred-filter"
+          placeholder={`Filter by true next ${domain.project.entity_noun}…`}
+          aria-label={`Filter queries by the true next ${domain.project.entity_noun} or query id`}
+          value={filter}
+          onChange={(e) => {
+            setFilter(e.target.value)
+            setLimit(RANK_PAGE)
+          }}
+        />
+      </div>
+      {loading ? (
+        <div className="skeleton skeleton-md" />
+      ) : (
+        <table className="pred-table">
+          <thead>
+            <tr>
+              {th('row_id', 'Query', false)}
+              <th>True next {domain.project.entity_noun}</th>
+              <th>Top-1</th>
+              {th('hit_rank', `Hit rank ≤${kCut}`)}
+              <th>
+                <span className="sr-only">Details</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((r) => (
+              <RankedRow
+                key={r.row_id}
+                row={r}
+                kCut={kCut}
+                lookup={lookup}
+                expanded={expanded === r.row_id}
+                onToggle={() => setExpanded(expanded === r.row_id ? null : r.row_id)}
+              />
+            ))}
+          </tbody>
+        </table>
+      )}
+      {!loading && limit < sorted.length && (
+        <button className="btn show-more" onClick={() => setLimit((l) => l + RANK_PAGE)}>
+          Show {Math.min(RANK_PAGE, sorted.length - limit)} more of{' '}
+          {(sorted.length - limit).toLocaleString()}
+        </button>
+      )}
+      {!loading && sorted.length === 0 && filter && (
+        <p className="muted">No queries match “{filter}”.</p>
+      )}
+      {!loading && rows.length === 0 && !filter && (
+        <p className="muted">This run recorded no per-query predictions.</p>
+      )}
+    </section>
+  )
+}
+
+function RankedRow({
+  row,
+  kCut,
+  lookup,
+  expanded,
+  onToggle,
+}: {
+  row: RankRow
+  kCut: number
+  lookup: (idx: number) => RankItem | null
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const hit = row.hitRank != null
+  return (
+    <>
+      <tr className="pred-row" onClick={onToggle} aria-expanded={expanded}>
+        <td className="num">{row.row_id}</td>
+        <td className="track-cell">
+          <ItemIdentity item={lookup(row.actualIdx)} rowId={row.actualIdx} />
+        </td>
+        <td className="track-cell">
+          <ItemIdentity item={lookup(row.predictedIdx)} rowId={row.predictedIdx} />
+        </td>
+        <td className="num-col">
+          <span className={`rank-badge${hit ? '' : ' is-miss'}`}>{hit ? `#${row.hitRank}` : 'miss'}</span>
+        </td>
+        <td className="expand-cell" aria-hidden>
+          {expanded ? '▾' : '▸'}
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="pred-detail">
+          <td colSpan={5}>
+            <RankedList row={row} kCut={kCut} lookup={lookup} />
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+/** The model's full ranked top-K for one query, truth highlighted; a rank bar
+ *  (mirroring the Pathfinder fit bar) reads the ordering at a glance. */
+function RankedList({
+  row,
+  kCut,
+  lookup,
+}: {
+  row: RankRow
+  kCut: number
+  lookup: (idx: number) => RankItem | null
+}) {
+  const n = row.topK.length || 1
+  return (
+    <div className="rank-list-wrap">
+      <ol className="rank-list">
+        {row.topK.map((idx, i) => {
+          const isTruth = idx === row.actualIdx
+          const w = Math.round(((n - i) / n) * 100)
+          return (
+            <li key={`${idx}-${i}`} className={`rank-item${isTruth ? ' is-truth' : ''}`}>
+              <span className="rank-item-n num">{i + 1}</span>
+              <span className="rank-item-track">
+                <ItemIdentity item={lookup(idx)} rowId={idx} />
+              </span>
+              <span className="rank-bar" aria-hidden>
+                <span className="rank-bar-fill" style={{ width: `${w}%` }} />
+              </span>
+              {isTruth && <span className="rank-truth-tag">true next</span>}
+            </li>
+          )
+        })}
+      </ol>
+      {row.hitRank == null && (
+        <p className="rank-miss-note">
+          Held-out next item is not in the top-{kCut}:{' '}
+          <span className="rank-miss-item">
+            <ItemIdentity item={lookup(row.actualIdx)} rowId={row.actualIdx} />
+          </span>
+        </p>
+      )}
+    </div>
   )
 }

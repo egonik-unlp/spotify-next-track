@@ -16,6 +16,14 @@
   font-size: var(--text-label);
 }
 
+/* "sequence" family marker next to a next-item dataset's name. */
+.ds-kind-badge {
+  margin-left: var(--sp-2);
+  font-size: var(--text-label);
+  color: var(--ink-secondary);
+  vertical-align: middle;
+}
+
 @media (max-width: 900px) {
   .datasets-table th:nth-child(4),
   .datasets-table td:nth-child(4), /* Breakdown */

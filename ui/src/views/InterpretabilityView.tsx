@@ -14,8 +14,9 @@ import EmbeddingProbeTool from './EmbeddingProbeTool'
 import ModelSaeTool from './ModelSaeTool'
 import SavedAnalysesTool from './SavedAnalysesTool'
 import ViewHeader from '../components/ViewHeader'
+import NotApplicable from '../components/NotApplicable'
 import { useAsync } from '../hooks/useAsync'
-import { useDocTitle } from '../lib/DomainContext'
+import { useDocTitle, useDomain } from '../lib/DomainContext'
 import './interpretability.css'
 
 const METRICS: { key: ProbeMetric; label: string }[] = [
@@ -37,6 +38,22 @@ const outputStage = (r: LayerProbeReport): LayerProbeStage =>
   r.stages.find((s) => s.lambda == null) ?? r.stages[r.stages.length - 1]
 
 export default function InterpretabilityView() {
+  const domain = useDomain()
+  // The probe tools decode a scalar target from hidden activations; a ranking
+  // instance has no such scalar. Guard the direct URL (the nav hides it too).
+  if (domain.target.task === 'ranking') {
+    return (
+      <NotApplicable
+        glyph="ip"
+        title="Interpretability"
+        reason="These probes decode a scalar target from a model's hidden activations. This instance ranks the next item in a sequence, so there is no scalar target to probe."
+      />
+    )
+  }
+  return <InterpretabilityBody />
+}
+
+function InterpretabilityBody() {
   useDocTitle('Interpretability')
   const models = useAsync(() => api.listInterpModels(), [])
   const datasets = useAsync(() => api.listDatasets(), [])

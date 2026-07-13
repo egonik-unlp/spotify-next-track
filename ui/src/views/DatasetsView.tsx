@@ -26,7 +26,8 @@ function kindCounts(columns: ColumnDesc[]): { pca: number; numeric: number; oneh
   return c
 }
 
-const evrSum = (m: Manifest) => m.pca.explained_variance_ratio.reduce((a, b) => a + b, 0)
+const isSequence = (m: Manifest) => m.kind === 'sequence'
+const evrSum = (m: Manifest) => (m.pca?.explained_variance_ratio ?? []).reduce((a, b) => a + b, 0)
 
 export default function DatasetsView() {
   useDocTitle('Datasets')
@@ -76,6 +77,10 @@ export default function DatasetsView() {
     })
     return list
   }, [datasets.data, sort, runCount, modelCount])
+
+  // Pure-sequence instance: relabel the pointwise-flavoured columns so the
+  // header reads for next-item datasets (items / latent / task), not PCA.
+  const allSeq = sorted.length > 0 && sorted.every(isSequence)
 
   const toggleSort = (key: SortKey) =>
     setSort((s) => ({ key, dir: s.key === key ? ((-s.dir) as 1 | -1) : key === 'created_at' ? -1 : 1 }))
@@ -144,13 +149,13 @@ export default function DatasetsView() {
           <tr>
             <th>Dataset</th>
             <th className="num-col" aria-sort={sort.key === 'n_rows' ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}>
-              {sortBtn('n_rows', 'Rows')}
+              {sortBtn('n_rows', allSeq ? 'Sessions' : 'Rows')}
             </th>
-            <th className="num-col">{sortBtn('n_cols', 'Features')}</th>
-            <th>Breakdown</th>
-            <th className="num-col">{sortBtn('var', 'PCA var')}</th>
+            <th className="num-col">{sortBtn('n_cols', allSeq ? 'Items' : 'Features')}</th>
+            <th>{allSeq ? 'Latent' : 'Breakdown'}</th>
+            <th className={allSeq ? '' : 'num-col'}>{allSeq ? 'Latent source' : sortBtn('var', 'PCA var')}</th>
             <th>Split</th>
-            <th>Target</th>
+            <th>{allSeq ? 'Task' : 'Target'}</th>
             <th className="num-col">Filtered</th>
             <th className="num-col">{sortBtn('runs', 'Runs')}</th>
             <th className="num-col">{sortBtn('models', 'Models')}</th>
@@ -198,7 +203,8 @@ function DatasetRow({
   onFocusRow: () => void
 }) {
   const navigate = useNavigate()
-  const k = kindCounts(m.columns)
+  const seq = isSequence(m)
+  const k = seq ? null : kindCounts(m.columns)
   return (
     <tr
       className={`run-row${focused ? ' is-focused' : ''}`}
@@ -210,18 +216,35 @@ function DatasetRow({
     >
       <td>
         <DatasetRef id={m.dataset_id} name={m.name} />
+        {seq && <span className="chip ds-kind-badge">sequence</span>}
       </td>
+      {/* Sessions (sequence) or corpus rows (pointwise): both live in n_rows. */}
       <td className="num-col num">{m.n_rows.toLocaleString()}</td>
-      <td className="num-col num">{m.n_cols}</td>
-      <td className="num breakdown-cell">
-        pca {k.pca} · num {k.numeric} · oh {k.onehot}
+      {/* Item-vocab size (sequence) or feature-column count (pointwise). */}
+      <td className="num-col num" title={seq ? 'item vocabulary' : 'feature columns'}>
+        {seq ? (m.sequence?.n_items.toLocaleString() ?? '—') : m.n_cols}
       </td>
-      <td className="num-col num">{fmtPct(evrSum(m), 0)}</td>
+      <td className="num breakdown-cell">
+        {seq ? (
+          <>latent d={m.n_cols}</>
+        ) : (
+          <>
+            pca {k!.pca} · num {k!.numeric} · oh {k!.onehot}
+          </>
+        )}
+      </td>
+      {seq ? (
+        <td className="num" title="per-item latent source collection">
+          {m.sequence?.latent_source ?? '—'}
+        </td>
+      ) : (
+        <td className="num-col num">{fmtPct(evrSum(m), 0)}</td>
+      )}
       <td className="num split-cell">
         test {fmtPct(m.split.test_ratio, 0)} · {m.split.n_train.toLocaleString()}/
         {m.split.n_test.toLocaleString()}
       </td>
-      <td className="num">{m.target.transform === 'log1p' ? 'log1p' : 'raw'}</td>
+      <td className="num">{seq ? 'next-item' : m.target.transform === 'log1p' ? 'log1p' : 'raw'}</td>
       <td className="num-col num">
         {m.quality && m.quality.n_excluded_total > 0
           ? `−${m.quality.n_excluded_total.toLocaleString()}`

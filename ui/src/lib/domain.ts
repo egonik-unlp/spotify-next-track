@@ -2,6 +2,8 @@
 // GET /api/domain. The whole UI reads its nouns, target formatting, field set
 // and quality labels from this once-at-boot config (see DomainContext).
 
+import type { TaskKind } from '../api/types'
+
 export type FieldRole =
   | 'target'
   | 'categorical'
@@ -51,6 +53,9 @@ export interface DomainTarget {
   field: string
   transform: 'log1p' | 'none'
   format: TargetFormat
+  /** Learning task this domain predicts. Absent ⇒ regression. `"ranking"`
+   *  marks a next-item/sequence instance (pointwise-only views are hidden). */
+  task?: TaskKind
 }
 
 /** `"all"` keeps every value; `{top_n}` keeps the N most frequent. */
@@ -114,6 +119,8 @@ export interface Domain {
   currency: DomainCurrency | null
   quality: DomainQuality
   metrics: DomainMetrics
+  /** Dataset family this instance produces. Absent ⇒ pointwise. */
+  kind?: 'pointwise' | 'sequence'
 }
 
 export async function fetchDomain(): Promise<Domain> {
