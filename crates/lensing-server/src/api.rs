@@ -130,15 +130,24 @@ fn dataset_summary(state: &AppState, id: &str) -> Option<serde_json::Value> {
     let dir = state.datasets_dir().join(id);
     let text = std::fs::read_to_string(dir.join("sequence-manifest.json")).ok()?;
     let sm: lensing_core::manifest::SequenceManifest = serde_json::from_str(&text).ok()?;
+    // Shaped like a Manifest so the pointwise UI (which iterates `columns`,
+    // `pca.explained_variance_ratio`, and reads `split.{test_ratio,n_train,n_test}`)
+    // renders a sequence dataset without crashing. `columns` is empty (no flat
+    // feature matrix); the `kind`/`sequence` fields carry the real shape.
+    let total = (sm.split.n_train_sessions + sm.split.n_test_sessions).max(1);
     Some(json!({
         "dataset_id": sm.dataset_id,
         "created_at": sm.created_at,
         "kind": "sequence",
         "n_rows": sm.n_sessions,
         "n_cols": sm.latent_dim,
+        "columns": [],
+        "pca": { "dims": sm.latent_dim, "explained_variance_ratio": [], "mean": [] },
         "target": { "task": "ranking", "field": "next_track", "transform": "none" },
         "split": {
             "strategy": sm.split.strategy,
+            "seed": 0,
+            "test_ratio": sm.split.n_test_sessions as f64 / total as f64,
             "n_train": sm.split.n_train_sessions,
             "n_test": sm.split.n_test_sessions,
         },
