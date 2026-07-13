@@ -42,6 +42,10 @@ QDRANT_URL="${QDRANT_URL:-http://localhost:6335}"
 # or without the cleaned variant still exports cleanly.
 QDRANT_COLLECTIONS="${QDRANT_COLLECTIONS:-spotify_tracks spotify_tracks_content spotify_tracks_song_ae spotify_tracks-clean-one manual-tracks}"
 PG_SERVICE="${PG_SERVICE:-postgres}"           # docker-compose service name
+# Instances that borrow a DB inside another instance's running postgres
+# container (shared-container setup) set PG_CONTAINER to that container name;
+# the dump then uses `docker exec <container>` instead of `docker compose exec`.
+PG_CONTAINER="${PG_CONTAINER:-}"
 PG_USER="${LENSING_DB_USER:-pg}"
 PG_DB="${LENSING_DB_NAME:-lensing}"
 BUNDLE_RUNS="${BUNDLE_RUNS:-0}"
@@ -67,10 +71,17 @@ log "bundle → $OUT_DIR"
 
 # ---- 1. Postgres -------------------------------------------------------------
 log "dumping Postgres ($PG_DB) from compose service '$PG_SERVICE'…"
-docker compose exec -T "$PG_SERVICE" \
-  pg_dump -U "$PG_USER" -d "$PG_DB" -Fc --no-owner --no-privileges \
-  > "$OUT_DIR/postgres.dump" \
-  || die "pg_dump failed — is the database up? (zig build db-up)"
+if [ -n "$PG_CONTAINER" ]; then
+  docker exec -i "$PG_CONTAINER" \
+    pg_dump -U "$PG_USER" -d "$PG_DB" -Fc --no-owner --no-privileges \
+    > "$OUT_DIR/postgres.dump" \
+    || die "pg_dump failed via container '$PG_CONTAINER' (db '$PG_DB')"
+else
+  docker compose exec -T "$PG_SERVICE" \
+    pg_dump -U "$PG_USER" -d "$PG_DB" -Fc --no-owner --no-privileges \
+    > "$OUT_DIR/postgres.dump" \
+    || die "pg_dump failed — is the database up? (zig build db-up)"
+fi
 log "  postgres.dump $(du -h "$OUT_DIR/postgres.dump" | cut -f1)"
 
 # ---- 2. Qdrant snapshots -----------------------------------------------------
@@ -101,8 +112,9 @@ for col in $QDRANT_COLLECTIONS; do
 done
 
 # ---- 3. data/ essentials -----------------------------------------------------
-DATA_PATHS=(data/best-models.json)
-for d in models datasets cli-runs; do [ -e "data/$d" ] && DATA_PATHS+=("data/$d"); done
+DATA_PATHS=()
+[ -e data/best-models.json ] && DATA_PATHS+=(data/best-models.json)
+for d in models datasets cli-runs seq; do [ -e "data/$d" ] && DATA_PATHS+=("data/$d"); done
 if [ "$BUNDLE_RUNS" = "1" ]; then
   [ -e data/runs ] && DATA_PATHS+=(data/runs)
   warn "BUNDLE_RUNS=1 — including data/runs/ (large)"

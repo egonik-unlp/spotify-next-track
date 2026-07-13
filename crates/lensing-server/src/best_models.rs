@@ -475,7 +475,10 @@ pub async fn predict_group(
                     .unwrap_or(0.0);
                 ConsensusPoint { row_id, predicted: argmax, proba: Some(mean), n_models: rows.len() }
             }
-            Task::Regression => {
+            // Ranking has no scalar consensus (predictions are ranked item
+            // lists); fall back to the median of the top-1 index so the
+            // endpoint compiles and stays harmless — it is not used for ranking.
+            Task::Regression | Task::Ranking => {
                 vals.sort_by(|a, b| a.total_cmp(b));
                 let n = vals.len();
                 let predicted = if n % 2 == 1 {
