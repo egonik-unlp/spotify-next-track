@@ -64,32 +64,39 @@ desc = "all tracks (metadata is present regardless of embedding source)"
 must = []
 must_not = []
 
-# Target PIVOT (2026-06-08): the model feeds the Pathfinder W_FIT term, which
-# wants a per-track [0,1] desirability. "rotation" = (play_count >= 2), i.e.
-# "did the user come back to this track" — a binary taste-fit signal that is
-# both more learnable (AUC ~0.77) than engagement magnitude and naturally
-# spread for fit_norm. transform = none (it's already 0/1). Engagement is kept
-# as a documented non-target field (the ceiling finding stands).
-# NOTE: build with quality.nonpositive_price = FALSE — rotation == 0 is the
-# valid negative class, not an outlier to exclude.
+# NEXT-TRACK PIVOT (2026-07-12): this instance predicts, within a listening
+# session, WHICH TRACK the user plays next — a sequence / next-item retrieval
+# task, not a per-track scalar. The model consumes the ordered session prefix
+# and predicts the next track's 64-dim song-AE latent, retrieved by cosine over
+# the corpus. Ranked by Recall@k / MRR / hit-rate on a leak-free session split.
+# The scalar [target] below is a semantic placeholder (the real label is the
+# next sequence item); validation uses [sequence], not a role="target" field.
 [target]
-field = "rotation"
+field = "next_track"
 transform = "none"
-# rotation is a binary label (play_count >= 2); train classifiers and rank by
-# AUC/logloss, not regression MAE. See experiments/PROJECT-FACTS.md (the binary
-# metric pivot, 2026-06-09).
-task = "binary"
+task = "ranking"
 
 [target.format]
 style = "number"
 symbol = ""
 locale = "en-US"
 
+# Sequence / next-item configuration. Sessions + order come from the OFFLINE
+# play stream (pipeline/corpus/sequences.py over sessions.parquet), not the
+# per-track Qdrant payload. Latents come from the song-AE collection.
+[sequence]
+session_field = "session_id"
+order_field = "ts"
+gap_minutes = 30
+skip_threshold_ms = 30000
+label = "last_item"
+latent_source = "spotify_tracks_song_ae"
+
 [metrics]
-primary = "AUC"
-columns = ["AUC", "logloss", "accuracy"]
-percent = ["accuracy"]
-value_unit = "P(rotation)"
+primary = "recall@10"
+columns = ["recall@10", "mrr", "hit@10"]
+percent = []
+value_unit = "P(next-track hit)"
 best_models_size = 12
 
 # ---- Fields: the corpus payload schema ----

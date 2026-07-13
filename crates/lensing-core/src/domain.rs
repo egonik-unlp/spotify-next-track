@@ -573,14 +573,19 @@ impl Domain {
         }
         // A ranking task requires a [sequence] block whose session/order fields
         // are declared; a pointwise task must not carry one.
+        // The sequence's session/order fields come from the OFFLINE play stream
+        // (the sequences producer), not the per-entity Qdrant payload, so they
+        // are not [[fields]]; we only require the block to be present + populated.
         match (self.target.task, &self.sequence) {
             (Task::Ranking, None) => bail!("[target].task = \"ranking\" requires a [sequence] block"),
             (Task::Ranking, Some(seq)) => {
-                for (key, name) in
-                    [("session_field", &seq.session_field), ("order_field", &seq.order_field)]
-                {
-                    if self.field(name).is_none() {
-                        bail!("[sequence].{key} {name:?} is not declared in [[fields]]");
+                for (key, val) in [
+                    ("session_field", &seq.session_field),
+                    ("order_field", &seq.order_field),
+                    ("latent_source", &seq.latent_source),
+                ] {
+                    if val.trim().is_empty() {
+                        bail!("[sequence].{key} must be a non-empty field/collection name");
                     }
                 }
             }
@@ -807,6 +812,22 @@ mod tests {
         assert_eq!(cluster.path, FieldPath::Payload);
         assert_eq!(d.qualified_key(cluster), "cluster");
         assert_eq!(d.qualified_key(d.field("price").unwrap()), "metadata.price");
+    }
+
+    #[test]
+    fn next_track_instance_domain_validates() {
+        // Guards this instance's retargeted domain.toml: a ranking domain with
+        // a [sequence] block and a recall@k primary must parse + validate.
+        let text = include_str!("../../../domain.toml");
+        let d: Domain = toml::from_str(text).expect("parse instance domain.toml");
+        d.validate().expect("instance domain.toml must validate");
+        assert_eq!(d.target.task, Task::Ranking);
+        assert!(d.sequence.is_some(), "ranking domain needs a [sequence] block");
+        assert!(
+            d.metrics.primary_direction().is_some(),
+            "primary metric {:?} must be a known metric",
+            d.metrics.primary
+        );
     }
 
     #[test]

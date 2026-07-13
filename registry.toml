@@ -1696,3 +1696,87 @@ type = "int"
 default = 0
 min = 0
 max = 100000
+
+# --------------------------------------------------------------------------- #
+# Sequence next-track predictor (reads a SEQUENCE artifact, not the flat       #
+# pointwise dataset). A GRU/LSTM consumes the frozen per-item latents of a     #
+# session prefix and predicts the next track's latent; retrieval ranks the     #
+# vocab by cosine. Trained/evaluated by predictors/seq_nexttrack.py; the       #
+# popularity/recency/first-order-Markov baselines live in seq_baselines.py.    #
+# --------------------------------------------------------------------------- #
+[[predictors]]
+name = "seq-nexttrack"
+display_name = "Next-track GRU (sequence)"
+language = "Python"
+framework = "PyTorch"
+description = "GRU/LSTM over session prefix latents -> predicted next-track latent; cosine retrieval over the vocab. Reads a SEQUENCE artifact. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/seq_nexttrack.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+
+[[predictors.params]]
+name = "hidden"
+label = "recurrent hidden width"
+type = "int"
+default = 128
+min = 16
+max = 1024
+
+[[predictors.params]]
+name = "arch"
+label = "recurrent cell"
+type = "enum"
+default = "gru"
+options = ["gru", "lstm"]
+
+[[predictors.params]]
+name = "loss"
+label = "training objective"
+type = "enum"
+default = "cosine"
+options = ["cosine", "infonce"]
+
+[[predictors.params]]
+name = "epochs"
+type = "int"
+default = 30
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "lr"
+label = "learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "dropout"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors.params]]
+name = "k"
+label = "Recall@k reported in metrics.recall_at_k"
+type = "int"
+default = 10
+min = 1
+max = 1000
+
+[[predictors.params]]
+name = "batch_size"
+label = "batch size (sessions)"
+type = "int"
+default = 128
+min = 1
+max = 8192
+
+[[predictors.params]]
+name = "patience"
+label = "early-stop patience (epochs, 0 = off)"
+type = "int"
+default = 5
+min = 0
+max = 10000
