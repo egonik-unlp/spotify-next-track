@@ -1,0 +1,1889 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.6cm]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{seqsplit}
+\graphicspath{{figures/}}
+\newcommand{\runid}[1]{\texttt{\small\seqsplit{#1}}}
+\newcommand{\dsid}[1]{\texttt{\small #1}}
+\newcommand{\best}[1]{\textbf{#1}}
+\newcommand{\medape}{medAPE}
+\newcommand{\rsq}{$R^2$}
+
+\title{Spotify Engagement from Metadata: Experiment Synthesis}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document is the living synthesis of the taste-fit prediction campaigns;
+the markdown reports in \texttt{experiments/} are the primary record. The
+active target is a binary \emph{rotation} signal --- did a track earn a repeat
+listen, $\text{play\_count}\ge 2$ --- predicted from a track's \emph{intrinsic
+metadata} alone (genre, artist, artist/track popularity, follower count,
+release year, release type) over the user's listening corpus. The headline
+metric is the area under the ROC curve (AUC); the engagement-magnitude
+regression target that the lab opened on ($\text{play\_count}\times
+\text{completion\_ratio}$, $\log1p$-transformed) is retained as a documented
+scientific field but is no longer delivered. The behavioral co-listening
+embedding and all playback/curation fields are deliberately excluded from the
+feature set. Five Jun-2026 campaigns are folded in below; they converge on a
+single finding --- categorical artist/genre/album identity read by
+gradient-boosted trees beats every dense modality and every dense
+distance/margin family --- and they crowned the project's first registered,
+promotable champion, \texttt{xgboost-classifier-rotation}, at AUC
+\num{0.7429} on the original DS-META corpus. Three Jun-12 campaigns then
+re-ran the family question on a larger 2026 corpus (a full-64-d,
+\num{23529}-row dataset): a four-family classifier bake-off in which
+\texttt{xgboost-classifier} again wins (AUC \num{0.7204}), \texttt{catboost}
+follows in-band, and a dense \texttt{pyramid-mlp} is last; a six-geometry
+architecture scan that closes the dense-net family for AUC by \emph{refuting}
+the budget hypothesis; and a topology bake-off of a new Rust/\texttt{burn}
+\texttt{burn-deep-classifier} that, by feeding the identity one-hots
+\emph{raw}, repairs the dense net's calibration completely (log-loss
+$2.0\to 0.62$) and lifts its AUC $\sim$2 bands to \num{0.7038} --- yet still
+lands $\sim$1--2 bands short of the tree tier, with learned entity embeddings
+starved by the low identity cardinality. A seventh campaign then closes that
+thread: a paired re-run of the topology bake-off on a \emph{higher}
+identity-cardinality matrix (artist cap $60\to300$, genre $40\to120$) flips the
+ranking --- \texttt{embeddings} now \emph{beats} \texttt{mlp} (a $+0.0130$ swing
+that reverses the prior result, confirming the starvation hypothesis) --- and
+lifts the net into the in-dataset tree tier (AUC \num{0.7192}, within $\sim$1
+band of \texttt{catboost}), the first ANN to clear the rotation save bar, saved
+as \texttt{burn-deep-embeddings-highvocab}. An eighth campaign then probes the inverse lever and refutes it: the classic Facebook GBDT$\to$LR trick generalized to GBDT$\to$MLP --- training a fresh head on the frozen champion tree's one-hot leaf indices --- caps \num{1.8}--\num{2.4} noise bands \emph{below} the bare xgboost champion (best head AUC \num{0.6978}) with badly broken calibration, a seventh convergent confirmation that learned representations layered on the trees do not help. A ninth campaign then probes how far the standing identity-resolution lever can go: a vocab-cap scan on the bare GBDT, holding the frozen champion config and moving \emph{only} the artist/genre one-hot cardinality, finds the lever \emph{largely spent} --- the first jump ($60/40\to300/120$) carries the gain, and past 300/120 each step pays only sub-band returns; xgboost reaches a new in-lineage single-split best AUC \num{0.7349} at 1000/300 (only $+0.005$, $\sim$0.4 band, over the anchor --- no save fired), \texttt{catboost} tracks it, and the full-vocabulary point could not be built (host memory ceiling). Section~\ref{sec:anns} consolidates
+why artificial neural nets structurally underperform on this one-hot-heavy
+feature matrix, how the representation-aware net resolves the diagnosis, and how
+enough identity resolution finally lets the embedding topology pay off.
+\end{abstract}
+
+\section{Introduction}
+This document is the living synthesis of the experiment campaigns; the
+markdown reports in \texttt{experiments/} are the primary record. Each section
+transcribes (never recomputes) the quantitative results of a campaign,
+preserves its run and dataset identifiers verbatim for traceability, and adds
+the rationale and interpretation that the terse reports omit.
+
+\paragraph{Task and target.} The lab predicts \emph{taste fit} from a track's
+intrinsic metadata over the user's listening corpus. It opened on an
+engagement-magnitude regression target ---
+$\text{play\_count}\times\text{completion\_ratio}$, trained against a
+$\log1p$-transform and mapped back with $\text{expm1}$ --- but on 2026-06-08
+the active target pivoted to a binary \emph{rotation} signal:
+$\text{play\_count}\ge 2$, i.e.\ did the track earn a repeat listen
+(Section~\ref{sec:rotation-pivot}). Rotation is the actionable input to the
+Playlist Pathfinder's per-track desirability term, it is far more learnable
+than engagement magnitude (trees reach $\text{AUC}\approx 0.73$ on rotation
+versus \rsq{}$\approx 0.3$ on engagement), and with a base rate near
+\SI{44.5}{\percent} it is naturally spread for path search. Engagement is
+retained as a documented scientific field, but rotation is the delivered
+target and every leaderboard below is on it.
+
+\paragraph{Metrics.} Because the target is binary, the headline metric is the
+area under the ROC curve (AUC, higher-better), the quantity the
+classification leaderboard (Table~\ref{tab:lb-auc}) sorts on and the
+best-models group auto-promotes by; it is reported alongside log-loss,
+accuracy and the Brier score. Two distinct metric regimes nonetheless coexist
+in the rotation campaigns. The campaigns opened with a \emph{regression} read
+--- mean absolute error (MAE), RMSE and \rsq{} on the $[0,1]$ P(rotation)
+scale --- and only later adopted the honest \emph{classification} read once
+the framework gained a binary mode. MAE is retained on the historical
+regression board (Table~\ref{tab:lb-mae}) for same-family band significance,
+but it is documented there as \emph{degenerate} on a binary target: an
+$\epsilon$-tube SVR can post a deceptively low MAE while being worse than
+predicting the mean (Section~\ref{sec:svm}), an illusion the classification
+metrics dissolve. The absolute-percentage metrics (MAPE/\medape{}) are
+undefined on rotation, since half the labels are exactly zero. The historical
+engagement board, where MAE \emph{is} the natural headline, is preserved in
+\texttt{PROJECT-FACTS.md}; its numbers live on the $\log1p$ engagement scale
+and are not comparable to anything below.
+
+\paragraph{Features.} The feature space is a track's \emph{intrinsic metadata}
+alone: genre, artist, artist/track popularity, follower count, release year,
+credited-artist count and release type. The dense embedding modalities
+(co-listening word2vec, content-text, acoustic, and the song-autoencoder
+latent of Section~\ref{sec:ae-blend}) are \emph{behavioral or descriptive}
+signals, not categorical identity, and the payload-based predictors over the
+metadata one-hots are the canonical models here. Critically, the recipe is
+\emph{leakage-free}: the playback fields that mechanically constitute or proxy
+the target --- \texttt{play\_count}, \texttt{completion\_ratio},
+\texttt{skip\_rate}, \texttt{shuffle\_rate}, \texttt{distinct\_sessions}, and
+the demoted \texttt{engagement} field itself --- and the behaviorally
+entangled curation fields are all excluded by default.
+
+\paragraph{Three feature matrices.} The first three campaigns ran on the
+original \emph{DS-META} corpus (\num{12256} rows, metadata-only). The Jun-12
+campaigns ran on a larger 2026 corpus, the \emph{full-64-d} dataset
+(\dsid{ds-20260609-204419-p64-s42}, \num{23529} rows, 177 columns: 64 song-AE
+PCA latent $+$ 7 numeric $+$ 106 identity one-hots at vocab caps artist 60 /
+genre 40 --- the \emph{60/40-vocab} matrix). A final Jun-12 campaign
+(Section~\ref{sec:anns-highvocab}) re-ran on a \emph{high-vocab} variant
+(\dsid{ds-20260612-143014-p64-s42}, \emph{same} \num{23529} rows / split seed 42
+/ PCA64, differing \emph{only} in identity cardinality: artist cap $60\to300$,
+genre $40\to120$; 497 columns including 426 one-hots --- artist 301, genre 121,
+album-type 4). \textbf{These are three non-comparable matrices}: DS-META differs
+from the full-64-d corpus in both size (\num{12256} versus \num{23529} rows) and
+feature set (metadata-only versus $+$64 AE latent), and the 60/40 and high-vocab
+matrices differ in identity cardinality (177 versus 497 columns). AUC numbers
+must therefore never be read across them --- not against the \num{0.7429}
+DS-META champion, and not between the 60/40 and high-vocab boards. Each matrix
+carries its own leaderboard (Tables~\ref{tab:lb-auc},~\ref{tab:lb-auc-p64}
+and~\ref{tab:lb-auc-highvocab}); nothing regressed when the 60/40 xgboost lands
+at \num{0.7204}, and every family scores \emph{higher} on the wider high-vocab
+matrix because the extra identity granularity is genuine signal.
+
+\section{Background: model families and metrics}
+\label{sec:background}
+This section gives the minimum theory for a reader who knows ML but not this
+repo. It is keyed to \texttt{PROJECT-FACTS.md} and grows only when a new
+predictor family or metric enters the reports.
+
+\paragraph{The families in play.}
+\begin{description}
+  \item[Gradient-boosted trees (\texttt{xgboost}, \texttt{xgboost-classifier},
+  \texttt{catboost-classifier}, \texttt{ngboost-classifier}).]
+  An additive ensemble of shallow trees, each fit to the residual gradient of
+  the previous stage. As a \emph{regressor} its output is a leaf average,
+  bounded by the range of training targets; as a \emph{classifier} it emits a
+  calibrated probability through a logistic link, the form that wins on
+  rotation. Trees split on individual columns, so they read a track's sparse
+  artist/genre/album identity one-hots \emph{losslessly} and capture non-linear
+  interactions without manual feature crosses --- the reason they dominate this
+  corpus. \texttt{catboost} is an ordered-boosting GBDT variant with symmetric
+  (oblivious) trees and native categorical handling; on this corpus it is the
+  legitimate second tree family, co-leader \emph{in-band} with xgboost.
+  \texttt{ngboost} is a natural-gradient boosting variant that fits a full
+  predictive \emph{distribution}; its probabilistic machinery, paid for with
+  shallow base learners, costs it raw ranking power here. The cost of the GBDT
+  family generally is a non-deterministic fit (subsampling and column sampling
+  carry an internal RNG seed), so two runs at different seeds differ slightly.
+  The registered champion \texttt{xgboost-classifier-rotation} is this family.
+  \item[Logistic regression.] Linear log-odds passed through a sigmoid: a
+  deterministic, $\ell_2$-regularized linear classifier. It is the natural
+  \emph{linear floor} for a binary target --- the analogue of ridge in the
+  regression world --- and serves as a cheap, reproducible control on the
+  harness. Being a single linear boundary in a dense feature space, it blurs
+  the sparse categorical identity that trees exploit, and it lands well below
+  them on rotation.
+  \item[Kernel SVM / SVC (\texttt{svc} with rbf / linear / poly / sigmoid
+  kernels).] A maximum-margin classifier that operates on kernel-induced
+  distances between points. As a \emph{regressor} (SVR) on a binary target the
+  $\epsilon$-insensitive tube degenerates --- the source of the binary-MAE trap
+  of Section~\ref{sec:svm}; as a proper probability \emph{classifier} (SVC) the
+  divergence vanishes but every kernel still loses to the trees, because a
+  dense-distance / large-margin model cannot read sparse identity one-hots the
+  way an axis-aligned tree split does. The sigmoid kernel is the weakest and is
+  the documented refutation echo.
+  \item[Pyramid-MLP (\texttt{pyramid-mlp-classifier}).] A feed-forward
+  artificial neural network with a tapering (``pyramid'') stack of hidden
+  layers, ReLU activations and an Adam optimizer, fit on the StandardScaler-ed
+  feature matrix. It is the project's only \emph{dense} (every-input-to-every-
+  hidden-unit) learner on rotation. As Section~\ref{sec:anns} develops at
+  length, a dense net is exactly the regime that one-hot-heavy taste data
+  fights: it must learn dense weights over a mostly-zero input, and it lands
+  last in the bake-off with a blown calibration that an architecture scan
+  proves is structural, not a budget artifact.
+  \item[Representation-aware net (\texttt{burn-deep-classifier}).] A
+  full-Rust/\texttt{burn} feed-forward classifier built to repair the
+  pyramid-MLP's pathologies. It splits the feature matrix into a
+  \emph{standardized} continuous block (64 PCA $+$ 7 numeric) and a set of
+  \emph{raw} (un-standardized) one-hot identity groups (artist, genre,
+  album-type), so the scaler never turns rare categories into outlier spikes
+  (Section~\ref{sec:anns-scaler}). A \texttt{topology} enum selects among a
+  plain dense \texttt{mlp} over the concatenated inputs, learned per-group
+  \texttt{embeddings}, and a \texttt{wide\_deep} split (a wide linear path over
+  the one-hots beside a deep path over the continuous block). As
+  Section~\ref{sec:anns-burn} reports, the raw-one-hot representation fixes the
+  calibration completely and lifts AUC $\sim$2 bands over the pyramid, but the
+  net still sits $\sim$1--2 bands below the tree tier, and the embedding
+  variants gain nothing because the identity cardinalities here are too low to
+  feed them.
+  \item[AE-transplant net (\texttt{burn-ae-classifier}).] A two-phase
+  Rust/\texttt{burn} network. Phase 1 pretrains an autoencoder to reconstruct
+  the \emph{full} assembled feature vector --- the standardized continuous
+  block beside the \emph{raw} identity one-hots, $D{=}177$ --- by mean-squared
+  error; Phase 2 transplants the trained encoder into a deep softmax classifier
+  (encoder $\to$ latent $\to$ head $\to$ logits) and fine-tunes it end-to-end
+  with cross-entropy. A \texttt{freeze\_encoder} flag chooses a fixed feature
+  extractor versus fine-tuning. It tests whether an \emph{unsupervised}
+  reconstruction pretrain hands the classifier a latent that raw one-hots do
+  not already give a from-scratch net; as Section~\ref{sec:anns-ae} reports it
+  does not --- the reconstructive latent is task-agnostic, and the family ties
+  the plain \texttt{burn-deep} \texttt{mlp} without reaching the tree tier.
+  \item[Autoencoder-XGBoost blend (\texttt{autoencoder-xgboost}).] A weighted
+  ensemble $\hat{y}=w\cdot\hat{y}_{\text{ae}}+(1-w)\cdot\hat{y}_{\text{xgb}}$
+  that combines a regressor over a precomputed 64-dimensional
+  song-autoencoder latent with a metadata-XGBoost model, the weight $w$ tuned on
+  a train holdout. Its purpose was to test whether the dense AE latent carries
+  rotation signal the metadata one-hots miss; it does not, and the tuner
+  correctly drives $w\to 0$, collapsing the ensemble to metadata-only XGBoost
+  (Section~\ref{sec:ae-blend}).
+\end{description}
+
+\paragraph{Why a binary target makes MAE degenerate.} For a continuous target,
+mean absolute error is a faithful summary of how far predictions sit from the
+truth. On a $\{0,1\}$ target it is not: a model can minimize MAE by hugging the
+labels regardless of how it \emph{ranks} or \emph{calibrates} them. An SVR with
+an $\epsilon{=}0.1$ tube snaps its outputs to a two-level step near
+$\{0.1,0.9\}$, sitting only $\sim 0.1$ off every label --- a low MAE --- while
+its ranking is worthless (negative \rsq{}). The metrics that matter for a
+binary taste-fit signal are therefore the classification ones:
+\begin{description}
+  \item[AUC (area under the ROC curve).] The probability that a random positive
+  is ranked above a random negative; \num{0.5} is chance, \num{1.0} is perfect.
+  It is threshold-free and scale-free, depends only on the \emph{ordering} of
+  the predicted probabilities, and is exactly the property the Pathfinder needs
+  from its desirability term. It is the headline metric and the leaderboard
+  sort key.
+  \item[Log-loss.] The negative log-likelihood of the labels under the
+  predicted probabilities; it punishes \emph{confident} mistakes severely and so
+  rewards calibration, not just ranking.
+  \item[Brier score.] The mean squared error between predicted probability and
+  the $\{0,1\}$ label --- a calibration-and-refinement measure on the natural
+  $[0,1]$ scale, lower-better.
+\end{description}
+A model that wins on AUC \emph{and} log-loss \emph{and} Brier, as the champion
+does, is winning on ranking and calibration at once; the binary-MAE artifact
+that flatters a degenerate SVR shows up on none of them. The same triad later
+exposes the opposite pathology in a dense net (Section~\ref{sec:anns}): a model
+can post a respectable AUC --- genuine ranking --- while its log-loss and Brier
+are catastrophic, i.e.\ it ranks acceptably but is \emph{confidently wrong}.
+
+\paragraph{A note on the historical log-target.} The lab's opening regression
+target, engagement, is heavy-tailed and non-negative, so it was trained against
+a $\log1p$-transform and mapped back with $\text{expm1}$. That transform pair
+carries a hazard --- a model unbounded in log-space can produce a large
+positive log prediction that $\text{expm1}$ amplifies into an enormous value,
+the ``$\text{expm1}$ blow-up'' --- which is why bounded-by-construction families
+(trees, rbf kernels) are preferred over unbounded ones (linear models, MLPs) on
+that target. Engagement remains a documented field and its leaderboard lives in
+\texttt{PROJECT-FACTS.md}, but it is no longer the delivered target, so the
+blow-up hazard is now a historical footnote rather than a live design
+constraint.
+
+\section{The rotation pivot: from engagement magnitude to a binary taste-fit signal}
+\label{sec:rotation-pivot}
+On 2026-06-08 the active target pivoted away from engagement magnitude to a
+binary \emph{rotation} signal, defined as $\text{play\_count} \ge 2$ --- did
+the track earn a repeat listen? Rotation is the actionable input to the
+Playlist Pathfinder's \texttt{W\_FIT} term, where a per-track $[0,1]$
+desirability biases the A* path; a calibrated rotation probability is a
+cleaner \texttt{fit\_norm} than a $\log1p$-then-$\text{expm1}$ engagement
+estimate. Rotation also turns out to be far more learnable than engagement
+magnitude (gradient-boosted trees reach $\text{AUC}\approx 0.73$ on rotation
+versus \rsq{}$\approx 0.3$ on engagement) and is naturally spread for path
+search, with a base rate near \SI{44.5}{\percent}. Engagement is retained as a
+documented scientific field but is no longer the delivered target.
+
+The pivot is decisive for how every number below must be read. Rotation lives
+on the $[0,1]$ scale, so its MAE/\rsq{} are \emph{not} comparable to the
+engagement leaderboard preserved in \texttt{PROJECT-FACTS.md}; and because half
+the rotation labels are exactly zero, the absolute-percentage metrics
+(MAPE/\medape{}) are undefined for those rows. Two distinct metric regimes
+therefore coexist in the rotation campaigns: an early \emph{regression} read
+(MAE, RMSE, \rsq{}, units P(rotation)) and the later, honest
+\emph{classification} read (AUC, log-loss, accuracy, Brier). As the campaigns
+below show, the choice of metric is not cosmetic --- under MAE a kernel SVR can
+\emph{look} competitive while being worse than predicting the mean, an illusion
+that the classification metrics dissolve.
+
+\section{Rotation leaderboards}
+\label{sec:leaderboard}
+Four leaderboards. The first two are on the original DS-META corpus, one per
+metric regime; the third and fourth are on the larger 2026 full-64-d corpus.
+\textbf{None of the three AUC boards is comparable to the others} --- they sit
+on three non-comparable feature matrices (DS-META metadata-only; the full-64-d
+\emph{60/40-vocab} matrix; and the full-64-d \emph{high-vocab} matrix, which
+shares the 60/40 corpus, rows and split but raises the identity cardinality
+caps). Each board carries its own in-dataset references and must never be read
+across (see the Introduction's ``Three feature matrices'' note). The DS-META
+AUC board carries the project's first registered, promotable rotation champion;
+the 60/40 board carries the new-corpus registered xgboost definition; the
+high-vocab board carries the first ANN to clear the rotation save bar
+(Section~\ref{sec:anns-highvocab}). Finally, \textbf{every AUC on all four
+boards is measured on a \emph{random} train/test split}; a chronological
+(train-on-earlier, test-on-later) split tells a sharply different story --- the
+numbers below are upper bounds on same-era ranking, and honest
+forward-prediction skill on this corpus is $\sim$0.11 AUC lower
+(Section~\ref{sec:drift}).
+
+\begin{table}[ht]
+  \centering
+  \caption{Rotation, \emph{classification} regime, \textbf{DS-META corpus} ---
+  ranked by AUC (higher-better). The champion is the only registered,
+  auto-promoted definition. Datasets: DS-META
+  \dsid{ds-20260609-141622-p1-s42} (115 cols, metadata-only, pca floor); the
+  178-col row adds the 64 song-AE latent columns
+  (\dsid{ds-20260608-204402-p64-s42}). AUC noise band $2\sigma=0.0126$.}
+  \label{tab:lb-auc}
+  \begin{tabular}{llcccc}
+    \toprule
+    Model & Dataset & AUC & log-loss & accuracy & Registered? \\
+    \midrule
+    \best{xgboost-classifier} (champion) & DS-META & \best{0.7429} & \best{0.5883} & 0.6846 & \best{yes (rank 1)} \\
+    xgboost-classifier (178, +AE latent) & p64-s42 & 0.7350 & 0.6045 & 0.6818 & no \\
+    svc (poly $d{=}3$, best non-tree)    & DS-META & 0.6855 & 0.6452 & 0.6450 & no \\
+    logistic ($C{=}1$, linear floor)     & DS-META & 0.6762 & 0.6329 & 0.6491 & no \\
+    svc (rbf)                            & DS-META & 0.6722 & 0.6469 & 0.6426 & no \\
+    svc (linear)                         & DS-META & 0.6363 & 0.6535 & 0.6373 & no \\
+    svc (sigmoid, worst)                 & DS-META & 0.6255 & 0.6673 & 0.6267 & no \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Rotation, \emph{classification} regime, \textbf{new full-64-d
+  corpus} --- ranked by AUC (higher-better). Dataset
+  \dsid{ds-20260609-204419-p64-s42} (\num{23529} rows, 177 cols: 64 song-AE
+  PCA $+$ 7 numeric $+$ 106 identity one-hots). \textbf{Not comparable to
+  Table~\ref{tab:lb-auc}}: different corpus size and feature set; the only
+  valid in-corpus reference is the \num{0.7204} xgboost point, which the
+  bake-off reproduced byte-identically. The winner's default config is saved
+  as the new-corpus definition. The single-seed sweep best (depth 8, lr 0.03,
+  \num{0.7261}) is $+0.0057$ over the default --- inside the band --- so it is
+  flagged for a 3-seed confirm, not promoted. The pyramid-mlp log-loss is its
+  documented calibration ceiling (Section~\ref{sec:anns}); the
+  \texttt{burn-deep-classifier} rows are the Rust/\texttt{burn}
+  representation-aware net that repairs it (log-loss $\to\sim$0.62) yet still
+  sits below the tree tier, so neither is registered
+  (Section~\ref{sec:anns-burn}). AUC band $2\sigma\approx 0.0126$ (old-corpus
+  estimate, approximate here).}
+  \label{tab:lb-auc-p64}
+  \begin{tabular}{llcccl}
+    \toprule
+    Model & max\_depth/lr & AUC & log-loss & accuracy & Note \\
+    \midrule
+    \best{xgboost-classifier} (winner, saved)      & 6 / 0.05  & \best{0.7204} & 0.6075 & 0.6585 & registered (new corpus) \\
+    xgboost-classifier (sweep best, single-seed)   & 8 / 0.03  & 0.7261 & \best{0.6044} & \best{0.6651} & flagged for 3-seed confirm \\
+    catboost-classifier (2nd tree, in-band)        & 6 / 0.05  & 0.7111 & 0.6132 & 0.6560 & $-0.0093$, inside band \\
+    burn-deep-classifier (mlp, best tune)          & lr 0.0005 / [128,64] & 0.7038 & 0.6221 & 0.6521 & best ANN; calib.\ fixed \\
+    burn-deep-classifier (mlp, Phase-1 winner)     & lr 0.001 / [128,64]  & 0.7001 & 0.6211 & 0.6470 & dense net; calib.\ fixed \\
+    burn-ae-classifier (AE-transplant, best)       & enc[128,64]/clf[128,64] & 0.6972 & 0.6216 & 0.6496 & $-0.0066$ vs burn mlp \\
+    ngboost-classifier                             & ---       & 0.6917 & 0.6293 & 0.6392 & $\sim$2.3 bands back \\
+    pyramid-mlp-classifier (arch-scan best)        & [512,256] & 0.6792 & 2.0584 & 0.6326 & dense net; calib.\ ceiling \\
+    pyramid-mlp-classifier (bake-off, 300 iter)    & [256,128,64] & 0.6781 & 2.4085 & 0.6326 & dense net; calib.\ ceiling \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Rotation, \emph{classification} regime, \textbf{high-vocab full-64-d
+  matrix} --- ranked by AUC (higher-better). Dataset
+  \dsid{ds-20260612-143014-p64-s42} (\num{23529} rows, 497 cols: 64 song-AE
+  PCA $+$ 9 numeric $+$ 426 identity one-hots --- artist 301, genre 121,
+  album-type 4). \textbf{Not comparable to Tables~\ref{tab:lb-auc}
+  or~\ref{tab:lb-auc-p64}}: it shares the 60/40 corpus, rows and split but
+  raises the identity cardinality (artist cap $60\to300$, genre $40\to120$), so
+  every family re-ran here for a fresh in-dataset ranking. The trees moved
+  \emph{up} on the wider matrix (xgboost $0.7204\to\num{0.7299}$, catboost
+  $0.7111\to\num{0.7252}$). The saved \texttt{burn-deep-classifier}
+  (\texttt{embeddings}) is the first ANN to reach the in-dataset tree tier and
+  clear the rotation save bar (Section~\ref{sec:anns-highvocab}); xgboost is the
+  in-dataset leader but no tree save rule fired this campaign. AUC band
+  $2\sigma\approx 0.0126$ (old-corpus estimate, approximate here).}
+  \label{tab:lb-auc-highvocab}
+  \begin{tabular}{llcccl}
+    \toprule
+    Model & config & AUC & log-loss & accuracy & Note \\
+    \midrule
+    \best{xgboost-classifier} (in-dataset leader)     & d6 / lr0.05      & \best{0.7299} & \best{0.6022} & \best{0.6719} & not registered \\
+    catboost-classifier (2nd tree)                    & defaults         & 0.7252 & 0.6068 & 0.6649 & $-0.0047$, in band \\
+    burn-deep-classifier (embeddings, Phase-2 best)   & ed8 / lr0.0005   & 0.7228 & 0.6105 & 0.6645 & tree tier; sub-band gain \\
+    burn-deep-classifier (embeddings, \emph{saved})   & ed16 / lr0.001   & 0.7192 & 0.6087 & 0.6694 & registered (high-vocab) \\
+    burn-deep-classifier (mlp)                        & lr0.001          & 0.7129 & 0.6166 & 0.6617 & $-0.0063$ vs embeddings \\
+    burn-deep-classifier (wide\_deep)                 & lr0.001          & 0.7061 & 0.6256 & 0.6526 & laggard, both regimes \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Rotation, \emph{regression} regime, \textbf{DS-META corpus} ---
+  ranked by MAE on the $[0,1]$ P(rotation) scale (lower-better). The
+  metadata-only XGBoost leader is the \texttt{mae\_xgb} branch reproduced
+  inside every blend run; it was never saved as a standalone definition. The
+  SVM-poly row is listed for completeness and \emph{refuted}: its lower MAE is
+  the $\epsilon$-tube artifact of Section~\ref{sec:svm}, its \rsq{} is
+  negative. MAE noise band $2\sigma=0.0086$.}
+  \label{tab:lb-mae}
+  \begin{tabular}{lcccl}
+    \toprule
+    Model & MAE & RMSE & \rsq{} & Source \\
+    \midrule
+    \best{metadata-only XGBoost} (AE latent dropped) & \best{0.3879} & \best{0.4475} & \best{0.191} & ae-blend / svm \\
+    xgboost on latent+metadata combined              & 0.3965 & --- & 0.166 & rotation pivot \\
+    xgboost on AE-latent only (64 cols)              & 0.4098 & --- & 0.132 & rotation pivot \\
+    svm (poly, $\epsilon$-tube artifact --- REFUTED) & 0.3814 & 0.5303 & $-0.137$ & svm \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Campaigns}
+
+\subsection{Autoencoder-latent + XGBoost blend: a dead modality, isolated}
+\label{sec:ae-blend}
+\emph{Rationale.} This was the first campaign on the pivoted rotation target.
+The hypothesis was that a precomputed 64-dimensional song-autoencoder latent
+(from the Qdrant collection \texttt{spotify\_tracks\_song\_ae}) carries a
+track's \emph{identity} in a way the metadata one-hots do not, and that
+blending an AE-latent regressor with a metadata-XGBoost model ---
+$\hat{y}=w\cdot\hat{y}_{\text{ae}}+(1-w)\cdot\hat{y}_{\text{xgb}}$, with the
+weight $w$ tuned on a train holdout --- could beat metadata-XGBoost alone. All
+six arms ran on \dsid{ds-20260608-204402-p64-s42} (64 AE latent + 114 metadata
+$=$ 178 cols, 12{,}256 rows, 9{,}805/2{,}451 at seed 42), varying only the AE
+branch (kNN at $k\in\{10,25,50,100,200\}$, plus a ridge-on-latent arm).
+
+\emph{Results.} All six runs (\runid{run-20260609-131545-e34e4} and siblings)
+succeeded, and all returned byte-identical blended metrics --- MAE 0.38789,
+\rsq{} 0.191, RMSE 0.4475 --- because the weight tuner drove $w\to 0$ in every
+arm. The only axis that moved was the AE branch's standalone error
+$mae_{\text{ae}}$, which grew monotonically with the neighborhood size, from
+0.4259 at $k=10$ to 0.4702 at $k=200$ (the ridge arm landed at 0.4623, between
+$k=100$ and $k=200$). Figure~\ref{fig:ae-knn} shows the curve against the three
+horizontal references that matter: even the best AE read ($k=10$, 0.4259) never
+reaches the metadata-only tree (0.3879), nor even the AE-latent-only
+\emph{xgboost} on record (0.4098).
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{ae_latent_knn}
+  \caption{The song-AE latent carries no rotation signal the metadata
+  one-hots do not already carry better. The kNN standalone error
+  $mae_{\text{ae}}$ rises monotonically as the neighborhood widens (the
+  latent's signal is strongest in tight local neighborhoods and washes toward
+  the base rate), and even its best point sits above both the AE-latent-only
+  tree and the metadata-only tree. The weight tuner correctly drives the blend
+  weight to zero, so the ensemble collapses to metadata-only XGBoost.}
+  \label{fig:ae-knn}
+\end{figure}
+
+\emph{Interpretation.} The collapse to $w=0$ is the correct answer, not a bug
+to fix: given an AE branch strictly worse than the XGB branch on the holdout,
+the optimal convex weight \emph{is} zero. The architecture's one real value was
+that it \emph{isolated} the latent into a branch the tuner could discard,
+recovering a cleaner result than feeding the latent into a unified XGBoost ---
+which actually \emph{dilutes} the tree (MAE 0.3965 with the 64 latent columns
+present versus 0.3879 with them dropped). The song-AE latent thus joins
+co-listening, content-text and acoustic features as a dense modality that loses
+to categorical identity one-hots. The one caveat at the time was honesty about
+significance: the $0.3879$ versus $0.3965$ edge is only $0.0086$ MAE on a
+$[0,1]$ target, and the rotation noise band was then unmeasured --- so the
+campaign reported the number but asserted no significant win and promoted
+nothing.
+\emph{Source: \texttt{2026-06-09-ae-xgboost-blend.md}.}
+
+\subsection{Kernel SVM on rotation: a refutation, and the binary-MAE trap}
+\label{sec:svm}
+\emph{Rationale.} With the latent ruled out, this campaign tested whether any
+SVM kernel (rbf / linear / poly / sigmoid) produces a rotation predictor
+competitive with the metadata-only XGBoost leader, and --- only if one passed
+--- whether it added orthogonal signal in a grid-weighted blend. The metadata
+matrix was reduced to the pca floor in a new dataset
+(\dsid{ds-20260609-141622-p1-s42}, 115 cols), with two split-seed siblings
+(seeds 17 and 101) built to measure the noise band, and the champion reproduced
+as a control (\runid{run-20260609-141717-9a8ba-autoencoder-xgboost}, blend
+weight 0). A secondary outcome was the campaign's central deliverable: the
+\textbf{first measured rotation noise band}.
+
+\emph{Results.} Across the three split seeds of the metadata-only XGBoost
+control (s42 0.387891, s17 0.393072, s101 0.396417) the sample standard
+deviation is $\sigma_{\text{split}}=0.00430$, giving a $2\sigma$ significance
+band of \textbf{0.0086 MAE} on the $[0,1]$ scale. This retroactively settles
+the previous campaign's open question: the $0.3879$ versus $0.3965$ edge is
+$\Delta 0.0086 \approx 1{\cdot}\text{band}$ (likely better, not confident),
+while the $0.3879$ versus $0.4098$ gap (AE-latent-only) is $\sim
+2.5{\cdot}\text{band}$ and therefore real. As for the SVM arms, rbf, linear and
+poly all posted MAE inside the control band (0.381--0.390), \emph{lower} than
+the champion in the poly case (0.3814) --- yet every one of them is
+worse-than-mean on \rsq{} ($-0.13$ to $-0.20$), with RMSE 0.53--0.54 against
+the tree's 0.4475. Sigmoid SVR diverged outright: MAE 0.624, RMSE 1.531, \rsq{}
+$-8.48$, with predictions reaching 24.7 on a $[0,1]$ target --- the classic
+unbounded sigmoid-SVR blow-up. Figure~\ref{fig:svm} contrasts the two metric
+views directly.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{svm_mae_vs_r2}
+  \caption{On a binary target, low SVR MAE is an artifact, not skill. With
+  $\epsilon=0.1$ on a $\{0,1\}$ target the SVR snaps its outputs to the
+  $\epsilon$-tube edges (a hard two-level step, $p_{50}\approx 0.10$,
+  $p_{90}\approx 0.90$), so each row sits only $\sim 0.1$ off its label and the
+  \emph{MAE} (left) reads competitive. The honest \emph{$R^2$} (right) exposes
+  it: every kernel is worse than predicting the mean. Sigmoid is off-scale at
+  $R^2=-8.48$.}
+  \label{fig:svm}
+\end{figure}
+
+\emph{Interpretation.} The low SVR MAE is a degeneracy of the metric on a
+binary target. With an $\epsilon$-tube of width $0.1$ on $\{0,1\}$ labels, the
+SVR collapses to a two-level step function pinned near the right classes ---
+each row is about $0.1$ off its label, so the MAE is small, while calibration
+and ranking are destroyed (negative \rsq{}). The metric that matters for the
+Pathfinder \texttt{fit\_norm} (ranking and calibration, i.e.\ \rsq{}/RMSE/AUC)
+says the SVM loses decisively. Worse, the two stage-2 blends
+(\runid{run-20260609-143114-528ef-blend} and its lgbm twin) fitted weights of
+exactly $[0.0, 1.0]$ --- the grid, optimizing the same degenerate validation
+MAE, \emph{mis-selected pure SVM} and discarded the tree, the opposite of the
+self-disabling seen in the blend campaign. The lesson is sharp: a grid-by-MAE
+blend objective is itself unsafe on a binary target. Nothing was registered or
+promoted; kernel SVM became the fifth dense-regime family to lose to one-hot
+identity on this corpus.
+\emph{Source: \texttt{2026-06-09-svm-kernel-rotation.md}.}
+
+\subsection{The honest AUC bake-off and the first AUC champion}
+\label{sec:auc}
+\emph{Rationale.} The SVM campaign exposed that MAE is the wrong lens for a
+binary target. The framework had meanwhile gained a classification mode
+(\texttt{domain.toml} \texttt{task = binary}, primary metric AUC,
+higher-better; the best-models group ranks by AUC and auto-promotes the top
+run). This campaign re-ran the comparison on that honest footing: xgboost-classifier
+against logistic and a four-kernel SVC scan, all on DS-META, plus a
+178-column arm with the AE latent re-added to settle the latent-dilution
+question on the AUC axis, and three control seeds to measure the AUC noise
+band. The hypothesis --- a sixth test of the convergent finding --- was that
+xgboost-classifier wins and every dense family loses.
+
+\emph{Results.} All nine runs succeeded. The champion config
+(\runid{run-20260609-172920-627d6-xgboost-classifier}, control hyperparameters,
+seed 42) reached \textbf{AUC 0.7429} (log-loss 0.5883, accuracy 0.6846, Brier
+0.2017) and was registered as \texttt{xgboost-classifier-rotation} and
+auto-promoted to best-models rank 1 --- the project's first saved, AUC-scored,
+promotable rotation champion. The first measured \emph{AUC} noise band comes
+from the three control seeds (s42 0.742934, s17 0.730659, s101 0.734469, mean
+0.736020): $\sigma_{\text{AUC}}=0.00628$, $2\sigma=\textbf{0.0126}$
+(Figure~\ref{fig:auc-band}). This band is a different metric from the 0.0086
+MAE band and does not replace it. Every dense family lost by many bands ---
+svc-poly 0.6855, logistic 0.6762, svc-rbf 0.6722, svc-linear 0.6363,
+svc-sigmoid 0.6255 --- a spread of 4.6 to 9.3 noise bands below the champion
+(Figure~\ref{fig:auc-bakeoff}). The 178-column arm (AE latent re-added) scored
+0.7350, $-0.0079$ below the metadata-only champion --- the same dilutive
+direction as the regression result, but inside the AUC band, so
+neutral-leaning-dilutive at a single seed.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{auc_bakeoff}
+  \caption{The honest classification metric confirms the convergent finding a
+  sixth time. xgboost-classifier reads the sparse artist/genre/album identity
+  one-hots losslessly; the dense distance/margin families (logistic and all
+  four SVC kernels) blur that identity in a dense feature space and land 4.6 to
+  9.3 noise bands lower. The shaded strip is the $2\sigma=0.0126$ band below
+  the champion; no challenger comes within a band of it.}
+  \label{fig:auc-bakeoff}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.7\textwidth]{auc_noise_band}
+  \caption{The first measured rotation AUC noise band. Three data-split seeds
+  of the registered champion config give $\sigma_{\text{AUC}}=0.0063$ and a
+  $2\sigma$ significance band of $0.0126$. In relative terms this is actually
+  tighter than the MAE band (0.85\% versus 1.10\% coefficient of variation),
+  as expected for a rank metric on 2{,}451 test rows. The band only matters for
+  the sub-band latent-dilution call; champion and challengers are separated by
+  many bands.}
+  \label{fig:auc-band}
+\end{figure}
+
+\emph{Interpretation.} Reframing rotation as classification did two things at
+once. It dissolved the SVR illusion of Section~\ref{sec:svm} --- under AUC,
+log-loss \emph{and} Brier, every SVC kernel is now visibly worse than the
+trees, all in the same direction, so the $\epsilon$-tube artifact that made
+SVR's MAE look competitive simply vanishes. And it confirmed that the metric
+was only ever a problem for the \emph{fairness of the comparison}; the dense
+family was always the loser. Notably svc-sigmoid does not collapse to chance
+under classification (it holds AUC 0.6255 rather than blowing up): a proper
+probability objective removes the unbounded divergence that wrecked the
+SVR-sigmoid run. The convergent finding now stands on an honest metric: the
+taste-fit signal lives in artist/genre/album \emph{identity}, captured by
+sparse one-hots and exploited by trees, not in dense distance or margin models.
+The remaining lever is identity \emph{resolution} --- raising the vocabulary
+caps so the \texttt{artist=\_\_other\_\_} tail gets real columns --- not new
+modalities or families. The next planned campaign is a champion hyperparameter
+scan now that the family and metric are settled.
+\emph{Source: \texttt{2026-06-09-rotation-classification.md}.}
+
+\subsection{Four-family bake-off on the new full-64-d corpus, and an xgboost depth/lr sweep}
+\label{sec:bakeoff-p64}
+\emph{Rationale.} The first three campaigns ran on the original DS-META corpus.
+This campaign re-asked the family question on the larger 2026 corpus --- ``all
+of the 64-d embedding'', the full 177-column matrix
+(\dsid{ds-20260609-204419-p64-s42}, \num{23529} rows, 64 song-AE PCA $+$ 7
+numeric $+$ 106 identity one-hots) --- by putting four classifier families head
+to head at registry defaults, seed 42: \texttt{xgboost-classifier},
+\texttt{catboost-classifier}, \texttt{ngboost-classifier} and a dense
+\texttt{pyramid-mlp-classifier}. The latter three are \emph{new families on
+this project}. The winner then earned a \texttt{max\_depth}$\times$
+\texttt{learning\_rate} sweep. The only valid in-corpus reference is a
+pre-existing run on this dataset (\runid{run-20260609-204726-439d8-xgboost-classifier},
+AUC \num{0.7204}); nothing here may be read against the DS-META \num{0.7429}
+champion (different corpus and feature set).
+
+\emph{Results.} All four bake-off arms succeeded (Table~\ref{tab:bakeoff-p64};
+Figure~\ref{fig:bakeoff-p64}). \texttt{xgboost-classifier}
+(\runid{run-20260612-115909-840c0-xgboost-classifier}) won at AUC \num{0.7204},
+reproducing the in-corpus reference byte-identically (\num{0.7204383403}) ---
+the determinism gate passed. \texttt{catboost-classifier}
+(\runid{run-20260612-115909-c7ef6-catboost-classifier}) followed at \num{0.7111},
+$-0.0093$ behind --- \emph{inside} the $\sim$0.0126 band, so co-leader and the
+legitimate second tree family, not a loss. \texttt{ngboost-classifier}
+(\runid{run-20260612-115909-d725b-ngboost-classifier}) landed at \num{0.6917}
+($\sim$2.3 bands back), and the dense \texttt{pyramid-mlp-classifier}
+(\runid{run-20260612-115909-ea698-pyramid-mlp-classifier}) was last at
+\num{0.6781} --- with a log-loss of \num{2.4085} and Brier \num{0.3251} far
+above the trees' $\sim$0.60--0.63 / $\sim$0.21, the diagnostic dissected in
+Section~\ref{sec:anns}.
+
+\begin{table}[ht]
+  \centering
+  \caption{Phase 1 --- the four-family bake-off on the new full-64-d corpus
+  (\dsid{ds-20260609-204419-p64-s42}, seed 42, registry defaults). All four
+  succeeded. AUC higher-better; log-loss and Brier lower-better. Winner bolded;
+  best cell per metric bolded.}
+  \label{tab:bakeoff-p64}
+  \begin{tabular}{llcccc}
+    \toprule
+    Arm / run id & Predictor & AUC & log-loss & accuracy & Brier \\
+    \midrule
+    \best{C0} (\runid{run-20260612-115909-840c0-xgboost-classifier}) & \best{xgboost-classifier}   & \best{0.7204} & \best{0.6075} & \best{0.6585} & \best{0.2109} \\
+    A1 (\runid{run-20260612-115909-c7ef6-catboost-classifier})       & catboost-classifier         & 0.7111 & 0.6132 & 0.6560 & 0.2132 \\
+    A2 (\runid{run-20260612-115909-d725b-ngboost-classifier})        & ngboost-classifier          & 0.6917 & 0.6293 & 0.6392 & 0.2193 \\
+    A3 (\runid{run-20260612-115909-ea698-pyramid-mlp-classifier})    & pyramid-mlp-classifier      & 0.6781 & 2.4085 & 0.6326 & 0.3251 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{bakeoff_p64}
+  \caption{The family ordering survives the corpus change. On the larger 2026
+  full-64-d matrix the two gradient-boosted-tree families lead
+  (\texttt{xgboost} winning, \texttt{catboost} co-leader inside the shaded
+  $2\sigma$ band below the winner); \texttt{ngboost} sits $\sim$2.3 bands back;
+  the dense \texttt{pyramid-mlp} is last, the same convergent finding seen on
+  DS-META in Figure~\ref{fig:auc-bakeoff}.}
+  \label{fig:bakeoff-p64}
+\end{figure}
+
+The winner earned a Phase-2 sweep over \texttt{max\_depth}$\in\{4,6,8\}\times$
+\texttt{learning\_rate}$\in\{0.03,0.05,0.1\}$ (Table-form data in the source
+report; Figure~\ref{fig:xgb-heatmap}). Depth is the dominant axis: every
+depth-4 cell is at the bottom (0.7074--0.7119), and the depth-8 / lr-0.03 corner
+tops the grid at \num{0.7261} (\runid{run-20260612-120207-2dd3d-xgboost-classifier},
+log-loss \num{0.6044}). High learning rate (0.1) consistently hurts both AUC and
+calibration. But the best-vs-default gap (+0.0057) is \emph{inside} the band, so
+the default depth-6/lr-0.05 config was saved as the new-corpus definition and the
+depth-8/lr-0.03 cell was flagged for a 3-seed confirmation rather than promoted.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.62\textwidth]{xgb_depth_lr_heatmap}
+  \caption{The xgboost \texttt{max\_depth}$\times$\texttt{learning\_rate} sweep
+  on the new corpus. Depth is the lever (the AUC climbs monotonically up the
+  depth axis at the slow learning rates), and a fast learning rate hurts. The
+  best cell (depth 8, lr 0.03, boxed) reaches \num{0.7261} but only $+0.0057$
+  over the default --- inside the $2\sigma$ band --- so the default config
+  remains saved and the best cell awaits a 3-seed confirm.}
+  \label{fig:xgb-heatmap}
+\end{figure}
+
+\emph{Interpretation.} The convergent finding survives the corpus change intact:
+on a different, larger corpus with the AE latent present, the two tree families
+again lead and the dense net is again last. \texttt{catboost} earns its place as
+a legitimate second tree family (co-leader in-band) --- a tree-diversity /
+second-opinion member, not an AUC gain over xgboost. \texttt{ngboost} pays for
+its distributional machinery: shallow base learners (\texttt{base\_max\_depth} 3)
+under-fit the 177-column one-hot-heavy matrix. The pyramid-MLP's last-place AUC
+\emph{plus} its blown log-loss are the dense-net signature; the bake-off read the
+log-loss as a 300-iteration under-training artifact and prescribed more budget ---
+a hypothesis the next campaign tests and refutes.
+\emph{Source: \texttt{2026-06-12-classifier-bakeoff-p64.md}.}
+
+\subsection{Pyramid-MLP architecture scan: refuting the budget hypothesis}
+\label{sec:mlp-scan}
+\emph{Rationale.} The bake-off flagged the pyramid-MLP's last place (AUC
+\num{0.6781}, log-loss \num{2.4085}) as a 300-iteration-cap under-training
+artifact, prescribing ``raise \texttt{max\_iter} so the net converges.'' This
+follow-up tests that mechanism directly: six pyramid geometries, all with
+\texttt{max\_iter} raised to \textbf{800}, alpha \num{1e-4}, learning rate
+\num{1e-3}, seed 42, on the same dataset --- so the comparison reflects
+\emph{architecture}, not budget. Does any geometry, given the budget to
+converge, lift the dense family to a competitive AUC?
+
+\emph{Results.} Refuted on every count (Table~\ref{tab:mlp-scan};
+Figures~\ref{fig:mlp-arch} and~\ref{fig:mlp-calib}). \textbf{No arm hit the 800
+cap}: every geometry self-stopped at \textbf{73--100 iterations} via sklearn's
+\texttt{n\_iter\_no\_change} loss-plateau tolerance --- far below even the old
+300 cap, so the budget was never the binding constraint. The decisive tell: the
+re-baseline arm M0 ([256,128,64], the bake-off geometry now at \texttt{max\_iter}
+800) reproduced the under-trained run's AUC to all digits ---
+\num{0.6780926} versus \num{0.6780926} --- because it ran the identical 73
+iterations. Raising the cap from 300 to 800 changed nothing. The best converged
+geometry was M1 [512,256] at AUC \num{0.6792} (\runid{run-20260612-123155-0ace5}),
+a statistical tie with the under-trained default ($+0.0011 \approx$ zero) and
+$\sim$3.3 bands below xgboost. The whole family lands in a 0.0080-wide AUC strip
+(0.6712--0.6792), entirely inside one noise band --- the geometry ranking is not
+resolvable at a single seed --- with the log-loss (2.06--2.78) and Brier
+(0.32--0.34) blown at the same level as the under-trained default across every
+arm. No definition was saved (below the 0.683 save bar).
+
+\begin{table}[ht]
+  \centering
+  \caption{The six-geometry pyramid-MLP architecture scan
+  (\dsid{ds-20260609-204419-p64-s42}, \texttt{max\_iter} 800, alpha \num{1e-4},
+  lr \num{1e-3}, seed 42), sorted by AUC. All six succeeded; \emph{none} hit
+  the 800-iteration cap --- each self-stopped at the listed iteration count.
+  Best cell per metric bolded.}
+  \label{tab:mlp-scan}
+  \begin{tabular}{llcccc}
+    \toprule
+    Arm & Hidden layers & AUC & log-loss & Brier & Iters (of 800) \\
+    \midrule
+    \best{M1} wide-shallow & [512, 256]            & \best{0.6792} & \best{2.0584} & \best{0.3216} & 75 \\
+    M0 re-baseline         & [256, 128, 64]        & 0.6781 & 2.4085 & 0.3251 & 73 \\
+    M4 gentle taper        & [384, 307, 246]       & 0.6777 & 2.7764 & 0.3292 & 87 \\
+    M2 deep pyramid        & [256, 128, 64, 32]    & 0.6737 & 2.7631 & 0.3303 & 100 \\
+    M3 steep taper         & [512, 169, 56]        & 0.6736 & 2.7031 & 0.3365 & 89 \\
+    M5 wide-deep           & [512, 307, 184, 111]  & 0.6712 & 2.6457 & 0.3348 & 84 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{mlp_arch_scan}
+  \caption{Both knobs of the dense family are exhausted. \emph{Left:} the six
+  geometries land inside a single $2\sigma$ band around the under-trained
+  default --- architecture is not the binding constraint. \emph{Right:} every
+  geometry self-stops at 73--100 iterations, well below even the old 300 cap
+  (let alone the raised 800), so the training \emph{budget} was never the
+  binding constraint either. The optimizer reaches a loss plateau it cannot
+  escape at this learning rate and halts. The binding constraint is the input
+  \emph{representation}.}
+  \label{fig:mlp-arch}
+\end{figure}
+
+\emph{Interpretation.} The refutation is clean and twofold: neither the training
+budget (every arm self-stops far below the cap; M0 reproduces the under-trained
+AUC to all digits) nor the architecture (all six geometries inside one band)
+moves the dense family. The high log-loss is therefore not a truncated training
+trajectory but a genuine \emph{calibration ceiling} at these hyperparameters ---
+the optimizer's chosen plateau. With the dense family's own knobs exhausted, the
+binding constraint must lie elsewhere: in the input \emph{representation}, the
+subject of Section~\ref{sec:anns}. The directional within-family trend ---
+wider-and-shallower mildly favored (M1 top), depth/capacity mildly harmful (M5
+wide-deep last) --- is consistent with a dense net struggling to route signal
+through 106 sparse one-hots: extra layers add capacity to memorize and blur,
+not to separate. The family is closed for AUC on this feature set; do not
+re-scan geometry or budget.
+\emph{Source: \texttt{2026-06-12-pyramid-mlp-arch-scan.md}.}
+
+\section{Why artificial neural nets underperform on one-hot-heavy taste data}
+\label{sec:anns}
+The dense \texttt{pyramid-mlp} is the only artificial neural net in the
+rotation campaigns, and across two Jun-12 campaigns it lands last with a
+distinctive failure pattern. This section consolidates, rigorously, \emph{why}
+--- grounding every claim in the campaign evidence. The short version is the
+project's documented \emph{convergent finding}: on this feature matrix the
+binding constraint is the input \emph{representation}, and a dense net is the
+one model class structurally mismatched to it. We build the argument in five
+parts and close with the motivated next step.
+
+\subsection{The feature matrix is mostly sparse identity}
+\label{sec:anns-matrix}
+The full-64-d matrix has 177 columns, and their \emph{composition} is the whole
+story. \textbf{106 of the 177 columns are sparse identity one-hots}: artist
+($\times 61$), \texttt{genre\_primary} ($\times 41$) and \texttt{album\_type}
+($\times 4$). Only 71 columns are continuous --- the 64 song-AE PCA latents and
+7 numeric metadata fields (popularities, follower count, release year,
+credited-artist count). For any given track exactly one artist column, one genre
+column and one album-type column is hot; the rest of the 106 are zero. The
+matrix is, by construction, dominated by a mostly-zero block of mutually
+exclusive indicators.
+
+A gradient-boosted tree reads this block \emph{losslessly and cheaply}: a single
+axis-aligned split on column \texttt{artist=X} partitions the data on exactly
+that identity, with no interaction among the one-hots forced and no cost paid for
+the columns that are zero. Capturing ``tracks by artist $X$ in genre $Y$ rotate''
+costs the tree two nested splits. A dense net cannot do this. It must learn a
+\emph{dense} weight from every one of the 106 mostly-zero inputs into every
+hidden unit, then back out a non-linear combination --- spending capacity and
+gradient signal modeling the structure of a block that the tree handles with one
+comparison. This is precisely the regime in which trees structurally dominate
+dense nets, and it is the project's \emph{convergent finding}, now observed
+across four feature modalities and five model families: the taste-fit signal is
+carried by artist/genre identity, captured by one-hots and exploited by trees,
+not by descriptive attributes or distance/margin/dense models. The pyramid-MLP
+is simply the dense family's turn to lose to it.
+
+\subsection{Standardization turns rare categories into outlier spikes}
+\label{sec:anns-scaler}
+The dense net is fed a StandardScaler-ed matrix, and standardization interacts
+pathologically with sparse one-hots. A one-hot column for a category present in
+a fraction $p$ of rows has mean $p$ and standard deviation $\sqrt{p(1-p)}$.
+Standardizing it maps the ``on'' rows to
+\[
+  z_{\text{on}} = \frac{1-p}{\sqrt{p(1-p)}} = +\sqrt{\frac{1-p}{p}},
+  \qquad
+  z_{\text{off}} = \frac{0-p}{\sqrt{p(1-p)}} = -\sqrt{\frac{p}{1-p}}.
+\]
+For a \emph{rare} category --- the long tail of artists and genres, where $p$ is
+small --- the ``on'' value $+\sqrt{(1-p)/p}$ becomes a large positive spike (for
+$p=0.01$ it is $\approx +9.9$), while the ``off'' value sits at a tiny negative
+$-\sqrt{p/(1-p)}\approx -0.1$. Every rare identity therefore arrives at the net
+as an occasional, enormous outlier on its own axis. ReLU units with Adam at
+learning rate \num{1e-3} swing hard on these spikes --- a single rare-category
+activation drives a large pre-activation that the optimizer chases --- and the
+softmax/sigmoid head saturates, emitting near-0 or near-1 probabilities on thin
+evidence. Trees are immune: a split threshold on a one-hot is invariant to any
+monotone rescaling, so the scaler's spike does nothing to them. This is a direct
+mechanistic contributor to the blown calibration documented next.
+
+\subsection{The diagnostic signature: genuine ranking, broken calibration}
+\label{sec:anns-signature}
+The dense net's failure has a precise, reproducible signature in the metrics ---
+and it is \emph{not} the failure of a weak model. The pyramid-MLP posts AUC
+$\approx 0.68$ (0.6781 in the bake-off, 0.6792 best in the arch scan): genuine
+ranking signal, well above the 0.5 chance line, only $\sim$3 bands below the
+trees. Yet \emph{at the same time} its log-loss is $\approx 2.0$--$2.8$ and its
+Brier $\approx 0.32$--$0.34$, against the trees' log-loss $\approx 0.60$--$0.63$
+and Brier $\approx 0.21$ (Figure~\ref{fig:mlp-calib}). A constant base-rate
+predictor (always outputting $p\approx 0.445$) scores a log-loss of only
+$\approx 0.69$. \textbf{The net's log-loss of 2.0--2.8 is thus far worse than the
+random baseline, while xgboost's 0.61 is well below it.}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{mlp_calibration_signature}
+  \caption{The dense-net diagnostic: the net is confidently wrong, not merely
+  weak. \emph{Left:} on AUC the pyramid-MLP genuinely ranks ($\approx 0.68$,
+  well above chance, $\sim$3 bands below the trees) --- there is real signal in
+  its ordering. \emph{Right:} but its log-loss ($\approx 2.0$--$2.8$) is far
+  \emph{worse} than the random base-rate baseline ($\approx 0.69$, dashed),
+  while the trees sit well below it ($\approx 0.61$). A model that ranks
+  acceptably yet scores worse-than-random log-loss is emitting confident,
+  miscalibrated probabilities.}
+  \label{fig:mlp-calib}
+\end{figure}
+
+This combination --- acceptable ranking, worse-than-random log-loss --- means the
+net is \emph{confidently wrong}: it pushes many predictions to the saturated
+extremes (near 0 or near 1) on the wrong side of the label, and log-loss punishes
+each such confident error severely. It is miscalibrated, not weak: the ordering
+is there, but the probabilities attached to that ordering are unusable as a
+\texttt{fit\_norm}. The mechanism is exactly the scaler-spike saturation of
+Section~\ref{sec:anns-scaler}. Contrast the trees, whose leaf-frequency outputs
+are calibrated by construction: a leaf reporting probability $q$ is the empirical
+rotation frequency of the training rows that fall in it, so the tree's
+probabilities are honest by design --- the reason it wins on log-loss and Brier as
+well as AUC.
+
+\subsection{Optimization versus representation: the binding constraint}
+\label{sec:anns-binding}
+A natural objection is that the net is merely under-optimized --- too few
+iterations, the wrong geometry. The architecture scan (Section~\ref{sec:mlp-scan})
+forecloses both. On the \emph{budget} axis, every one of the six geometries
+self-stops at 73--100 iterations, well below even the old 300 cap (let alone the
+raised 800): the optimizer reaches a loss plateau it cannot escape, so more budget
+buys nothing --- the re-baseline arm M0 reproduced the under-trained AUC to all
+digits because it ran the identical 73 iterations. On the \emph{architecture}
+axis, all six geometries land inside a single noise band, and the best converged
+geometry reproduces the under-trained AUC to four digits (0.6792 versus 0.6781).
+Both knobs internal to the dense family are therefore exhausted. By elimination,
+the binding constraint is neither budget nor architecture but the input
+\emph{representation} --- the raw one-hots of Section~\ref{sec:anns-matrix}, which
+the net cannot consume the way a tree does. This is the diagnostic that points at
+representation-aware topologies (entity embeddings, wide-and-deep) as the only
+untested lever, since those are designed precisely to replace raw one-hots with a
+learned dense representation.
+
+\subsection{PCA has already pre-empted the net's nonlinear job}
+\label{sec:anns-pca}
+There is a second reason the dense net has little to do. The 64 song-AE PCA
+latents are already a \emph{linear, decorrelated} compression of a
+1536-dimensional embedding: PCA has extracted the dominant linear structure and
+handed the net orthogonal components with most of the easy linear variance
+already separated. Whatever nonlinear interaction a hidden layer might discover
+in that block has largely been pre-empted; little nonlinear structure remains for
+the net's depth to exploit. The evidence is direct: a plain logistic regression
+reaches AUC 0.676 on this corpus and the converged MLP reaches 0.679 --- a dead
+heat. A multi-layer ReLU network buys essentially nothing over a single linear
+boundary, which is exactly what one expects when the continuous block is already
+linearly pre-conditioned and the categorical block is the part that carries
+signal the net cannot read.
+
+\subsection{The open question and the motivated next step}
+\label{sec:anns-next}
+The diagnosis is now sharp: the dense net's ceiling is set by its inability to
+consume raw one-hot identity, not by budget, architecture, or the continuous
+block. That isolates a single, testable open question --- \emph{can a
+representation-aware topology close the gap to the trees?} The two ingredients
+that target the diagnosis directly are (i) \textbf{entity embeddings} for the
+identity groups (artist, genre, album-type), which replace each sparse one-hot
+block with a learned low-dimensional dense vector --- the standard fix for
+high-cardinality categoricals in nets, removing both the dense-weights-over-zeros
+problem of Section~\ref{sec:anns-matrix} and the scaler-spike problem of
+Section~\ref{sec:anns-scaler}; and (ii) a \textbf{wide-and-deep} split --- a wide
+linear path over the one-hots (so identity is read directly, as the tree reads
+it) alongside a deep path over the continuous block. A Rust/\texttt{burn}
+implementation of such a representation-aware network --- the
+\texttt{burn-deep-classifier} --- was built precisely to answer this question.
+Section~\ref{sec:anns-burn} reports its results, and they resolve the diagnosis
+cleanly: the calibration pathology was indeed a representation artifact and is
+fixed, but the AUC gap to the trees only \emph{narrows}, it does not close.
+
+\emph{Sources: \texttt{2026-06-12-classifier-bakeoff-p64.md},
+\texttt{2026-06-12-pyramid-mlp-arch-scan.md}.}
+
+\subsection{Resolved: the burn-deep-classifier fixes calibration but not the AUC gap}
+\label{sec:anns-burn}
+\emph{Rationale.} The preceding subsections left a single sharp open question:
+the dense net's ceiling is set by its inability to consume raw one-hot identity,
+so \emph{can a representation-aware topology close the gap to the trees?} The
+\texttt{burn-deep-classifier} --- a full-Rust/\texttt{burn} network --- was built
+to answer it. Its design targets the two diagnosed pathologies directly: it keeps
+the identity one-hots \emph{raw} (standardizing only the 64 PCA $+$ 7 numeric
+continuous block), so the scaler-spike mechanism of Section~\ref{sec:anns-scaler}
+never fires, and it exposes a \texttt{topology} enum over a plain dense
+\texttt{mlp}, learned entity \texttt{embeddings}, and a \texttt{wide\_deep} split.
+Phase 1 compared the three topologies (epochs 250, patience 20, early-stop on
+validation log-loss, hidden $[128,64]$, embed\_dim 8, lr \num{1e-3}, batch 256);
+Phase 2 tuned the winner. All nine runs ran on the same full-64-d dataset
+(\dsid{ds-20260609-204419-p64-s42}) and succeeded cleanly.
+
+\emph{Results.} The headline is the calibration recovery
+(Figure~\ref{fig:burn-topology}). Every topology lands at log-loss
+\num{0.621}--\num{0.628} and Brier \num{0.217}--\num{0.220} --- squarely in the
+trees' $\sim$0.60--0.63 / $\sim$0.21 regime --- against the sklearn pyramid's
+log-loss \num{2.0}--\num{2.4} and Brier \num{0.33}. \textbf{The calibration
+pathology is fixed completely.} On the topology axis (Table~\ref{tab:burn-topo}),
+the plain \texttt{mlp} wins at AUC \num{0.7001}, with \texttt{embeddings}
+(\num{0.6934}) and \texttt{wide\_deep} (\num{0.6918}) both inside the
+$2\sigma=0.0126$ band of it and of each other --- \texttt{embeddings} edges
+\texttt{wide\_deep} by a sub-band $+0.0016$. The Phase-2 \texttt{mlp} tune
+(Table~\ref{tab:burn-tune}) tops out at AUC \num{0.7038} (lr \num{5e-4},
+$[128,64]$): the whole 6-cell grid is a \num{0.0081}-wide strip
+(\num{0.6957}--\num{0.7038}), every $[128,64]$ cell beats every $[256,128]$ cell,
+and the best config is only $+0.0037$ (inside the band) over the Phase-1 winner,
+so the Phase-1 \texttt{mlp} config stands. At \num{0.7038} the net sits
+$-0.0073$ below \texttt{catboost} ($\sim$0.6 band) and $-0.0166$ below
+\texttt{xgboost} ($\sim$1.3 bands); below the $\sim$0.71 save bar, so no
+definition was persisted.
+
+\begin{table}[ht]
+  \centering
+  \caption{Phase 1 --- the \texttt{burn-deep-classifier} topology bake-off
+  (\dsid{ds-20260609-204419-p64-s42}, held params: epochs 250, patience 20,
+  hidden $[128,64]$, embed\_dim 8, dropout 0.1, lr \num{1e-3}, batch 256, relu;
+  the only axis is \texttt{topology}). All three succeeded. AUC higher-better;
+  log-loss and Brier lower-better. Winner bolded; best cell per metric bolded.}
+  \label{tab:burn-topo}
+  \begin{tabular}{llcccc}
+    \toprule
+    Arm / run id & Topology & AUC & log-loss & accuracy & Brier \\
+    \midrule
+    \best{T-mlp} (\runid{run-20260612-140116-41fc9-burn-deep-classifier}) & \best{mlp}        & \best{0.7001} & \best{0.6211} & \best{0.6470} & \best{0.2169} \\
+    T-emb (\runid{run-20260612-140116-0eda4-burn-deep-classifier})        & embeddings        & 0.6934 & 0.6251 & 0.6436 & 0.2187 \\
+    T-wd (\runid{run-20260612-140116-e85be-burn-deep-classifier})         & wide\_deep        & 0.6918 & 0.6281 & 0.6407 & 0.2198 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Phase 2 --- tuning the winning \texttt{mlp} topology, a
+  \texttt{lr}$\times$\texttt{hidden} grid (other params held). All six
+  succeeded, sorted by AUC; winner bolded, best cell per metric bolded. The
+  whole grid is inside one noise band, every $[128,64]$ cell beats every
+  $[256,128]$ cell, and the best gain over the Phase-1 winner ($+0.0037$) is
+  sub-band --- so the Phase-1 config is the config of record.}
+  \label{tab:burn-tune}
+  \begin{tabular}{lllcccc}
+    \toprule
+    Run id & lr & hidden & AUC & log-loss & accuracy & Brier \\
+    \midrule
+    \best{\runid{run-20260612-140211-6575a-burn-deep-classifier}} & \best{0.0005} & \best{[128,64]}  & \best{0.7038} & 0.6221 & 0.6521 & 0.2172 \\
+    \runid{run-20260612-140211-21ad5-burn-deep-classifier}        & 0.002         & [128,64]         & 0.6997 & 0.6227 & \best{0.6532} & 0.2174 \\
+    \runid{run-20260612-140211-18c9e-burn-deep-classifier}        & 0.001         & [128,64]         & 0.6996 & \best{0.6213} & 0.6447 & \best{0.2170} \\
+    \runid{run-20260612-140211-fecb0-burn-deep-classifier}        & 0.0005        & [256,128]        & 0.6966 & 0.6232 & 0.6424 & 0.2179 \\
+    \runid{run-20260612-140211-4c359-burn-deep-classifier}        & 0.002         & [256,128]        & 0.6963 & 0.6245 & 0.6460 & 0.2181 \\
+    \runid{run-20260612-140211-0f4e1-burn-deep-classifier}        & 0.001         & [256,128]        & 0.6957 & 0.6252 & 0.6424 & 0.2187 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{burn_topology}
+  \caption{The representation-aware net resolves the open question of
+  Section~\ref{sec:anns-next}. \emph{Left:} the three topologies are inside one
+  $2\sigma$ band of each other; the plain \texttt{mlp} wins and the entity
+  \texttt{embeddings} barely edge \texttt{wide\_deep}, because at these identity
+  cardinalities (artist 61, genre 41, album-type 4) learned embeddings are
+  starved --- they pay off at hundreds-to-thousands of categories, not dozens (a
+  hypothesis Section~\ref{sec:anns-highvocab} confirms by raising the caps).
+  \emph{Right:} the headline. Keeping the one-hots \emph{raw} drops the
+  log-loss from the sklearn pyramid's $\approx 2.0$ (confidently miscalibrated,
+  worse than the random baseline) to $\approx 0.62$, into the tree regime --- a
+  clean confirmation that the calibration pathology was a representation
+  artifact, not an intrinsic property of nets on this data.}
+  \label{fig:burn-topology}
+\end{figure}
+
+\emph{Interpretation.} The result resolves Section~\ref{sec:anns-next}'s open
+question in two parts, and the two answers point in opposite directions. First,
+the \emph{calibration} verdict is overturned: the pyramid-MLP's worse-than-random
+log-loss of Section~\ref{sec:anns-signature} was a \emph{representation} artifact
+--- raw one-hots crushed into the standardizer --- not an intrinsic property of
+dense nets on taste data, and a net that keeps the one-hots raw is calibrated in
+the trees' regime. The earlier ``broken calibration is a fixed ceiling'' reading
+holds only for the sklearn-pyramid representation. AUC also recovered: the burn
+net's \num{0.7038} is $+0.025$ over the best converged pyramid (\num{0.6792}),
+$\sim$2 bands of genuine ranking-power gain, so the prior conclusion that ``the
+MLP family is closed for AUC at $\approx 0.68$'' is revised --- a raw-one-hot
+Rust net reaches $\sim$0.70. Second, and against the optimistic reading, the
+representation fix does \emph{not} reach the tree tier: at \num{0.7038} the net is
+still $\sim$1 band below \texttt{catboost} and $\sim$1.3 below \texttt{xgboost}.
+The gap narrowed dramatically (from the pyramid's $\sim$3.3 bands to $\sim$1) but
+did not close, so the convergent finding survives intact --- trees still read the
+sparse identity one-hots a hair more effectively than even a raw-one-hot net. The
+topology comparison sharpens this: the plain \texttt{mlp} beating both the
+embedding and wide-deep variants is the \emph{same} ``the identity is already in
+the one-hots'' lesson the tree campaigns taught, now reproduced inside the ANN
+family --- learned per-group embeddings have little to add over 61 artist and 41
+genre one-hots, and the standing lever for the net (as for the trees) is identity
+\emph{resolution}: raise the vocabulary caps and the embedding topology should
+finally start to pay off --- a prediction that the high-vocab re-run of
+Section~\ref{sec:anns-highvocab} then confirms, flipping \texttt{embeddings}
+above \texttt{mlp} and lifting the net into the tree tier. No definition was
+saved here (below the $\sim$0.71 bar); the
+net is a strong, now-honest dense baseline and a natural ensemble member for its
+decorrelated inductive bias, not a champion.
+\emph{Source: \texttt{2026-06-12-burn-deep-topology.md}.}
+
+\subsection{Confirmed: raising identity cardinality lifts the embedding net into the tree tier}
+\label{sec:anns-highvocab}
+\emph{Rationale.} Section~\ref{sec:anns-burn} closed on a sharp, testable
+prediction: the entity-\texttt{embeddings} topology lost to plain \texttt{mlp}
+\emph{only} because the identity cardinalities (artist 61, genre 41) were too
+low to feed a learned embedding, so raising the vocabulary caps should flip the
+ranking. This campaign is the paired re-run that tests it directly. A new matrix
+(\dsid{ds-20260612-143014-p64-s42}) was built \emph{identical} to the 60/40
+full-64-d dataset of Section~\ref{sec:anns-burn} --- same \num{23529} rows, same
+split seed 42, byte-identical PCA64 --- differing in \emph{one} axis only:
+identity cardinality, with the artist cap raised $60\to300$
+(\SI{50.4}{\percent} coverage) and \texttt{genre\_primary} $40\to120$
+(\SI{78.8}{\percent}). It is a \emph{third} non-comparable matrix (497 columns:
+64 PCA $+$ 9 numeric $+$ 426 one-hots --- artist 301, genre 121, album-type 4 ---
+versus the 60/40 matrix's 177), so all metrics here are fresh in-dataset
+references and must never be read against the 60/40 or DS-META boards. The
+headline question: with cardinality $5\times$ (artist) and $3\times$ (genre)
+larger, does \texttt{embeddings} now beat \texttt{mlp}? Phase 0 re-ran the two
+trees for an in-dataset tree tier; Phase 1 re-ran the topology bake-off (the
+embeddings arm now at embed\_dim 16, since higher cardinality justifies a wider
+table); Phase 2 tuned the winning topology over embed\_dim $\times$ lr.
+
+\emph{Results.} The ranking \textbf{flipped} (Table~\ref{tab:highvocab-topo};
+Figure~\ref{fig:burn-highvocab}). \texttt{embeddings}
+(\runid{run-20260612-143411-e8db6-burn-deep-classifier}) wins at AUC
+\num{0.7192}, with \texttt{mlp} at \num{0.7129} ($+0.0063$) and \texttt{wide\_deep}
+last at \num{0.7061} ($+0.0131$). On the 60/40 matrix \texttt{mlp} had beaten
+\texttt{embeddings} by $+0.0067$; here \texttt{embeddings} beats \texttt{mlp} by
+$+0.0063$ --- a \textbf{swing of $+0.0130$} in the embedding's favour, crossing
+the band, the qualitative reversal the starvation hypothesis predicted. Phase 0
+shows both trees also moved \emph{up} on the wider matrix: xgboost
+$0.7204\to\num{0.7299}$ ($+0.0095$, \runid{run-20260612-143411-02fda-xgboost-classifier},
+log-loss \num{0.6022}) and catboost $0.7111\to\num{0.7252}$ ($+0.0141$,
+\runid{run-20260612-143411-8f15e-catboost-classifier}), so high vocab is genuine
+signal for \emph{every} family --- it does not hand the embedding a unique
+advantage, it \emph{unlocks} a topology that was previously starved. The Phase-2
+embed\_dim$\times$lr tune (best embed\_dim 8 / lr \num{5e-4}, AUC \num{0.7228},
+\runid{run-20260612-143508-3310f-burn-deep-classifier}) shows the win came from
+\emph{enabling} embeddings plus a slower learning rate, not from a wider table:
+AUC is monotone-decreasing in embed\_dim at the slow lr (ed8 \num{0.7228} $>$
+ed16 \num{0.7210} $>$ ed32 \num{0.7200}, a sub-band $\sim$\num{0.0028} spread),
+so embed\_dim is already saturated at 8. The best tuned cell beats the Phase-1
+winner by only $+0.0036$ (sub-band), so the decision rule saved the \emph{Phase-1}
+config (embeddings, embed\_dim 16, lr \num{1e-3}) as
+\texttt{burn-deep-embeddings-highvocab}. A determinism twin reproduced the
+Phase-1 run to four digits ($0.71923$ versus $0.71923$). At \num{0.7192} the
+saved net sits $-0.0060$ below catboost ($<$ 1 band) and $-0.0107$ below xgboost,
+inside the band of the second tree family --- the first ANN to reach the
+in-dataset tree tier and clear the rotation save bar.
+
+\begin{table}[ht]
+  \centering
+  \caption{Phase 1 --- the \texttt{burn-deep-classifier} topology bake-off on
+  the \textbf{high-vocab} matrix (\dsid{ds-20260612-143014-p64-s42}, held
+  params: epochs 250, patience 20, hidden $[128,64]$, embed\_dim 16, dropout
+  0.1, lr \num{1e-3}, batch 256, relu; the only axis is \texttt{topology}). All
+  three succeeded. The ranking \emph{reverses} the 60/40 result of
+  Table~\ref{tab:burn-topo}: \texttt{embeddings} now wins. AUC higher-better;
+  log-loss and Brier lower-better. Winner bolded; best cell per metric bolded.}
+  \label{tab:highvocab-topo}
+  \begin{tabular}{llcccc}
+    \toprule
+    Topology / run id & Topology & AUC & log-loss & accuracy & Brier \\
+    \midrule
+    \best{T-emb} (\runid{run-20260612-143411-e8db6-burn-deep-classifier}) & \best{embeddings} & \best{0.7192} & \best{0.6087} & \best{0.6694} & \best{0.2110} \\
+    T-mlp (\runid{run-20260612-143411-01d7b-burn-deep-classifier})        & mlp               & 0.7129 & 0.6166 & 0.6617 & 0.2143 \\
+    T-wd (\runid{run-20260612-143411-7d117-burn-deep-classifier})         & wide\_deep        & 0.7061 & 0.6256 & 0.6526 & 0.2183 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Phase 2 --- tuning the winning \texttt{embeddings} topology, an
+  embed\_dim$\times$\texttt{lr} grid (hidden $[128,64]$, other params held),
+  sorted by AUC; winner bolded, best cell per metric bolded. AUC is
+  monotone-decreasing in embed\_dim at lr \num{5e-4} (the table is already
+  saturated at width 8), and lr \num{5e-4} beats lr \num{1e-3} at every width.
+  The best gain over the Phase-1 winner ($+0.0036$) is sub-band, so the Phase-1
+  config is the config of record.}
+  \label{tab:highvocab-tune}
+  \begin{tabular}{llcccc}
+    \toprule
+    embed\_dim & lr & AUC & log-loss & accuracy & Brier \\
+    \midrule
+    \best{8}  & \best{0.0005} & \best{0.7228} & 0.6105 & 0.6645 & 0.2114 \\
+    16        & 0.0005        & 0.7210 & \best{0.6088} & \best{0.6711} & \best{0.2108} \\
+    32        & 0.0005        & 0.7200 & 0.6100 & 0.6657 & 0.2114 \\
+    8         & 0.001         & 0.7193 & 0.6092 & 0.6643 & 0.2112 \\
+    16        & 0.001         & 0.7192 & 0.6087 & 0.6666 & 0.2110 \\
+    32        & 0.001         & 0.7183 & 0.6097 & 0.6668 & 0.2114 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{burn_highvocab}
+  \caption{Identity resolution closes the ANN-pitfalls thread. \emph{Left:} the
+  paired \texttt{embeddings}-versus-\texttt{mlp} comparison across the two
+  cardinalities. On the 60/40 matrix \texttt{mlp} wins by $+0.0067$; on the
+  high-vocab matrix \texttt{embeddings} wins by $+0.0063$ --- a $+0.0130$ swing
+  that reverses the ranking and confirms the starvation diagnosis: with artist
+  cardinality $5\times$ and genre $3\times$ larger the embedding table finally
+  has enough distinct identities to learn a useful low-rank geometry instead of
+  collapsing near-constant. \emph{Right:} the five-family in-dataset AUC ranking
+  on the high-vocab matrix. The saved \texttt{embeddings} net (\num{0.7192})
+  reaches the bottom of the tree tier (shaded: from a band below \texttt{catboost}
+  up to \texttt{xgboost}) --- the first ANN to do so --- while \texttt{xgboost}
+  (\num{0.7299}) remains the in-dataset leader.}
+  \label{fig:burn-highvocab}
+\end{figure}
+
+\emph{Interpretation.} This resolves Section~\ref{sec:anns-burn}'s open question
+\emph{confirmed}: the embedding topology's earlier loss was a starvation
+artifact of low cardinality, not an intrinsic limit, and raising the caps flips
+the ranking exactly as predicted. Two honest caveats keep the claim calibrated.
+First, the single-split emb-vs-mlp margin ($+0.0063$) is itself sub-band, so the
+\emph{magnitude} of the reversal needs a 3-split confirm; what is decisive is
+the \emph{direction} --- the whole ranking reordered, with the embedding arm
+moving from the bottom of the 60/40 ranking to the top of this one. Second, high
+vocab helps \emph{everyone}: the trees gained as much as (catboost) or more than
+the embedding arm, so the correct reading is ``higher resolution is better
+signal for every family, and it specifically unlocks the embedding topology'',
+not ``embeddings now win outright'' --- \texttt{xgboost} at \num{0.7299} is still
+the in-dataset leader, $\sim$\num{0.0107} ($\sim$1 band) above the saved net.
+But the qualitative arc that ran through Section~\ref{sec:anns} now closes
+cleanly: a dense net that consumes raw one-hots is calibrated in the tree regime
+(Section~\ref{sec:anns-burn}), and given \emph{enough} identity resolution its
+embedding topology reaches the tree tier --- the standing ``identity resolution
+is the lever'' lever, demonstrated. Logloss ($\sim$0.61) and Brier ($\sim$0.21)
+stay in the trees' calibrated regime throughout, so there is no calibration
+penalty for the win. One data-hygiene note: the high-vocab manifest's redundancy
+report flags 21 near-perfect genre$\leftrightarrow$artist one-hot collinearities
+(e.g.\ \texttt{genre\_primary=australian psych} $\equiv$ \texttt{artist=Tame
+Impala}, correlation \num{1.000}; 19 more $\ge\num{0.957}$), an artifact of
+admitting rare genres carried by a single newly-admitted artist; the trees and
+the net's regularizers absorb it with no observed run pathology, but it is worth
+knowing before reading individual one-hot importances on this matrix. The saved
+\texttt{burn-deep-embeddings-highvocab} is flagged for best-model-selector as
+the first tree-tier ANN and a natural family-diversity candidate.
+\emph{Source: \texttt{2026-06-12-high-vocab-topology.md}.}
+
+\subsection{A second representation-aware net: the AE-transplant confirms the ceiling}
+\label{sec:anns-ae}
+\emph{Rationale.} Section~\ref{sec:anns-burn} established that a net which keeps
+the identity one-hots \emph{raw} is calibrated in the tree regime yet still caps
+$\sim$1 band below the trees. A natural next question is whether a \emph{learned
+unsupervised representation} of the same inputs --- rather than the raw inputs
+themselves --- lifts the net further. The \texttt{burn-ae-classifier} tests it:
+Phase 1 pretrains an autoencoder to reconstruct the full assembled feature
+vector (standardized continuous block beside the raw one-hots, $D{=}177$) by
+MSE, Phase 2 transplants the encoder into a softmax classifier and fine-tunes.
+This campaign is the family's first characterization --- a 13-config scan on the
+60/40 full-64-d matrix (\dsid{ds-20260609-204419-p64-s42}, seed 42) over latent
+size, head depth/width, activation, and the \texttt{freeze\_encoder} flag, read
+against the in-corpus xgboost champion (\num{0.7204}) and the comparable
+\texttt{burn-deep} \texttt{mlp} (\num{0.7038}).
+
+\emph{Results.} \textbf{Capacity does not matter for this family on rotation}
+(Table~\ref{tab:burn-ae}; Figure~\ref{fig:burn-ae}). The 12 fine-tuned configs
+span a single \num{0.0054}-wide strip (\num{0.69175}--\num{0.69719}), entirely
+inside the $2\sigma=0.0126$ band --- a flat tie across a $4\times$ latent range
+(32 to 128), across head depth and width, and across activation. The nominal
+best (cfg3, enc$[128,64]$/clf$[128,64]$, AUC \num{0.69719}) beats the
+\num{0.69225} baseline by only $+0.00494$ (sub-band), and even the bare linear
+probe (cfg2, clf$[]$, \num{0.69175}) is only $-0.00544$ below it: a single linear
+layer on the fine-tuned latent already captures essentially all the family's
+skill. The one out-of-band effect is a \emph{trap}: freezing the MSE-pretrained
+encoder is safe under a shallow head (cfg11, \num{0.69530}, in-band) but
+\emph{collapses} under a deep head (cfg10, \num{0.68210}, $-0.0151$ $\approx$
+1.2 bands, the worst row). relu edges gelu and silu by a sub-band margin.
+Calibration is healthy throughout (log-loss $\sim$0.62, Brier $\sim$0.22 --- the
+trees' regime), so this is a legitimate calibrated dense member, just not an AUC
+contender: the best config sits $\sim$1.8 bands below \texttt{xgboost} and is
+\emph{statistically equal} to the plain \texttt{burn-deep} \texttt{mlp}
+($-0.0066$, sub-band). No definition was saved.
+
+\begin{table}[ht]
+  \centering
+  \caption{The \texttt{burn-ae-classifier} capacity + head-architecture scan
+  (\dsid{ds-20260609-204419-p64-s42}, seed 42; held: ae\_epochs 80, ae\_lr
+  \num{1e-3}, epochs 200, lr \num{1e-3}, dropout 0.1, patience 25). All 13 runs
+  succeeded. AUC and accuracy higher-better; log-loss lower-better. Winner
+  (cfg3) and best cell per metric bolded; the frozen-deep-head collapse (cfg10)
+  is the only out-of-band row. Sorted by AUC.}
+  \label{tab:burn-ae}
+  {\small\begin{tabular}{@{}p{3.3cm}p{5.0cm}ccc@{}}
+    \toprule
+    Run id & enc / clf / freeze / act & AUC & log-loss & acc \\
+    \midrule
+    \best{\runid{run-20260615-152359-21f11-burn-ae-classifier}} & \best{[128,64] / [128,64] / ft / relu} & \best{0.69719} & \best{0.6216} & \best{0.6496} \\
+    \runid{run-20260615-152359-05bce-burn-ae-classifier} & [256,128] / [128] / ft / relu   & 0.69712 & 0.6254 & 0.6485 \\
+    \runid{run-20260615-152359-e5a75-burn-ae-classifier} & [128,32] / [64] / ft / relu     & 0.69657 & 0.6246 & 0.6451 \\
+    \runid{run-20260615-152359-94f8f-burn-ae-classifier} & [128,64] / [64] / ft / relu (baseline re-run) & 0.69645 & 0.6264 & 0.6496 \\
+    \runid{run-20260615-152359-7a459-burn-ae-classifier} & [128,64] / [256,128] / ft / relu & 0.69561 & 0.6235 & 0.6434 \\
+    \runid{run-20260615-152359-cb93b-burn-ae-classifier} & [384,192] / [192,96] / ft / relu & 0.69541 & 0.6224 & 0.6426 \\
+    \runid{run-20260615-160112-aa1db-burn-ae-classifier} & [256,128] / [128] / \emph{frozen} / relu & 0.69530 & 0.6242 & 0.6409 \\
+    \runid{run-20260615-160112-4a764-burn-ae-classifier} & [128,64] / [128,64] / ft / gelu & 0.69340 & 0.6256 & 0.6411 \\
+    \runid{run-20260615-152359-3b006-burn-ae-classifier} & [256,128,64] / [64] / ft / relu & 0.69302 & 0.6279 & 0.6481 \\
+    \runid{run-20260615-160113-7567b-burn-ae-classifier} & [128,64] / [128,64] / ft / silu & 0.69242 & 0.6230 & 0.6436 \\
+    \runid{run-20260615-152359-86fd5-burn-ae-classifier} & [256,128] / [256,128] / ft / relu & 0.69240 & 0.6275 & 0.6392 \\
+    \runid{run-20260615-152359-dbb6a-burn-ae-classifier} & [128,64] / [] (linear probe) / ft / relu & 0.69175 & 0.6282 & 0.6405 \\
+    \runid{run-20260615-160112-17da7-burn-ae-classifier} & [128,64] / [128,64] / \emph{frozen} / relu (collapse) & 0.68210 & 0.6378 & 0.6373 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{burn_ae_capacity}
+  \caption{The AE-transplant net confirms the dense-net ceiling on two axes.
+  \emph{Left:} the 12 fine-tuned configs collapse onto a single
+  \num{0.0054}-wide strip inside the noise band, far below the comparable
+  \texttt{burn-deep} \texttt{mlp} (dashed, \num{0.7038}) and the xgboost
+  champion (green, \num{0.7204}) --- latent size, head depth/width and
+  activation are all spent levers; capacity is saturated at the smallest config
+  tested. \emph{Right:} the one real effect. Freezing the MSE-pretrained encoder
+  is safe under a (near-)linear head (cfg11, in-band) but \emph{collapses} the
+  model under a deep head (cfg10, $-0.0151 \approx 1.2$ bands): a deep head
+  stacked on a frozen, task-agnostic representation just underfits the label,
+  because the gradients that would have re-shaped the encoder toward the target
+  are blocked. End-to-end fine-tuning (the registry default) avoids the trap.}
+  \label{fig:burn-ae}
+\end{figure}
+
+\emph{Interpretation.} The AE pretrain buys a fast, stable init but \emph{no
+AUC} over a from-scratch raw-one-hot net: because the reconstruction objective
+is purely descriptive (MSE on the assembled vector), the latent it hands the
+classifier is task-agnostic, and no amount of encoder/latent/head capacity turns
+it into tree-tier ranking power. This is the same ``a learned representation
+downstream of the identity one-hots adds nothing the trees do not already
+have'' lesson --- the AE-latent dilution of Section~\ref{sec:ae-blend} and the
+entity-embedding starvation of Section~\ref{sec:anns-burn} --- now reproduced in
+a third dense family. The freeze-collapse is a citable pitfall: an MSE-optimal
+feature extractor is not label-optimal, so a deep head over a frozen encoder
+stacks unhelpful capacity and underfits. If the family is ever revisited the
+lever is the pretraining \emph{objective} (supervised or contrastive), not its
+size. The family is closed for AUC on rotation as configured.
+\emph{Source: \texttt{2026-06-15-burn-ae-classifier-capacity-scan.md}.}
+
+\subsection{Refuted: a GBDT-leaf-embedding head cannot recover the tree that generated its features}
+\label{sec:leaf-head}
+\emph{Rationale.} The ANN thread above closed on a clean lesson --- a learned
+representation fed downstream of the identity one-hots does not buy ranking
+power the trees do not already have (the AE-latent dilution of
+Section~\ref{sec:ae-blend}; entity embeddings starved unless cardinality is
+high, Section~\ref{sec:anns-burn}). This campaign stress-tests that lesson at
+its hardest point with the classic Facebook GBDT$\to$LR trick, generalized to
+GBDT$\to$MLP. The frozen champion tree --- the registered
+\texttt{xgboost-classifier-rotation-p64} config, \emph{hard-frozen}, not a
+tunable --- emits, for each row, the index of the leaf it falls into in every
+one of its 500 boosted trees; those indices are one-hot-encoded into the tree's
+own learned axis-aligned partition ($\sim$10k leaf-membership columns), and a
+fresh head (an $\ell_2$-logistic linear head, or a shallow MLP) is trained on
+top. The input to the head is thus the tree's \emph{own} partition; the
+hypothesis --- a seventh test of the convergent finding --- was that even this
+would \emph{not} beat the bare tree, the expected refutation being the citable
+finding. All arms ran on the 60/40 full-64-d matrix
+(\dsid{ds-20260609-204419-p64-s42}, seed 42); the only valid reference is the
+in-dataset \num{0.7204} champion, never the \num{0.7429} DS-META or
+\num{0.7299} high-vocab numbers (different matrices).
+
+\emph{Results.} Refuted exactly as predicted (Table~\ref{tab:leaf-head};
+Figure~\ref{fig:leaf-head}). The control C0
+(\runid{run-20260615-151551-f2911-xgboost-classifier}) reproduced the champion
+to all 16 digits (\num{0.7204383403100314}), so the determinism gate passed and
+the treatments are interpretable. Every head then capped \emph{below} the bare
+tree by more than one noise band: GBDT$\to$linear at AUC \num{0.6978}
+($-0.0227$, $\sim$1.8 bands), GBDT$\to$MLP$[256,128]$ at \num{0.6921}
+($\sim$2.2 bands), GBDT$\to$MLP$[128]$ at \num{0.6897} ($\sim$2.4 bands) --- the
+best of them is itself \num{0.0100} below the refutation threshold
+(champion $-$ band $=$ \num{0.7078}). The in-band-tie branch (which would have
+fired a 3-seed spot-check) and the win branch ($>\num{0.7330}$) never triggered;
+no definition was saved. The linear head --- the literal Facebook recipe --- is
+the best of the three, and adding MLP capacity over the leaf one-hots does not
+recover the tree, consistent with the recipe's original framing as a cheap
+\emph{linear} trick. Worse than the AUC deficit, \emph{every head is badly
+mis-calibrated}: log-loss \num{0.8162}--\num{1.3119} and Brier
+\num{0.2603}--\num{0.2951} against the tree's \num{0.6075} / \num{0.2109}. The
+$\ell_2$-logistic head at the default inverse-$C{=}1$ is under-regularized over
+$\sim$10k sparse leaf indicators --- it drives a handful of leaf weights to
+large magnitudes and emits over-confident probabilities, the same
+sklearn-pyramid over-confidence signature (log-loss far above the trees' while
+AUC is only modestly behind) seen in Section~\ref{sec:anns-signature}, and a
+calibration red flag for best-model-selector should any of these runs ever be
+considered for the group.
+
+\begin{table}[ht]
+  \centering
+  \caption{The GBDT-leaf-head ceiling probe
+  (\dsid{ds-20260609-204419-p64-s42}, seed 42; the leaf-emitting GBDT is the
+  frozen champion config in every treatment, only the head varies). All four
+  runs succeeded. AUC higher-better; log-loss and Brier lower-better. Control
+  (winner) bolded; best cell per metric bolded; treatment rows sorted by AUC.
+  Refutation threshold (champion $-2\sigma$) $=\num{0.7078}$: every head is
+  below it.}
+  \label{tab:leaf-head}
+  \begin{tabular}{llcccc}
+    \toprule
+    Arm / run id & Head & AUC & log-loss & accuracy & Brier \\
+    \midrule
+    \best{C0} (\runid{run-20260615-151551-f2911-xgboost-classifier}) & \best{bare tree (champion)} & \best{0.7204} & \best{0.6075} & \best{0.6585} & \best{0.2109} \\
+    T1 (\runid{run-20260615-151551-b4db5-gbdt-leaf-head-classifier}) & linear ($\ell_2$ logistic, l2 1.0) & 0.6978 & 1.3119 & 0.6441 & 0.2944 \\
+    T3 (\runid{run-20260615-151551-44b1d-gbdt-leaf-head-classifier}) & mlp $[256,128]$, head\_lr \num{1e-3} & 0.6921 & 1.1813 & 0.6396 & 0.2951 \\
+    T2 (\runid{run-20260615-151551-9d655-gbdt-leaf-head-classifier}) & mlp $[128]$, head\_lr \num{1e-3} & 0.6897 & 0.8162 & 0.6356 & 0.2603 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{leaf_head_ceiling}
+  \caption{The leaf-embedding stack is refuted on both axes. \emph{Left:} every
+  GBDT$\to$head arm caps below the bare champion tree on AUC --- the best
+  (GBDT$\to$linear, \num{0.6978}) is itself a full band below the refutation
+  threshold (the dashed line at champion $-2\sigma=\num{0.7078}$; the shaded
+  strip is the band). \emph{Right:} and every head is mis-calibrated, with
+  log-loss \num{0.82}--\num{1.31} far above the tree regime (\num{0.61}, dotted)
+  and past the random base-rate baseline (\num{0.69}, dashed) for the two
+  worst. Learning a head over the tree's own one-hot leaf indices is strictly
+  lossier than reading the tree's leaf-value sums directly.}
+  \label{fig:leaf-head}
+\end{figure}
+
+\emph{Interpretation.} The refutation is decisive and mechanistic. The tree's
+additive leaf-value scoring already weights every leaf \emph{jointly} across 500
+boosting rounds with shrinkage; re-encoding those leaves as one-hot membership
+indicators and fitting a head \emph{post-hoc} discards the boosting structure
+and re-estimates it worse. The leaf one-hots are a strictly lossier view of a
+tree that already scores better directly --- the dense head cannot even recover
+the tree that generated its own features. This is the same family as the
+AE-latent dilution (Section~\ref{sec:ae-blend}) and the dense-head ceiling
+(Section~\ref{sec:anns}), pushed to its limit: here the head's \emph{input} is
+the tree's optimal partition, and it still caps $\sim$2 bands below. Re-tuning
+the head regularization could tame the over-confidence but cannot close an
+$\sim$1.8-band AUC deficit, so the leaf-head family is closed for rotation. This
+is the seventh convergent confirmation that the durable lever is identity
+\emph{resolution} (raising vocab caps, which already lifted xgboost to
+\num{0.7299} on the high-vocab matrix), not new heads or representations layered
+on the tree.
+\emph{Source: \texttt{2026-06-15-gbdt-leaf-head-ceiling-probe.md}.}
+
+\subsection{The identity-resolution vocab-cap scan: a largely-spent lever}
+\label{sec:vocab-cap}
+\emph{Rationale.} Every campaign above closes on the same standing lever ---
+identity \emph{resolution}: raising the artist/genre vocabulary caps so the
+\texttt{\_\_other\_\_} tail gets real one-hot columns, which already lifted
+xgboost from \num{0.7204} (60/40) to \num{0.7299} (300/120,
+Section~\ref{sec:anns-highvocab}) and flipped the embedding net into the tree
+tier. But only \emph{two} points existed on that cap$\to$AUC curve, and the
+high end was the in-lineage record. This campaign maps where the lever stops
+paying. It holds the registered champion \texttt{xgboost-classifier-rotation-p64}
+config \emph{frozen} (\texttt{catboost} defaults as a secondary arm), holds
+\emph{everything else} fixed --- same \num{23529}-row corpus, same split seed 42
+(\num{18823} train / \num{4706} test), same PCA64, same field block --- and
+moves the \emph{single} axis \texttt{vocab\_top\_n}, adding three higher-cap
+points: 500/200 (777 cols), 1000/300 (1377 cols) and the full vocabulary,
+5594/962 (6633 cols). The hypothesis to discriminate: \emph{saturation} (gain
+per step $<$ one band) versus \emph{reversal} (AUC drops as singleton-artist
+columns inject memorizable variance).
+
+\emph{Results.} All eight launched runs succeeded; the controls reproduced both
+anchors to four digits (60/40 xgboost \num{0.72044} versus reference
+\num{0.7204}, $\Delta+0.00004$; 300/120 xgboost \num{0.72988} versus
+\num{0.7299}, $\Delta-0.00002$), so the whole curve sits under one consistent
+measurement (Table~\ref{tab:vocab-cap}; Figure~\ref{fig:vocab-cap}). xgboost
+rose to a new in-lineage single-split best of \textbf{\num{0.73490}} at 1000/300
+(\runid{run-20260615-163803-e75be-xgboost-classifier}), but the step structure
+tells the real story: the jump $60\to300$ was $+0.00944$ ($+0.75$ band), then
+$300\to500$ was \emph{flat} ($-0.00022$, within noise) and $500\to1000$ was
+$+0.00524$ ($+0.42$ band). The best point is only $+0.00502$ ($\sim$0.40 band)
+over the 0.7299 anchor --- a \emph{sub-band} improvement, well short of the
+$+0.0126$ a confident beat would require. \texttt{catboost} tracks xgboost
+qualitatively at every cap (\num{0.71105}$\to$\num{0.72516}$\to$\num{0.72372}%
+$\to$\num{0.72633}), staying $\sim$0.005--0.009 below it throughout and rising
+just as gently after 300/120 --- its native categorical handling does
+\emph{not} scale better at high cardinality. The top-of-curve all-vocab point
+(6633 cols) \textbf{could not be built}: two POST attempts each returned a
+build id but died mid-materialization against the host memory ceiling
+($\sim$2.3 GB free of 15 GB under concurrent load), leaving no dataset and no
+artifacts. That is an infrastructure ceiling, \emph{not} a modeling result, and
+the curve's top end is recorded as unmeasured.
+
+\begin{table}[ht]
+  \centering
+  \caption{The vocab-cap scan on the bare GBDT
+  (frozen champion xgboost config; \texttt{catboost} defaults; the only axis is
+  \texttt{vocab\_top\_n}, all else byte-identical to the 300/120 anchor: same
+  \num{23529} rows, split seed 42, PCA64, field block). Sorted by artist/genre
+  cap. AUC higher-better; log-loss and Brier lower-better. The new in-lineage
+  single-split best run is bolded; best cell per metric bolded. The all-vocab
+  row is the failed build (host memory ceiling, two attempts), recorded as an
+  infrastructure failure, not a result. AUC band $2\sigma\approx 0.0126$.}
+  \label{tab:vocab-cap}
+  \begin{tabular}{lllccccl}
+    \toprule
+    Run id & cap & cols & model & AUC & log-loss & Brier & Note \\
+    \midrule
+    \runid{run-20260615-163751-de9a4-xgboost-classifier} & 60/40    & 177  & xgb & 0.72044 & 0.60754 & 0.21087 & control \\
+    \runid{run-20260615-163803-3391f-catboost-classifier} & 60/40   & 177  & cat & 0.71105 & 0.61324 & 0.21316 & control \\
+    \runid{run-20260615-163803-536d5-xgboost-classifier} & 300/120  & 497  & xgb & 0.72988 & 0.60223 & 0.20803 & anchor \\
+    \runid{run-20260615-163803-6f170-catboost-classifier} & 300/120 & 497  & cat & 0.72516 & 0.60681 & 0.20994 & anchor \\
+    \runid{run-20260615-163803-1a0ba-xgboost-classifier} & 500/200  & 777  & xgb & 0.72966 & 0.60392 & 0.20856 & flat ($-0.00022$) \\
+    \runid{run-20260615-163803-1fae3-catboost-classifier} & 500/200 & 777  & cat & 0.72372 & 0.60894 & 0.21068 & dips below own 300/120 \\
+    \best{\runid{run-20260615-163803-e75be-xgboost-classifier}} & \best{1000/300} & \best{1377} & \best{xgb} & \best{0.73490} & \best{0.60070} & \best{0.20700} & \best{new in-lineage best (sub-band)} \\
+    \runid{run-20260615-163803-9ed65-catboost-classifier} & 1000/300 & 1377 & cat & 0.72633 & 0.60931 & 0.21068 & catboost best on its curve \\
+    (build failed) & all 5594/962 & 6633 & --- & --- & --- & --- & NOT built (memory ceiling) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{vocab_cap_scan}
+  \caption{The identity-resolution lever is largely spent. Holding the frozen
+  champion config and moving only the artist/genre one-hot cap, the cap$\to$AUC
+  curve climbs sharply on the first jump ($60/40\to300/120$, $+0.75$ band) and
+  then \emph{plateaus}: $300\to500$ is flat ($-0.00022$, within noise) and
+  $500\to1000$ recovers only $+0.42$ band, so the new in-lineage single-split
+  best (\num{0.73490} at 1000/300) clears the 300/120 anchor by just $+0.00502$
+  ($\sim$0.40 band, inside the shaded $+2\sigma$ envelope and so a \emph{sub-band}
+  improvement). \texttt{catboost} (dashed) tracks xgboost at every cap, $\sim$%
+  0.005--0.009 below --- native categorical handling buys no high-cardinality
+  edge. The full-vocabulary point (6633 cols, red $\times$) is \emph{unmeasured}:
+  its build hit a host memory ceiling on both attempts, an infrastructure
+  failure rather than a modeling result.}
+  \label{fig:vocab-cap}
+\end{figure}
+
+\emph{Interpretation.} The verdict is a clean ``not saturated, not reversed,
+but diminishing.'' No interior point fell a full band below the anchor (the
+lowest, 500/200, is $-0.00022$), so the reversal hypothesis does not fire ---
+the singleton-artist columns at high cardinality do \emph{not} hurt the tree,
+consistent with the project's no-blow-up prior that axis-aligned splits tolerate
+collinear, mostly-zero one-hots by simply not splitting on the useless ones. But
+the gains past the first jump are all sub-band and wobble up and down inside the
+$2\sigma=0.0126$ envelope: the curve past 300/120 is better read as a flat
+plateau with single-split jitter than as a monotone climb, which is exactly why
+the decision rule guards a save behind a $\ge$1-band beat plus a 3-seed confirm.
+The best point's $+0.00502$ is in the ``likely better, needs confirmation''
+window, so \textbf{the 3-seed confirm did not fire and no definition was saved};
+the cross-matrix DS-META champion (\num{0.7429}) holds rank 1 unchanged, and the
+1000/300 point auto-promoted to best-models rank 3 without displacing any
+registered model. The honest read for future work: raw vocab-cap \emph{height}
+is a largely-spent lever on this corpus --- the big payoff was the first jump,
+already on record. The catboost agreement seals it: two independent tree
+families say the marginal columns past 300/120 carry little independent signal.
+The residual rotation signal is the behavioral/contextual part no
+song-metadata cardinality can capture, so identity work should pivot from
+bigger caps to resolution \emph{quality} --- artist-followers / popularity
+interactions, genre hierarchy --- and the standing ``identity resolution is the
+lever'' guidance should now read ``weak and plateauing past 300/120, with the
+top end still unmeasured pending a wide build on a quiescent host.''
+\emph{Source: \texttt{2026-06-15-vocab-cap-scan-gbdt.md}.}
+
+\subsection{Reading the nets: per-model sparse autoencoders}
+\label{sec:anns-sae}
+\emph{Rationale.} Every result so far has been read off the leaderboard --- AUC,
+log-loss, Brier. But two nets can post identical AUC while carving the input
+into very different internal representations, a distinction the leaderboard
+cannot see. This campaign opens that box. It first ports a \emph{per-model
+sparse autoencoder} (\texttt{POST /api/interp/model-sae}) into the
+\texttt{burn-deep-classifier} family (the SAE head previously existed only for a
+regressor), so that promotion now auto-queues an interpretability read: a
+$2\times$-overcomplete SAE (l1 \num{0.0015}, 40 epochs) is fit on each hidden
+layer's activations, its atoms are probed for interpretable \emph{concepts}, and
+the linear \emph{decodability} of rotation is measured layer by layer. The first
+use compares two geometries at fixed AUC on the canonical full-64-d matrix
+(\dsid{ds-20260609-204419-p64-s42}, seed 42): a tapering \texttt{pyramid}
+$[256,128,64]$ against a uniform \texttt{rect} $[128,128,128]$, differing
+\emph{only} in hidden shape.
+
+\emph{Results.} The two nets are \textbf{statistically tied} on AUC (pyramid
+\num{0.69857}, rect \num{0.69937}; $\Delta\num{0.0008}\ll$ band) --- both in the
+on-record \texttt{burn-deep} \texttt{mlp} tier and $\sim$1.7 bands below the
+xgboost champion. They also capture the \emph{same amount} of decodable signal:
+linear decodability of rotation barely lifts above the raw input ($\sim$0.111
+$\to\sim$0.12) for both. The difference is purely in \emph{layout}
+(Figure~\ref{fig:sae-pyramid-rect}). The pyramid's interpretable concepts peak
+in its middle 128-d layer (72) and then compress $\sim$40\% out at the 64-d
+bottleneck (42); the uniform net spreads them more evenly and \emph{retains}
+more to the end ($17\to66\to54$), because it has the width to. Neither net is
+starved --- both fully utilize every SAE atom (0 dead / 0 rare), give
+essentially every identity segment ($\sim$103--105/105) a dedicated separating
+atom, and reconstruct $>96\%$ of activation variance --- so the concept-count
+gap is genuine allocation, not capacity. A no-early-stop control confirmed a
+registered pitfall: run to the full 100 epochs with patience 0, both 3-layer
+nets overfit (AUC $-\num{0.015}$, log-loss blows to \num{0.96}--\num{1.22}); the
+$\sim$0.699 / 0.625 calibrated regime is recovered only \emph{because} the
+production runs early-stop. \textbf{Deeper \texttt{burn-deep} nets need
+patience.}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.72\textwidth]{sae_pyramid_rect}
+  \caption{At equal AUC, two geometries lay out the same signal differently ---
+  a representational difference invisible to the leaderboard. The tapering
+  \texttt{pyramid} $[256,128,64]$ (blue) peaks its SAE-interpretable concepts in
+  the middle 128-d layer (72) and squeezes $\sim$40\% of them out at the 64-d
+  neck (42); the uniform \texttt{rect} $[128,128,128]$ (grey) spreads its
+  concepts and retains more to the output layer ($17\to66\to54$). Both nets
+  fully utilize every atom and decode rotation to the same $\sim$0.12 ceiling,
+  so the pyramid \emph{consolidates} its interpretable structure into a
+  compressed bottleneck while the uniform net keeps a broader concept set ---
+  same AUC, different allocation.}
+  \label{fig:sae-pyramid-rect}
+\end{figure}
+
+\emph{Interpretation.} At equal ranking power the pyramid consolidates its
+interpretable structure into a narrowing bottleneck while the uniform net
+distributes it, and both merely re-express the raw input's $\sim$0.11
+decodability rather than manufacturing new taste signal. The SAE thus confirms,
+mechanistically, what the leaderboard only implies: the dense nets are not
+finding structure the trees miss; they are re-packaging the same identity signal
+in a representation that AUC cannot distinguish. This ``same signal, different
+allocation'' pattern recurs across families at higher vocab
+(Section~\ref{sec:anns-capacity}). \emph{Source:
+\texttt{2026-07-12-pyramid-vs-rect-sae.md}.}
+
+\subsection{Capacity is a spent lever at high vocab, and what the SAE sees}
+\label{sec:anns-capacity}
+\emph{Rationale.} The high-vocab matrix (Section~\ref{sec:anns-highvocab}) was
+where the embedding net first reached the tree tier, but it was never
+depth/width-tuned. This campaign asks the direct question: does \emph{capacity}
+--- width or depth --- lift the ANN family across the remaining $\sim$0.2--0.6
+band gap to the trees on that matrix (\dsid{ds-20260612-143014-p64-s42}, 497
+cols)? Two one-axis geometry ladders, lr held at each topology's on-record best:
+an \texttt{embeddings} ladder (ed8, lr \num{5e-4}) and an \texttt{mlp} ladder
+(lr \num{1e-3}), each stepping $[128,64]$ (control) $\to[256,128]$ (wider)
+$\to[256,128,64]$ (deeper). Each promoted arm also gets the per-model SAE of
+Section~\ref{sec:anns-sae}, for a cross-family representation read at high vocab.
+
+\emph{Results.} \textbf{CEILING --- capacity is saturated for both topologies}
+(Table~\ref{tab:highvocab-capacity}; Figure~\ref{fig:highvocab-capacity}).
+Neither widening nor deepening beats its own $[128,64]$ control by more than one
+band; the best config stays the on-record \texttt{embeddings}
+ed8/lr\num{5e-4}/$[128,64]$ (reproduced here at \num{0.72274}, $\Delta$
+$-\num{0.0001}$). Deepening \texttt{embeddings} to three layers actively
+\emph{hurts} ($-\num{0.0152}\approx$ 1.2 bands, the only out-of-band move);
+deepening \texttt{mlp} helps a sub-band touch ($+\num{0.0057}$). Crucially, the
+best \texttt{mlp} (B6, \num{0.71800}) closes to within $+\num{0.0047}$ of the
+best \texttt{embeddings} (B1, \num{0.72274}): at their best geometries the two
+topologies tie within a band, so \textbf{capacity, not the embeddings mechanism,
+was the lever} --- the earlier ``embeddings wins at high vocab'' reading is an
+in-band tie, and the ANN family remains $\sim$0.2--0.6 band below the tree tier
+(catboost \num{0.7252}, xgboost \num{0.7299}). The saved
+\texttt{burn-deep-embeddings-highvocab} definition and the champion are both
+unchanged; the best arm was promoted for the record as
+\texttt{emb-128-64-ed8-highvocab}.
+
+\begin{table}[ht]
+  \centering
+  \caption{The \texttt{burn-deep-classifier} capacity scan on the high-vocab
+  matrix (\dsid{ds-20260612-143014-p64-s42}, 497 cols; \texttt{activation=relu},
+  dropout 0.1, epochs 250, patience 20; only the hidden geometry varies within a
+  topology). All six succeeded. AUC and accuracy higher-better; log-loss and
+  Brier lower-better. Winner (B1) and best cell per metric bolded; sorted by
+  AUC. The deep \texttt{embeddings} arm (B3) is the only out-of-band move.}
+  \label{tab:highvocab-capacity}
+  {\small\begin{tabular}{@{}p{3.3cm}p{2.9cm}cccc@{}}
+    \toprule
+    Run id & topology / hidden & AUC & log-loss & acc & Brier \\
+    \midrule
+    \best{\runid{run-20260712-171008-065bd-burn-deep-classifier}} & \best{embeddings / [128,64]} & \best{0.72274} & \best{0.61043} & 0.66426 & \best{0.21140} \\
+    \runid{run-20260712-171008-7c302-burn-deep-classifier} & mlp / [256,128,64]  & 0.71800 & 0.61266 & 0.66065 & 0.21276 \\
+    \runid{run-20260712-171008-cf746-burn-deep-classifier} & embeddings / [256,128] & 0.71798 & 0.61323 & 0.66511 & 0.21246 \\
+    \runid{run-20260712-171008-fc3e0-burn-deep-classifier} & mlp / [256,128]     & 0.71576 & 0.61220 & \best{0.66638} & 0.21249 \\
+    \runid{run-20260712-171008-c093f-burn-deep-classifier} & mlp / [128,64]      & 0.71229 & 0.61694 & 0.65852 & 0.21447 \\
+    \runid{run-20260712-171008-786b4-burn-deep-classifier} & embeddings / [256,128,64] & 0.70750 & 0.61671 & 0.66001 & 0.21444 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{highvocab_capacity}
+  \caption{Capacity is a spent lever for the dense net at high vocab. Holding lr
+  at each topology's best and stepping the hidden geometry
+  $[128,64]\to[256,128]\to[256,128,64]$, neither the \texttt{embeddings} (blue)
+  nor the \texttt{mlp} (grey) ladder clears its own control by a band; a third
+  \texttt{embeddings} layer \emph{hurts} by \num{0.0152} ($\sim$1.2 bands, the
+  only out-of-band move), because the extra depth dilutes an already
+  weaker-conditioned learned entity-embedding input. The best \texttt{mlp} closes
+  to within $+\num{0.0047}$ of the best \texttt{embeddings}, so the two families
+  tie within a band --- capacity, not the embeddings mechanism, was the lever ---
+  and the whole ANN tier stays $\sim$0.2--0.6 band below the in-dataset tree
+  tier (shaded, catboost \num{0.7252} up to xgboost \num{0.7299}).}
+  \label{fig:highvocab-capacity}
+\end{figure}
+
+\emph{Interpretation.} The per-model SAE explains \emph{why} both moves fail.
+The AUC-tied cross-family pair --- \texttt{embeddings} $[128,64]$ (\num{0.72274})
+and \texttt{mlp} $[256,128,64]$ (\num{0.71800}) --- plateau at the \emph{same}
+decodability ceiling (peak layer test $R^2_{\text{target}}$ \num{0.149} versus
+\num{0.141}) and both give all 245 identity segments a dedicated separating
+atom; the difference is layout only. The winner reaches the ceiling with few,
+monotonically-built concepts ($33\to75$, $\Sigma108$), while the deeper/wider
+\texttt{mlp} forms nearly $2\times$ the concepts ($55\to113\to32$, $\Sigma200$)
+that peak in its middle layer and \emph{collapse} through its neck --- the same
+consolidation-versus-proliferation pattern of Section~\ref{sec:anns-sae}, now
+reproduced across families and invisible to AUC. And the $-\num{0.0152}$
+deep-embeddings penalty is dilution, not starvation: that arm has 0 dead atoms
+and full utilization but a weaker learned entity-embedding \emph{input}
+($R^2_{\text{target}}$ \num{0.123} versus the winner's \num{0.133}), and its
+extra depth never recovers it (decodability dips mid-trunk). This is the
+mechanistic face of the capacity ceiling: a third layer over a learned embedding
+table dilutes ranking rather than sharpening it. Both this scan and the GBDT
+vocab-cap scan (Section~\ref{sec:vocab-cap}) point the same way --- identity
+\emph{resolution quality}, not the raw capacity of the model or the vocabulary,
+is the remaining lever. \emph{Source:
+\texttt{2026-07-12-high-vocab-capacity-scan.md}.}
+
+\section{Taste drift: the leaderboard is an upper bound on forward prediction}
+\label{sec:drift}
+\emph{Rationale.} Every AUC in this document is measured on a \emph{random}
+train/test split, which lets a track discovered in a given period land on both
+sides of the split. That answers ``can the model rank tracks from the same era
+as its training data?'' --- but the deployed question is forward-looking:
+\emph{will I replay a song I discover next?} This campaign asks it honestly by
+adding a first-class chronological-split capability to the builder
+(\texttt{split\_order\_field} on the build request): rows are ordered by a
+payload field (here \texttt{first\_played}), the earliest go to train and the
+latest to test, and PCA, vocabulary and imputation are all fit on the
+early-train rows only, so the split is leak-free. Four datasets were built from
+the active \texttt{spotify\_tracks\_song\_ae} collection --- full and intrinsic,
+each random and chronological --- and the champion plus a model sweep were
+evaluated on each dataset's own native split. If AUC collapses under the
+chronological split, taste drifts and the leaderboard overstates real forward
+skill.
+
+\emph{Results.} \textbf{Taste is not stationary} (Table~\ref{tab:drift};
+Figure~\ref{fig:taste-drift}). The full-random build reproduces the on-record
+champion to five digits (\num{0.73490}), validating the fresh builds; the
+chronological build of the \emph{same} features drops it to \num{0.61894} --- a
+$+\num{0.116}$ collapse ($\approx$9 noise bands). The drop is \num{0.109}--%
+\num{0.116} for \emph{every} model family (\texttt{catboost} \num{0.72889}$\to$%
+\num{0.61294}, \texttt{logistic} \num{0.72141}$\to$\num{0.61234}), so it is the
+data/taste, not a model quirk. Identity one-hots barely help forward:
+\emph{dropping} them (the intrinsic build) costs only $\sim$0.02 chronological
+(\num{0.61894}$\to$\num{0.59858}) versus $\sim$0.025 random --- they mostly
+memorize same-era artists. A recency-weighted \texttt{xgboost} (up-weighting
+recent discoveries) recovers only $+\num{0.003}$ (sub-band), so drift is not a
+simple recency effect. And the walk-forward read --- train on
+\texttt{first\_played}~$<Y$, test on year $Y$ --- lands at \num{0.59}--\num{0.67}
+for every single year from 2019 to 2026, \emph{never} near the \num{0.735}
+random baseline, and more training history does not close the gap. An
+off-framework re-split of the pre-existing random-built features agrees to
+$\sim$0.007 AUC (\num{0.626}), and controlling for right-censoring (restricting
+the chronological test to tracks with $\ge$180 days of replay opportunity)
+barely moves it (\num{0.62579}$\to$\num{0.62319}) --- so the penalty is genuine
+non-stationarity, not the base-rate shift of mechanically-less-rotated recent
+tracks.
+
+\begin{table}[ht]
+  \centering
+  \caption{The random-versus-chronological AUC gap, definitive framework builds
+  (all \texttt{spotify\_tracks\_song\_ae}, \num{23529} rows, seed 42; each model
+  on its dataset's native split). ``full'' carries the identity one-hots,
+  ``intrinsic'' drops them (64 PCA $+$ 7 numeric only). The champion row is
+  bolded; the drift column is the random$-$chronological drop on the full
+  matrix. Full-random reproduces the on-record champion (\num{0.73490}),
+  validating the builds. Datasets: full-random \dsid{ds-20260712-183615},
+  full-chrono \dsid{ds-20260712-183629}, intrinsic-random
+  \dsid{ds-20260712-183630}, intrinsic-chrono \dsid{ds-20260712-183631}. AUC
+  band $2\sigma\approx 0.0126$.}
+  \label{tab:drift}
+  \begin{tabular}{lccccc}
+    \toprule
+    Model & full $\cdot$ random & full $\cdot$ chrono & drift & intr.\ $\cdot$ random & intr.\ $\cdot$ chrono \\
+    \midrule
+    \best{xgboost} (champion) & \best{0.73490} & \best{0.61894} & \best{$+0.116$} & 0.71020 & 0.59858 \\
+    catboost                  & 0.72889 & 0.61294 & $+0.116$ & 0.70172 & 0.59556 \\
+    logistic                  & 0.72141 & 0.61234 & $+0.109$ & 0.64836 & 0.59016 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.9\textwidth]{taste_drift}
+  \caption{The leaderboard AUC is an upper bound on forward prediction.
+  \emph{Left:} moving from a random to a chronological (train-earlier /
+  test-later) split drops AUC by $\sim$0.11 for \emph{every} model family --- the
+  penalty is the data, not any one model. \emph{Right:} the walk-forward read
+  (train on \texttt{first\_played}~$<Y$, test on year $Y$) lands at
+  \num{0.59}--\num{0.67} every year and never approaches the \num{0.735} random
+  baseline (green), tracking the $\sim$\num{0.619} chronological level (red
+  dashed) instead; more accumulated history does not close the gap. Forward
+  ``will I replay a song I discover next'' skill on this corpus is
+  $\sim$0.62--0.63, $\sim$0.11 below the random-split leaderboard.}
+  \label{fig:taste-drift}
+\end{figure}
+
+\emph{Interpretation.} The mechanism is identity churn, and it ties the whole
+document together. Rotation is driven by artist/genre \emph{identity} one-hots
+(the convergent finding of every campaign above); in a chronological split the
+test period is full of newly discovered artists that were unseen in training and
+fall into \texttt{\_\_other\_\_}, so the model must fall back on the weaker
+intrinsic acoustic/metadata signal --- which tops out near \num{0.60}. That is
+exactly why raising vocab caps (Section~\ref{sec:vocab-cap}) and adding net
+capacity (Section~\ref{sec:anns-capacity}) are spent levers for forward skill:
+they only sharpen same-era \emph{memorization}, which does not transfer. It is
+also the same-signal story the per-model SAEs tell --- linear decodability
+$\sim$0.14 with no clean monosemantic taste atom (Sections~\ref{sec:anns-sae},
+\ref{sec:anns-capacity}): remove identity memorization and little generalizable
+taste signal remains. The practical reading: every on-record AUC is an upper
+bound on same-era ranking, not forward skill; a deployed model needs periodic
+retraining because taste drifts; and the only lever that would move
+\emph{forward} AUC is richer generalizable intrinsic signal (better acoustics,
+cross-artist structure), since identity resolution and model capacity are both
+spent and same-era-only. This does not overturn any leaderboard number --- the
+random-split AUCs are valid measurements of same-era ranking --- but it reframes
+what they mean. \emph{Source:
+\texttt{2026-07-12-taste-drift-temporal-split.md}.}
+
+\section{Conclusions}
+\label{sec:conclusions}
+Thirteen campaigns (Jun--Jul 2026) on the pivoted rotation target converge
+on a single story, with one late-breaking caveat (point 12). (1) Across two feature campaigns and three model-family scans (two
+corpora), every dense modality and every dense distance/margin/dense-net family
+loses to categorical identity one-hots read by gradient-boosted trees --- the
+song-AE latent dilutes (Section~\ref{sec:ae-blend}), kernel SVM is
+worse-than-mean (Section~\ref{sec:svm}), and on the new full-64-d corpus the two
+tree families lead while the dense pyramid-MLP is last
+(Section~\ref{sec:bakeoff-p64}). (2) The choice of metric is load-bearing on a
+binary target: MAE is degenerate (a two-level $\epsilon$-tube predictor posts a
+deceptively low MAE while being worse than the mean), and a grid-by-MAE blend
+even mis-selects such a predictor; the honest classification metrics (AUC,
+log-loss, Brier) restore a fair comparison (Section~\ref{sec:auc}). (3) The
+campaigns delivered two measured noise bands --- $2\sigma=0.0086$ MAE and
+$2\sigma=0.0126$ AUC --- and the project's first registered, promotable rotation
+champion, \texttt{xgboost-classifier-rotation} at AUC 0.7429 on DS-META, plus a
+saved new-corpus xgboost definition at AUC 0.7204. (4) The dense neural net was
+diagnosed in full (Section~\ref{sec:anns}): an architecture scan refuted the
+budget hypothesis (every geometry self-stops at 73--100 iterations and the
+converged net reproduces the under-trained AUC to all digits), so the binding
+constraint is the raw one-hot \emph{representation}, not optimization --- and the
+net's worse-than-random log-loss beside a genuine AUC marks it as confidently
+miscalibrated, not merely weak. (5) That diagnosis was then tested directly: the
+Rust/\texttt{burn} \texttt{burn-deep-classifier}, which feeds the identity
+one-hots \emph{raw}, repaired the calibration completely (log-loss
+$2.0\to\sim 0.62$, into the tree regime) and lifted AUC $\sim$2 bands to
+\num{0.7038} (Section~\ref{sec:anns-burn}) --- confirming the pathology was a
+representation artifact, not an intrinsic property of nets. But the gap to the
+trees only \emph{narrowed} (from $\sim$3.3 bands to $\sim$1), it did not close:
+the net still lands below \texttt{catboost} and \texttt{xgboost}, the plain
+\texttt{mlp} beat both the embedding and wide-deep topologies (entity embeddings
+are starved at the corpus's low identity cardinality), and nothing cleared the
+$\sim$0.71 save bar. (6) That standing lever was then pulled. A paired re-run on a
+\emph{high-vocab} matrix --- identical to the 60/40 dataset but with the artist
+cap raised $60\to300$ and genre $40\to120$ --- \emph{flipped} the topology
+ranking (Section~\ref{sec:anns-highvocab}): \texttt{embeddings}, starved and
+last on the 60/40 matrix, now \emph{beats} \texttt{mlp} (a $+0.0130$ swing that
+reverses the prior result and confirms the starvation hypothesis directionally),
+and the saved net reaches the in-dataset tree tier at AUC \num{0.7192} (within
+$\sim$1 band of \texttt{catboost}) --- the first ANN to clear the rotation save
+bar, saved as \texttt{burn-deep-embeddings-highvocab}. The convergent finding
+still stands at the top (\texttt{xgboost} leads every matrix, and higher
+resolution lifts \emph{every} family, not just the embedding), but the
+ANN-pitfalls thread is now closed: a representation-aware net that consumes raw
+one-hots is calibrated in the tree regime, and given enough identity resolution
+its embedding topology reaches the tree tier --- identity \emph{resolution} was
+the lever all along.
+(7) A final probe then tested the inverse of the lever --- whether a learned representation \emph{derived from} the tree, rather than fed alongside it, could beat the bare tree --- and refuted it: the Facebook GBDT$\to$LR trick generalized to GBDT$\to$MLP, with a fresh head trained on the frozen champion's one-hot leaf indices, caps \num{1.8}--\num{2.4} bands below the bare xgboost champion (best head AUC \num{0.6978}) and is badly mis-calibrated on every head, because the leaf one-hots are a strictly lossier view of a tree whose additive leaf-value scoring already weights the leaves optimally (Section~\ref{sec:leaf-head}). The dense head cannot even recover the tree that generated its features --- the seventh convergent confirmation that identity resolution, not new heads or representations layered on the trees, is the durable lever.
+(8) Finally, the standing identity-resolution lever was mapped to its edge: a vocab-cap scan on the bare GBDT --- frozen champion config, only \texttt{vocab\_top\_n} moved --- shows the lever is \emph{largely spent} (Section~\ref{sec:vocab-cap}). The first cardinality jump ($60/40\to300/120$) carries the gain; past 300/120 every step is sub-band, the curve plateaus inside the noise envelope, xgboost reaches only \num{0.7349} at 1000/300 ($+0.005$, $\sim$0.4 band over the anchor, so no save fired), and \texttt{catboost} tracks it --- two tree families agreeing the marginal high-cardinality columns carry little independent signal. Not saturated and not reversed, but diminishing: raw cap height is no longer the durable lever, and future identity work should target resolution \emph{quality} (follower/popularity interactions, genre hierarchy) rather than bigger caps --- with the full-vocabulary point (6633 cols) still unmeasured against a host memory ceiling.
+
+(9) A tenth campaign characterized a \emph{second} representation-aware net and reached the same ceiling: the two-phase \texttt{burn-ae-classifier}, which pretrains an autoencoder over the assembled feature vector and transplants the encoder into a classifier, is flat across 13 capacity/head configs (a \num{0.0054}-wide strip inside the band), ties the plain \texttt{burn-deep} \texttt{mlp}, and stays $\sim$1.8 bands below the tree champion; freezing the MSE-pretrained encoder under a deep head is a documented collapse mode (Section~\ref{sec:anns-ae}). The unsupervised reconstruction latent is task-agnostic --- a third confirmation that a learned representation downstream of the identity one-hots buys no ranking power the trees lack.
+(10) Two interpretability campaigns opened the nets with a per-model sparse autoencoder (Sections~\ref{sec:anns-sae}, \ref{sec:anns-capacity}): at equal AUC, a tapering pyramid \emph{consolidates} its interpretable concepts into a compressed bottleneck while a uniform net keeps a broader set, and at high vocab an AUC-tied embeddings/mlp pair captures the \emph{same} $\sim$0.14-decodable signal with different concept allocation --- ``same signal, different layout,'' invisible to the leaderboard.
+(11) A capacity scan on the high-vocab matrix confirmed the dense net is at its ceiling there: neither widening nor deepening beats the $[128,64]$ control by a band, a third embedding layer \emph{hurts} ($-\num{0.0152}$, dilution not starvation), and the best \texttt{mlp} ties the best \texttt{embeddings} --- capacity, not the embeddings mechanism, was the lever, and it is spent (Section~\ref{sec:anns-capacity}).
+(12) Finally, the honest forward question was asked --- and it reframes the whole leaderboard. A first-class chronological (train-earlier / test-later) split drops the champion from AUC \num{0.735} to \num{0.619}, a $\sim$0.11 collapse that is \emph{universal} across xgboost, catboost and logistic and is genuine taste non-stationarity, not right-censoring; a walk-forward read lands at \num{0.59}--\num{0.67} every year, never near the random baseline (Section~\ref{sec:drift}). Every on-record AUC is therefore an upper bound on same-era ranking; real forward ``will I replay a song I discover next'' skill is $\sim$0.62--0.63. The mechanism is identity churn --- unseen future artists fall into \texttt{\_\_other\_\_} and the model must lean on the weaker $\sim$0.60 intrinsic floor --- which is precisely why higher vocab caps and bigger nets, both same-era memorization levers, do not transfer forward. This does not overturn any random-split number; it clarifies what they measure and makes richer generalizable intrinsic signal the only remaining lever for forward performance.
+
+\section{Source reports}
+This synthesis consolidates thirteen campaign reports from \texttt{experiments/}:
+\begin{itemize}
+  \item \texttt{2026-06-09-ae-xgboost-blend.md} --- autoencoder-latent +
+    XGBoost blend on rotation (Section~\ref{sec:ae-blend}).
+  \item \texttt{2026-06-09-svm-kernel-rotation.md} --- kernel SVM scan and
+    conditional blend; first measured MAE noise band (Section~\ref{sec:svm}).
+  \item \texttt{2026-06-09-rotation-classification.md} --- AUC bake-off, first
+    measured AUC noise band, first registered rotation champion
+    (Section~\ref{sec:auc}).
+  \item \texttt{2026-06-12-classifier-bakeoff-p64.md} --- four-family
+    classifier bake-off and xgboost depth/lr sweep on the new full-64-d corpus
+    (Sections~\ref{sec:bakeoff-p64} and~\ref{sec:anns}).
+  \item \texttt{2026-06-12-pyramid-mlp-arch-scan.md} --- six-geometry
+    pyramid-MLP architecture scan, refuting the budget hypothesis
+    (Sections~\ref{sec:mlp-scan} and~\ref{sec:anns}).
+  \item \texttt{2026-06-12-burn-deep-topology.md} --- the Rust/\texttt{burn}
+    \texttt{burn-deep-classifier} topology bake-off; resolves the
+    representation-aware-net question, fixing calibration but not the AUC gap
+    (Section~\ref{sec:anns-burn}).
+  \item \texttt{2026-06-12-high-vocab-topology.md} --- the paired topology
+    re-run on a higher-identity-cardinality matrix; flips
+    \texttt{embeddings}$>$\texttt{mlp} and lifts the saved net into the
+    in-dataset tree tier, the first ANN to clear the rotation save bar
+    (Section~\ref{sec:anns-highvocab}).
+  \item \texttt{2026-06-15-gbdt-leaf-head-ceiling-probe.md} --- the Facebook
+    GBDT$\to$LR trick generalized to GBDT$\to$MLP; every leaf-embedding head
+    caps below the bare xgboost champion with broken calibration, the seventh
+    convergent refutation (Section~\ref{sec:leaf-head}).
+  \item \texttt{2026-06-15-vocab-cap-scan-gbdt.md} --- the identity-resolution vocab-cap scan on the bare GBDT; maps the cap$\to$AUC curve and finds the lever largely spent past 300/120 (sub-band gains, no save fired), with the all-vocab point unmeasured at the host memory ceiling (Section~\ref{sec:vocab-cap}).
+  \item \texttt{2026-06-15-burn-ae-classifier-capacity-scan.md} --- first
+    characterization of the two-phase \texttt{burn-ae-classifier}; 13 configs in
+    one sub-band strip, ties the plain \texttt{burn-deep} \texttt{mlp}, and a
+    frozen-deep-head collapse mode (Section~\ref{sec:anns-ae}).
+  \item \texttt{2026-07-12-pyramid-vs-rect-sae.md} --- per-model SAE
+    representation read; at equal AUC the pyramid consolidates concepts into its
+    bottleneck while the uniform net keeps a broader set
+    (Section~\ref{sec:anns-sae}).
+  \item \texttt{2026-07-12-high-vocab-capacity-scan.md} --- the
+    \texttt{burn-deep-classifier} capacity scan on the high-vocab matrix
+    (CEILING) plus a cross-family SAE allocation read
+    (Section~\ref{sec:anns-capacity}).
+  \item \texttt{2026-07-12-taste-drift-temporal-split.md} --- the chronological
+    versus random split; a universal $\sim$0.11 AUC drop reframing the
+    leaderboard as an upper bound on same-era ranking (Section~\ref{sec:drift}).
+\end{itemize}
+
+\end{document}

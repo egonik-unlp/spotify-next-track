@@ -1,0 +1,33 @@
+[package]
+name = "lensing-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lensing hub/worker/inference server: API, UI, run orchestration, distributed roles"
+
+[dependencies]
+lensing-core = { workspace = true }
+lensing-db = { package = "lensing-db", path = "../lensing-db", version = "0.1.0" }
+lensing-pipeline = { package = "lensing-pipeline", path = "../lensing-pipeline", version = "0.1.0" }
+lensing-compression = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tower-http = { version = "0.6", features = ["fs"] }
+toml = "0.9"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+dotenvy = "0.15"
+futures = "0.3"
+# Distributed roles: dataset-archive transport (worker downloads from the
+# hub) + tarball packing of dataset dirs.
+reqwest = { version = "0.13", default-features = false, features = ["blocking"] }
+tar = "0.4"
+flate2 = "1"
+# Pathfinder sidecar supervision: PR_SET_PDEATHSIG so the Python child dies
+# with the server regardless of how the server is killed.
+libc = "0.2"

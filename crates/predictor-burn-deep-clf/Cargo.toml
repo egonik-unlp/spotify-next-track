@@ -1,0 +1,22 @@
+[package]
+name = "lensing-predictor-burn-deep-clf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lensing representation-aware deep classifier (burn): entity-embedding / wide-and-deep / plain MLP topologies for one-hot-heavy tabular targets"
+
+[dependencies]
+lensing-core = { workspace = true }
+lensing-interp = { workspace = true }
+lensing-sae = { workspace = true }
+lensing-onnx = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+burn = { version = "0.21", features = ["ndarray", "autodiff"] }
+
+[[bin]]
+name = "predictor-burn-deep-clf"
+path = "src/main.rs"

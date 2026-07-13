@@ -1,0 +1,21 @@
+{
+  "collection": "spotify_tracks_song_ae",
+  "pca_dims": 64,
+  "test_ratio": 0.2,
+  "seed": 42,
+  "log_target": false,
+  "fields": {
+    "album_type": true, "artist": true, "artist_count": true,
+    "artist_followers": true, "artist_popularity": true,
+    "genre_primary": true, "release_year": true, "track_popularity": true
+  },
+  "vocab_top_n": {"artist": 60, "genre_primary": 40},
+  "quality": {
+    "nonpositive_price": false, "price_outlier": false, "missing_fields": false,
+    "price_range": false, "bedrooms_outlier": false, "duplicate_content": false,
+    "short_content": false, "price_min": 1000.0, "price_max": 50000000.0,
+    "price_outlier_mad_z": 3.5, "bedrooms_max": 15.0, "short_content_min_chars": 80
+  },
+  "currency": {"keep": "", "mode": "filter", "rate_source": "", "reconcile_collection": null},
+  "raw_numerics": false
+}

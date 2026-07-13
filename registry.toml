@@ -1,0 +1,1698 @@
+# Predictor registry. Each entry is an executable implementing the contract
+# documented in README.md. {dataset}, {run_dir}, {hyperparams} are substituted
+# by lensing-server; commands run from the repository root.
+
+[[predictors]]
+name = "burn-mlp"
+display_name = "MLP (burn)"
+language = "Rust"
+framework = "burn"
+description = "Feed-forward net on PCA embeddings + metadata one-hots. Rust, CPU."
+command = "target/release/predictor-burn-mlp"
+args = ["train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["export", "--model", "{model}", "--output", "{output}"]
+supports_stop = true
+visualization = true
+
+[[predictors.params]]
+name = "epochs"
+type = "int"
+default = 50
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "checkpoint_every"
+label = "checkpoint every N epochs"
+type = "int"
+default = 0
+min = 0
+max = 100000
+
+[[predictors.params]]
+name = "patience"
+label = "early-stop patience (epochs, 0 = off)"
+type = "int"
+default = 0
+min = 0
+max = 10000
+
+[[predictors.params]]
+name = "val_fraction"
+label = "early-stop validation fraction (of train)"
+type = "float"
+default = 0.15
+min = 0.05
+max = 0.5
+
+[[predictors.params]]
+name = "lr"
+label = "learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "batch_size"
+label = "batch size"
+type = "int"
+default = 256
+min = 8
+max = 8192
+
+[[predictors.params]]
+name = "hidden"
+label = "hidden layers"
+type = "ints"
+default = [256, 128]
+
+[[predictors.params]]
+name = "dropout"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors.params]]
+name = "activation"
+label = "hidden-layer activation"
+type = "enum"
+default = "relu"
+options = ["relu", "gelu", "silu", "mish", "tanh", "leaky_relu", "selu", "elu"]
+
+[[predictors.params]]
+name = "clamp_output"
+label = "clamp predictions at ~2x max train target"
+type = "bool"
+default = false
+
+[[predictors]]
+name = "flux-mlp"
+display_name = "MLP (Flux.jl)"
+language = "Julia"
+framework = "Flux.jl"
+description = "Feed-forward net on PCA embeddings + metadata one-hots. Julia, CPU."
+command = "julia"
+args = ["--project=predictors/flux-mlp", "--startup-file=no", "predictors/flux-mlp/train.jl", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["--project=predictors/flux-mlp", "--startup-file=no", "predictors/flux-mlp/train.jl", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+supports_stop = true
+visualization = true
+
+[[predictors.params]]
+name = "epochs"
+type = "int"
+default = 50
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "checkpoint_every"
+label = "checkpoint every N epochs"
+type = "int"
+default = 0
+min = 0
+max = 100000
+
+[[predictors.params]]
+name = "lr"
+label = "learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "batch_size"
+label = "batch size"
+type = "int"
+default = 256
+min = 8
+max = 8192
+
+[[predictors.params]]
+name = "hidden"
+label = "hidden layers"
+type = "ints"
+default = [256, 128]
+
+[[predictors.params]]
+name = "dropout"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors]]
+name = "burn-cnn"
+display_name = "CNN (burn)"
+language = "Rust"
+framework = "burn"
+description = "1D conv net over PCA embeddings; metadata one-hots join the dense head. Rust, CPU."
+command = "target/release/predictor-burn-cnn"
+args = ["train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["export", "--model", "{model}", "--output", "{output}"]
+supports_stop = true
+visualization = true
+
+[[predictors.params]]
+name = "epochs"
+type = "int"
+default = 50
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "checkpoint_every"
+label = "checkpoint every N epochs"
+type = "int"
+default = 0
+min = 0
+max = 100000
+
+[[predictors.params]]
+name = "lr"
+label = "learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "batch_size"
+label = "batch size"
+type = "int"
+default = 256
+min = 8
+max = 8192
+
+[[predictors.params]]
+name = "channels"
+label = "conv channels"
+type = "ints"
+default = [32, 64]
+
+[[predictors.params]]
+name = "kernel_size"
+label = "kernel size"
+type = "int"
+default = 3
+min = 1
+max = 15
+
+[[predictors.params]]
+name = "dense_hidden"
+label = "dense head units"
+type = "int"
+default = 64
+min = 1
+max = 4096
+
+[[predictors.params]]
+name = "dropout"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors]]
+name = "torch-cnn"
+display_name = "CNN (PyTorch)"
+language = "Python"
+framework = "PyTorch"
+description = "1D conv net over PCA embeddings; metadata one-hots join the dense head. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/torch-cnn/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/torch-cnn/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["predictors/torch-cnn/train.py", "export", "--model", "{model}", "--output", "{output}"]
+supports_stop = true
+visualization = true
+
+[[predictors.params]]
+name = "epochs"
+type = "int"
+default = 50
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "checkpoint_every"
+label = "checkpoint every N epochs"
+type = "int"
+default = 0
+min = 0
+max = 100000
+
+[[predictors.params]]
+name = "lr"
+label = "learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "batch_size"
+label = "batch size"
+type = "int"
+default = 256
+min = 8
+max = 8192
+
+[[predictors.params]]
+name = "channels"
+label = "conv channels"
+type = "ints"
+default = [32, 64]
+
+[[predictors.params]]
+name = "kernel_size"
+label = "kernel size"
+type = "int"
+default = 3
+min = 1
+max = 15
+
+[[predictors.params]]
+name = "dense_hidden"
+label = "dense head units"
+type = "int"
+default = 64
+min = 1
+max = 4096
+
+[[predictors.params]]
+name = "dropout"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors]]
+name = "flux-cnn"
+display_name = "CNN (Flux.jl)"
+language = "Julia"
+framework = "Flux.jl"
+description = "1D conv net over PCA embeddings; metadata one-hots join the dense head. Julia, CPU."
+command = "julia"
+args = ["--project=predictors/flux-cnn", "--startup-file=no", "predictors/flux-cnn/train.jl", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["--project=predictors/flux-cnn", "--startup-file=no", "predictors/flux-cnn/train.jl", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+supports_stop = true
+visualization = true
+
+[[predictors.params]]
+name = "epochs"
+type = "int"
+default = 50
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "checkpoint_every"
+label = "checkpoint every N epochs"
+type = "int"
+default = 0
+min = 0
+max = 100000
+
+[[predictors.params]]
+name = "lr"
+label = "learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "batch_size"
+label = "batch size"
+type = "int"
+default = 256
+min = 8
+max = 8192
+
+[[predictors.params]]
+name = "channels"
+label = "conv channels"
+type = "ints"
+default = [32, 64]
+
+[[predictors.params]]
+name = "kernel_size"
+label = "kernel size"
+type = "int"
+default = 3
+min = 1
+max = 15
+
+[[predictors.params]]
+name = "dense_hidden"
+label = "dense head units"
+type = "int"
+default = 64
+min = 1
+max = 4096
+
+[[predictors.params]]
+name = "dropout"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors]]
+name = "ridge"
+display_name = "Ridge (scikit-learn)"
+language = "Python"
+framework = "scikit-learn"
+description = "L2-regularized linear regression on PCA embeddings + metadata one-hots, adapted to this corpus: CV-selected alpha, optional target-proportional sample weights against tail compression bias, optional Huber loss. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/ridge/ridge.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/ridge/ridge.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["predictors/ridge/ridge.py", "export", "--model", "{model}", "--output", "{output}"]
+
+[[predictors.params]]
+name = "auto_alpha"
+label = "select alpha by CV"
+type = "bool"
+default = true
+
+[[predictors.params]]
+name = "alpha"
+label = "regularization strength (when CV off)"
+type = "float"
+default = 1.0
+min = 0.0
+max = 100000.0
+
+[[predictors.params]]
+name = "weight_gamma"
+label = "target weight exponent"
+type = "float"
+default = 0.0
+min = 0.0
+max = 2.0
+
+[[predictors.params]]
+name = "loss"
+label = "loss"
+type = "enum"
+default = "squared"
+options = ["squared", "huber"]
+
+[[predictors.params]]
+name = "huber_epsilon"
+label = "huber epsilon"
+type = "float"
+default = 1.35
+min = 1.0
+max = 5.0
+
+[[predictors]]
+name = "svm"
+display_name = "SVM (scikit-learn)"
+language = "Python"
+framework = "scikit-learn"
+description = "Support vector regression with selectable kernel on PCA embeddings + metadata one-hots. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/svm/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/svm/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["predictors/svm/train.py", "export", "--model", "{model}", "--output", "{output}"]
+
+[[predictors.params]]
+name = "kernel"
+label = "kernel"
+type = "enum"
+default = "rbf"
+options = ["rbf", "linear", "poly", "sigmoid"]
+
+[[predictors.params]]
+name = "C"
+label = "regularization strength"
+type = "float"
+default = 1.0
+min = 0.001
+max = 100000.0
+
+[[predictors.params]]
+name = "epsilon"
+label = "epsilon-tube width"
+type = "float"
+default = 0.1
+min = 0.0
+max = 10.0
+
+[[predictors.params]]
+name = "gamma"
+label = "kernel coefficient (0 = scale)"
+type = "float"
+default = 0.0
+min = 0.0
+max = 100.0
+
+[[predictors.params]]
+name = "degree"
+label = "poly degree"
+type = "int"
+default = 3
+min = 1
+max = 10
+
+[[predictors.params]]
+name = "coef0"
+label = "independent term (poly/sigmoid)"
+type = "float"
+default = 0.0
+min = -10.0
+max = 10.0
+
+[[predictors]]
+name = "kernel-ridge"
+display_name = "Kernel ridge (scikit-learn)"
+language = "Python"
+framework = "scikit-learn"
+description = "Kernel ridge regression: the SVR's rbf kernel (same expm1 protection) with squared loss instead of the epsilon-insensitive loss — dense dual solution over all train rows. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/kernel-ridge/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/kernel-ridge/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["predictors/kernel-ridge/train.py", "export", "--model", "{model}", "--output", "{output}"]
+
+[[predictors.params]]
+name = "kernel"
+label = "kernel"
+type = "enum"
+default = "rbf"
+options = ["rbf", "linear", "poly", "sigmoid"]
+
+[[predictors.params]]
+name = "alpha"
+label = "ridge regularization"
+type = "float"
+default = 1.0
+min = 0.000001
+max = 1000000.0
+
+[[predictors.params]]
+name = "gamma"
+label = "kernel coefficient (0 = scale)"
+type = "float"
+default = 0.0
+min = 0.0
+max = 100.0
+
+[[predictors.params]]
+name = "degree"
+label = "poly degree"
+type = "int"
+default = 3
+min = 1
+max = 10
+
+[[predictors.params]]
+name = "coef0"
+label = "independent term (poly/sigmoid)"
+type = "float"
+default = 1.0
+min = -10.0
+max = 10.0
+
+[[predictors]]
+name = "svm-moe"
+display_name = "SVM mixture (GMM + SVR)"
+language = "Python"
+framework = "scikit-learn"
+description = "Gaussian-mixture soft clustering with one rbf SVR expert per component, responsibility-blended. Targets segment-specific pricing regimes. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/svm-moe/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/svm-moe/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+
+[[predictors.params]]
+name = "n_clusters"
+label = "mixture components"
+type = "int"
+default = 4
+min = 2
+max = 16
+
+[[predictors.params]]
+name = "covariance"
+label = "GMM covariance"
+type = "enum"
+default = "diag"
+options = ["diag", "spherical"]
+
+[[predictors.params]]
+name = "C"
+label = "regularization strength"
+type = "float"
+default = 7.0
+min = 0.001
+max = 100000.0
+
+[[predictors.params]]
+name = "epsilon"
+label = "epsilon-tube width"
+type = "float"
+default = 0.05
+min = 0.0
+max = 10.0
+
+[[predictors.params]]
+name = "gamma"
+label = "kernel coefficient (0 = scale per expert)"
+type = "float"
+default = 0.0
+min = 0.0
+max = 100.0
+
+[[predictors.params]]
+name = "seed"
+label = "GMM init seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors]]
+name = "svm-quantile-moe"
+display_name = "SVM quantile mixture (banded experts)"
+language = "Python"
+framework = "scikit-learn"
+description = "Supervised regime split: quantile target bands with one rbf SVR expert per band, blended by a logistic gate's band probabilities. The direct test of the high-tail hypothesis. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/svm-quantile-moe/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/svm-quantile-moe/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+
+[[predictors.params]]
+name = "n_bands"
+label = "target quantile bands"
+type = "int"
+default = 4
+min = 2
+max = 8
+
+[[predictors.params]]
+name = "C"
+label = "regularization strength"
+type = "float"
+default = 7.0
+min = 0.001
+max = 100000.0
+
+[[predictors.params]]
+name = "epsilon"
+label = "epsilon-tube width"
+type = "float"
+default = 0.05
+min = 0.0
+max = 10.0
+
+[[predictors.params]]
+name = "gamma"
+label = "kernel coefficient (0 = scale per expert)"
+type = "float"
+default = 0.0
+min = 0.0
+max = 100.0
+
+[[predictors.params]]
+name = "gate_c"
+label = "gate inverse regularization"
+type = "float"
+default = 1.0
+min = 0.001
+max = 1000.0
+
+[[predictors.params]]
+name = "seed"
+label = "gate solver seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors]]
+name = "xgboost"
+display_name = "XGBoost"
+language = "Python"
+framework = "XGBoost"
+description = "Gradient-boosted trees on PCA embeddings + metadata one-hots. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/xgboost/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/xgboost/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["predictors/xgboost/train.py", "export", "--model", "{model}", "--output", "{output}"]
+supports_stop = true
+
+[[predictors.params]]
+name = "n_estimators"
+label = "boosting rounds"
+type = "int"
+default = 500
+min = 10
+max = 10000
+
+[[predictors.params]]
+name = "early_stopping_rounds"
+label = "early-stop rounds (0 = off)"
+type = "int"
+default = 0
+min = 0
+max = 1000
+
+[[predictors.params]]
+name = "val_fraction"
+label = "early-stop validation fraction (of train)"
+type = "float"
+default = 0.15
+min = 0.05
+max = 0.5
+
+[[predictors.params]]
+name = "max_depth"
+label = "tree depth"
+type = "int"
+default = 6
+min = 1
+max = 20
+
+[[predictors.params]]
+name = "learning_rate"
+label = "learning rate"
+type = "float"
+default = 0.05
+min = 0.001
+max = 1.0
+
+[[predictors.params]]
+name = "subsample"
+label = "row subsample"
+type = "float"
+default = 0.8
+min = 0.1
+max = 1.0
+
+[[predictors.params]]
+name = "colsample_bytree"
+label = "column subsample"
+type = "float"
+default = 0.8
+min = 0.1
+max = 1.0
+
+[[predictors.params]]
+name = "min_child_weight"
+label = "min child weight"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1000.0
+
+[[predictors.params]]
+name = "reg_lambda"
+label = "L2 regularization"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1000.0
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors.params]]
+name = "weight_gamma"
+label = "target weight exponent"
+type = "float"
+default = 0.0
+min = 0.0
+max = 2.0
+
+[[predictors]]
+name = "xgboost-classifier"
+display_name = "XGBoost Classifier"
+language = "Python"
+framework = "XGBoost"
+description = "Gradient-boosted trees optimizing logistic / softmax loss for a binary or multiclass target. Emits calibrated class probabilities; scored by AUC / logloss / accuracy. Pair with a classification-task domain."
+command = "predictors/.venv/bin/python"
+args = ["predictors/xgboost-classifier/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/xgboost-classifier/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["predictors/xgboost-classifier/train.py", "export", "--model", "{model}", "--output", "{output}"]
+supports_stop = false
+
+[[predictors.params]]
+name = "n_estimators"
+label = "boosting rounds"
+type = "int"
+default = 500
+min = 10
+max = 10000
+
+[[predictors.params]]
+name = "max_depth"
+label = "tree depth"
+type = "int"
+default = 6
+min = 1
+max = 20
+
+[[predictors.params]]
+name = "learning_rate"
+label = "learning rate"
+type = "float"
+default = 0.05
+min = 0.001
+max = 1.0
+
+[[predictors.params]]
+name = "subsample"
+label = "row subsample"
+type = "float"
+default = 0.8
+min = 0.1
+max = 1.0
+
+[[predictors.params]]
+name = "colsample_bytree"
+label = "column subsample"
+type = "float"
+default = 0.8
+min = 0.1
+max = 1.0
+
+[[predictors.params]]
+name = "min_child_weight"
+label = "min child weight"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1000.0
+
+[[predictors.params]]
+name = "reg_lambda"
+label = "L2 regularization"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1000.0
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors]]
+name = "gbdt-leaf-head-classifier"
+display_name = "GBDT-Leaf-Head Classifier"
+language = "Python"
+framework = "XGBoost + scikit-learn"
+description = "Facebook GBDT→LR trick generalized: a gradient-boosted tree (frozen at the xgboost-classifier champion config) emits leaf indices, one-hot-encoded into the tree's partition, then a linear (L2 logistic) or shallow-MLP head trains on top. A ceiling-probe for whether a learned head over tree leaves beats the bare tree. Binary only; no ONNX export."
+command = "predictors/.venv/bin/python"
+args = ["predictors/gbdt-leaf-head-classifier/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/gbdt-leaf-head-classifier/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+supports_stop = false
+
+[[predictors.params]]
+name = "head"
+label = "head over the tree's leaves"
+type = "enum"
+default = "linear"
+options = ["linear", "mlp"]
+
+[[predictors.params]]
+name = "hidden"
+label = "mlp hidden layers (mlp head only)"
+type = "ints"
+default = [128]
+
+[[predictors.params]]
+name = "l2"
+label = "head L2 regularization (logistic inverse-C / mlp alpha)"
+type = "float"
+default = 1.0
+min = 0.0
+max = 100000.0
+
+[[predictors.params]]
+name = "head_lr"
+label = "mlp learning rate (mlp head only)"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "max_iter"
+label = "head max iterations (mlp head early-stops before this)"
+type = "int"
+default = 300
+min = 100
+max = 100000
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors]]
+name = "logistic"
+display_name = "Logistic Regression"
+language = "Python"
+framework = "scikit-learn"
+description = "Standardized linear classifier (logistic / multinomial softmax) — a clean linear baseline on the categorical-identity features. Emits calibrated class probabilities; scored by AUC / logloss / accuracy."
+command = "predictors/.venv/bin/python"
+args = ["predictors/logistic/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/logistic/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["predictors/logistic/train.py", "export", "--model", "{model}", "--output", "{output}"]
+supports_stop = false
+
+[[predictors.params]]
+name = "C"
+label = "inverse regularization (C)"
+type = "float"
+default = 1.0
+min = 0.0001
+max = 10000.0
+
+[[predictors.params]]
+name = "max_iter"
+label = "max iterations"
+type = "int"
+default = 2000
+min = 100
+max = 100000
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors]]
+name = "svc"
+display_name = "SVC (kernel classifier)"
+language = "Python"
+framework = "scikit-learn"
+description = "Support-vector classifier with probability estimates (Platt scaling) across kernels — the classification counterpart to the SVR kernel scan, scored honestly by AUC / logloss instead of a degenerate regression MAE. rbf/poly arms are slow on large n."
+command = "predictors/.venv/bin/python"
+args = ["predictors/svc/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/svc/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["predictors/svc/train.py", "export", "--model", "{model}", "--output", "{output}"]
+supports_stop = false
+
+[[predictors.params]]
+name = "kernel"
+label = "kernel"
+type = "enum"
+default = "rbf"
+options = ["rbf", "linear", "poly", "sigmoid"]
+
+[[predictors.params]]
+name = "C"
+label = "inverse regularization (C)"
+type = "float"
+default = 1.0
+min = 0.0001
+max = 10000.0
+
+[[predictors.params]]
+name = "gamma"
+label = "kernel coefficient"
+type = "enum"
+default = "scale"
+options = ["scale", "auto"]
+
+[[predictors.params]]
+name = "degree"
+label = "poly degree"
+type = "int"
+default = 3
+min = 2
+max = 6
+
+[[predictors.params]]
+name = "coef0"
+label = "kernel coef0 (poly/sigmoid)"
+type = "float"
+default = 0.0
+min = -10.0
+max = 10.0
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors]]
+name = "autoencoder-xgboost"
+display_name = "Autoencoder + XGBoost (blend)"
+language = "Python"
+framework = "scikit-learn / XGBoost"
+description = "Weighted-blend ensemble: an AE-latent regressor (kNN or ridge on the song-autoencoder latent columns = identity) blended with XGBoost on the metadata columns (the rest). Blend weight tuned on an internal train holdout. Pair with a dataset built off the song-AE latent collection."
+command = "predictors/.venv/bin/python"
+args = ["predictors/autoencoder-xgboost/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/autoencoder-xgboost/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+supports_stop = false
+
+[[predictors.params]]
+name = "ae_branch"
+label = "AE-branch regressor (over latent cols)"
+type = "enum"
+default = "knn"
+options = ["knn", "ridge"]
+
+[[predictors.params]]
+name = "knn_k"
+label = "kNN neighbors (knn branch)"
+type = "int"
+default = 25
+min = 1
+max = 500
+
+[[predictors.params]]
+name = "knn_weights"
+label = "kNN weighting (knn branch)"
+type = "enum"
+default = "distance"
+options = ["distance", "uniform"]
+
+[[predictors.params]]
+name = "ridge_auto"
+label = "auto alpha via RidgeCV (ridge branch)"
+type = "bool"
+default = true
+
+[[predictors.params]]
+name = "ridge_alpha"
+label = "ridge alpha (ridge branch, when auto off)"
+type = "float"
+default = 1.0
+min = 0.0
+max = 100000.0
+
+[[predictors.params]]
+name = "n_estimators"
+label = "XGB boosting rounds"
+type = "int"
+default = 500
+min = 10
+max = 10000
+
+[[predictors.params]]
+name = "max_depth"
+label = "XGB tree depth"
+type = "int"
+default = 6
+min = 1
+max = 20
+
+[[predictors.params]]
+name = "learning_rate"
+label = "XGB learning rate"
+type = "float"
+default = 0.05
+min = 0.001
+max = 1.0
+
+[[predictors.params]]
+name = "subsample"
+label = "XGB row subsample"
+type = "float"
+default = 0.8
+min = 0.1
+max = 1.0
+
+[[predictors.params]]
+name = "colsample_bytree"
+label = "XGB column subsample"
+type = "float"
+default = 0.8
+min = 0.1
+max = 1.0
+
+[[predictors.params]]
+name = "min_child_weight"
+label = "XGB min child weight"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1000.0
+
+[[predictors.params]]
+name = "reg_lambda"
+label = "XGB L2 regularization"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1000.0
+
+[[predictors.params]]
+name = "blend_weight"
+label = "AE blend weight (< 0 = auto-tune)"
+type = "float"
+default = -1.0
+min = -1.0
+max = 1.0
+
+[[predictors.params]]
+name = "blend_grid"
+label = "auto blend grid resolution"
+type = "int"
+default = 21
+min = 3
+max = 101
+
+[[predictors.params]]
+name = "val_fraction"
+label = "internal holdout fraction (of train)"
+type = "float"
+default = 0.2
+min = 0.05
+max = 0.5
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors]]
+name = "lightgbm"
+display_name = "LightGBM"
+language = "Python"
+framework = "LightGBM"
+description = "Gradient-boosted trees (leaf-wise growth) on PCA embeddings + metadata one-hots. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/lightgbm/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/lightgbm/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["predictors/lightgbm/train.py", "export", "--model", "{model}", "--output", "{output}"]
+supports_stop = true
+
+[[predictors.params]]
+name = "n_estimators"
+label = "boosting rounds"
+type = "int"
+default = 500
+min = 10
+max = 10000
+
+[[predictors.params]]
+name = "early_stopping_rounds"
+label = "early-stop rounds (0 = off)"
+type = "int"
+default = 0
+min = 0
+max = 1000
+
+[[predictors.params]]
+name = "val_fraction"
+label = "early-stop validation fraction (of train)"
+type = "float"
+default = 0.15
+min = 0.05
+max = 0.5
+
+[[predictors.params]]
+name = "num_leaves"
+label = "leaves per tree"
+type = "int"
+default = 31
+min = 2
+max = 4096
+
+[[predictors.params]]
+name = "max_depth"
+label = "tree depth (0 = unlimited)"
+type = "int"
+default = 0
+min = 0
+max = 30
+
+[[predictors.params]]
+name = "learning_rate"
+label = "learning rate"
+type = "float"
+default = 0.05
+min = 0.001
+max = 1.0
+
+[[predictors.params]]
+name = "min_child_samples"
+label = "min samples per leaf"
+type = "int"
+default = 20
+min = 1
+max = 10000
+
+[[predictors.params]]
+name = "subsample"
+label = "row subsample"
+type = "float"
+default = 0.8
+min = 0.1
+max = 1.0
+
+[[predictors.params]]
+name = "colsample_bytree"
+label = "column subsample"
+type = "float"
+default = 0.8
+min = 0.1
+max = 1.0
+
+[[predictors.params]]
+name = "reg_lambda"
+label = "L2 regularization"
+type = "float"
+default = 0.0
+min = 0.0
+max = 1000.0
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors.params]]
+name = "weight_gamma"
+label = "target weight exponent"
+type = "float"
+default = 0.0
+min = 0.0
+max = 2.0
+
+[[predictors]]
+name = "random-forest"
+display_name = "Random forest"
+language = "Python"
+framework = "scikit-learn"
+description = "Bagged tree ensemble (scikit-learn) on PCA embeddings + metadata one-hots. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/random-forest/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/random-forest/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["predictors/random-forest/train.py", "export", "--model", "{model}", "--output", "{output}"]
+
+[[predictors.params]]
+name = "n_estimators"
+label = "number of trees"
+type = "int"
+default = 300
+min = 10
+max = 5000
+
+[[predictors.params]]
+name = "max_depth"
+label = "tree depth (0 = unlimited)"
+type = "int"
+default = 0
+min = 0
+max = 50
+
+[[predictors.params]]
+name = "min_samples_leaf"
+label = "min samples per leaf"
+type = "int"
+default = 1
+min = 1
+max = 1000
+
+[[predictors.params]]
+name = "max_features"
+label = "feature fraction per split"
+type = "float"
+default = 1.0
+min = 0.01
+max = 1.0
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors]]
+name = "baseline-median"
+display_name = "Median baseline"
+language = "Python"
+description = "Predicts the train-split median target per outlier-group category. The floor every model must beat."
+command = "python3"
+args = ["predictors/baseline-median/predict.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/baseline-median/predict.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+params = []
+
+[[predictors]]
+name = "blend"
+display_name = "Blend (ensemble)"
+language = "Rust"
+description = "Meta-predictor: combines member models' target-space predictions by weighted mean or median vote. Members are frozen promoted models ({\"model\": …}), models.toml definitions trained inside the run ({\"definition\": …}), or inline recipes ({\"predictor\": …, \"hyperparams\": …}); each takes an optional weight and exclude_blocks column mask."
+command = "target/release/predictor-blend"
+args = ["train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["export", "--model", "{model}", "--output", "{output}"]
+supports_stop = true
+visualization = true
+
+[[predictors.params]]
+name = "members"
+label = "members (JSON array)"
+type = "json"
+default = []
+
+[[predictors.params]]
+name = "rule"
+label = "combination rule"
+type = "enum"
+default = "mean"
+options = ["mean", "median"]
+
+[[predictors.params]]
+name = "weight_fit"
+label = "weight fitting"
+type = "enum"
+default = "none"
+options = ["none", "grid"]
+
+[[predictors.params]]
+name = "val_fraction"
+label = "validation fraction (grid fit)"
+type = "float"
+default = 0.15
+min = 0.05
+max = 0.5
+
+[[predictors]]
+name = "catboost-classifier"
+display_name = "CatBoost Classifier"
+language = "Python"
+framework = "CatBoost"
+description = "Ordered gradient boosting with symmetric (oblivious) trees optimizing Logloss / MultiClass. Emits calibrated class probabilities; scored by AUC / logloss / accuracy. Pair with a classification-task domain."
+command = "predictors/.venv/bin/python"
+args = ["predictors/catboost-classifier/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/catboost-classifier/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["predictors/catboost-classifier/train.py", "export", "--model", "{model}", "--output", "{output}"]
+supports_stop = false
+
+[[predictors.params]]
+name = "iterations"
+label = "boosting iterations"
+type = "int"
+default = 500
+min = 10
+max = 10000
+
+[[predictors.params]]
+name = "depth"
+label = "tree depth"
+type = "int"
+default = 6
+min = 1
+max = 16
+
+[[predictors.params]]
+name = "learning_rate"
+label = "learning rate"
+type = "float"
+default = 0.05
+min = 0.001
+max = 1.0
+
+[[predictors.params]]
+name = "l2_leaf_reg"
+label = "L2 leaf regularization"
+type = "float"
+default = 3.0
+min = 0.0
+max = 1000.0
+
+[[predictors.params]]
+name = "subsample"
+label = "row subsample (Bernoulli bootstrap)"
+type = "float"
+default = 0.8
+min = 0.1
+max = 1.0
+
+[[predictors.params]]
+name = "border_count"
+label = "feature split count"
+type = "int"
+default = 254
+min = 1
+max = 65535
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors]]
+name = "ngboost-classifier"
+display_name = "NGBoost Classifier"
+language = "Python"
+framework = "NGBoost"
+description = "Natural-gradient boosting over a k-categorical distribution: decision-tree base learners fit the natural gradient of the LogScore for probabilistic predictions. Emits calibrated class probabilities; scored by AUC / logloss / accuracy. Pair with a classification-task domain."
+command = "predictors/.venv/bin/python"
+args = ["predictors/ngboost-classifier/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/ngboost-classifier/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+supports_stop = false
+
+[[predictors.params]]
+name = "n_estimators"
+label = "boosting rounds"
+type = "int"
+default = 400
+min = 10
+max = 10000
+
+[[predictors.params]]
+name = "learning_rate"
+label = "learning rate"
+type = "float"
+default = 0.03
+min = 0.001
+max = 1.0
+
+[[predictors.params]]
+name = "minibatch_frac"
+label = "row subsample per round"
+type = "float"
+default = 0.5
+min = 0.1
+max = 1.0
+
+[[predictors.params]]
+name = "col_sample"
+label = "column subsample per round"
+type = "float"
+default = 1.0
+min = 0.1
+max = 1.0
+
+[[predictors.params]]
+name = "base_max_depth"
+label = "base tree depth"
+type = "int"
+default = 3
+min = 1
+max = 12
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors]]
+name = "pyramid-mlp-classifier"
+display_name = "Pyramid-MLP Classifier"
+language = "Python"
+framework = "scikit-learn"
+description = "Feed-forward net whose hidden layers taper geometrically (top_width, top_width*decay, ...) from wide to narrow. StandardScaler + adam + ReLU MLPClassifier; softmax output. Emits calibrated class probabilities; scored by AUC / logloss / accuracy. Pair with a classification-task domain."
+command = "predictors/.venv/bin/python"
+args = ["predictors/pyramid-mlp-classifier/train.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/pyramid-mlp-classifier/train.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["predictors/pyramid-mlp-classifier/train.py", "export", "--model", "{model}", "--output", "{output}"]
+supports_stop = false
+
+[[predictors.params]]
+name = "top_width"
+label = "first (widest) hidden layer width"
+type = "int"
+default = 256
+min = 8
+max = 4096
+
+[[predictors.params]]
+name = "n_layers"
+label = "number of hidden layers"
+type = "int"
+default = 3
+min = 1
+max = 10
+
+[[predictors.params]]
+name = "decay"
+label = "per-layer width decay"
+type = "float"
+default = 0.5
+min = 0.1
+max = 1.0
+
+[[predictors.params]]
+name = "alpha"
+label = "L2 regularization"
+type = "float"
+default = 0.0001
+min = 0.0
+max = 100.0
+
+[[predictors.params]]
+name = "learning_rate_init"
+label = "initial learning rate"
+type = "float"
+default = 0.001
+min = 1e-06
+max = 1.0
+
+[[predictors.params]]
+name = "max_iter"
+label = "max training iterations"
+type = "int"
+default = 300
+min = 10
+max = 5000
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 42
+min = 0
+max = 1000000
+
+[[predictors]]
+name = "burn-deep-classifier"
+display_name = "Deep Classifier (burn)"
+language = "Rust"
+framework = "burn"
+description = "Representation-aware deep classifier. Splits features into a standardized continuous block (PCA + numerics) and raw one-hot identity groups, then trains one of three topologies: `mlp` (dense over all features), `embeddings` (a learned entity embedding per identity group + MLP — the fix for high-cardinality one-hots), or `wide_deep` (a wide linear path over one-hots summed with a deep MLP over the continuous block). Softmax cross-entropy; emits calibrated class probabilities scored by AUC / logloss / accuracy. Rust, CPU. Pair with a classification-task domain."
+command = "target/release/predictor-burn-deep-clf"
+args = ["train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["export", "--model", "{model}", "--output", "{output}"]
+model_sae_args = ["model-sae", "--model", "{model}", "--dataset", "{dataset}", "--output", "{output}"]
+supports_stop = true
+
+[[predictors.params]]
+name = "topology"
+label = "network topology"
+type = "enum"
+default = "embeddings"
+options = ["mlp", "embeddings", "wide_deep"]
+
+[[predictors.params]]
+name = "hidden"
+label = "deep-trunk hidden layers"
+type = "ints"
+default = [128, 64]
+
+[[predictors.params]]
+name = "embed_dim"
+label = "embedding width per identity group (capped at cardinality)"
+type = "int"
+default = 8
+min = 1
+max = 256
+
+[[predictors.params]]
+name = "activation"
+label = "hidden-layer activation"
+type = "enum"
+default = "relu"
+options = ["relu", "gelu", "silu", "tanh"]
+
+[[predictors.params]]
+name = "dropout"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors.params]]
+name = "epochs"
+type = "int"
+default = 100
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "lr"
+label = "learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "batch_size"
+type = "int"
+default = 256
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "patience"
+label = "early-stop patience (epochs, 0 = off)"
+type = "int"
+default = 0
+min = 0
+max = 10000
+
+[[predictors.params]]
+name = "val_fraction"
+label = "early-stop validation fraction (of train)"
+type = "float"
+default = 0.15
+min = 0.05
+max = 0.5
+
+[[predictors.params]]
+name = "checkpoint_every"
+label = "checkpoint every N epochs (0 = end only)"
+type = "int"
+default = 0
+min = 0
+max = 100000
+
+[[predictors]]
+name = "burn-ae-classifier"
+display_name = "Autoencoder-Pretrained Deep Classifier (burn)"
+language = "Rust"
+framework = "burn"
+description = "Two-phase representation-learning classifier. Phase 1 trains an autoencoder to reconstruct the full assembled feature vector (standardized PCA + numerics continuous block concatenated with raw one-hots) by MSE — an unsupervised bottleneck that must explain the features before seeing the label. Phase 2 transplants the trained encoder into a deep classifier (encoder → latent → MLP head → softmax), fine-tuned end-to-end with cross-entropy (or with the encoder frozen as a fixed feature extractor). Emits calibrated class probabilities scored by AUC / logloss / accuracy / brier. Rust, CPU. Pair with a classification-task domain."
+command = "target/release/predictor-burn-ae-clf"
+args = ["train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+export_args = ["export", "--model", "{model}", "--output", "{output}"]
+supports_stop = true
+
+[[predictors.params]]
+name = "enc_hidden"
+label = "encoder layer widths (last = latent dim)"
+type = "ints"
+default = [128, 64]
+
+[[predictors.params]]
+name = "ae_epochs"
+label = "autoencoder pretraining epochs"
+type = "int"
+default = 60
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "ae_lr"
+label = "autoencoder learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "ae_dropout"
+label = "dropout during pretraining"
+type = "float"
+default = 0.0
+min = 0.0
+max = 0.9
+
+[[predictors.params]]
+name = "clf_hidden"
+label = "classifier-head layers after the latent"
+type = "ints"
+default = [64]
+
+[[predictors.params]]
+name = "freeze_encoder"
+label = "freeze the transplanted encoder during fine-tune"
+type = "bool"
+default = false
+
+[[predictors.params]]
+name = "epochs"
+label = "supervised fine-tune epochs"
+type = "int"
+default = 100
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "lr"
+label = "fine-tune learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "batch_size"
+type = "int"
+default = 256
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "dropout"
+label = "classifier-head dropout"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors.params]]
+name = "activation"
+label = "hidden-layer activation"
+type = "enum"
+default = "relu"
+options = ["relu", "gelu", "silu", "tanh"]
+
+[[predictors.params]]
+name = "patience"
+label = "early-stop patience (fine-tune epochs, 0 = off)"
+type = "int"
+default = 0
+min = 0
+max = 10000
+
+[[predictors.params]]
+name = "val_fraction"
+label = "early-stop validation fraction (of train)"
+type = "float"
+default = 0.15
+min = 0.05
+max = 0.5
+
+[[predictors.params]]
+name = "checkpoint_every"
+label = "checkpoint every N fine-tune epochs (0 = end only)"
+type = "int"
+default = 0
+min = 0
+max = 100000

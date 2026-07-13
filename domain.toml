@@ -1,0 +1,406 @@
+# Domain configuration — Spotify engagement-from-metadata models.
+#
+# Sibling of lensing-spotify, but a different question: can a track's INTRINSIC
+# metadata (genre, artist, popularity, release year, …) alone predict how much
+# the user will engage with it? Target: engagement = play_count ×
+# completion_ratio, log1p-transformed (the same playback signal lensing-spotify
+# uses) — but here the features are restricted to descriptive song metadata.
+#
+# Corpus: the user's personal listening history (one point per unique track),
+# 12,256 tracks. Vectors are 200-dim word2vec co-listening embeddings — a
+# BEHAVIORAL signal, NOT song metadata — so the payload-based predictors are
+# the canonical models here and the embedding is left out of the feature set.
+# Because we do not depend on the co-listening vector, we keep ALL tracks (no
+# `embedding_source=="learned"` filter): the metadata fields are present for
+# fallback-vector tracks too, giving ~4× the rows lensing-spotify trains on.
+#
+# Rules of the road:
+# - Field order is load-bearing: feature columns are emitted numerics-first
+#   then categoricals, each in the order declared here.
+# - Field `name`s are payload JSON keys AND the items.json keys predictors
+#   read.
+# - Quality rule keys are stable internal identifiers; we rebind/relabel
+#   them, we do not rename them.
+#
+# NOTE on leakage: play_count / completion_ratio / skip_rate / shuffle_rate /
+# distinct_sessions are playback signals (engagement is built from the first
+# two). Curation fields (is_saved / in_playlist_count / on_repeat_count) are
+# behavioral too — you save/replay what you already engage with. ALL of these
+# are default_on = false so the canonical "metadata-only" build predicts
+# engagement from intrinsic song attributes alone; turning a group back on is a
+# deliberate sanity / soft-leakage control build, never the default.
+
+schema_version = 1
+
+[project]
+name = "spotify-predict-engagement"
+title = "Spotify Engagement from Metadata"
+entity_noun = "track"
+entity_noun_plural = "tracks"
+target_noun = "taste fit"
+
+[branding]
+mark_seed = "spotify-engagement"
+# Rotates the velocity ramp so the swarm reads green (approaching side lands on
+# the brand accent hue ~150) ↔ violet (receding) — matching the instance's
+# green-signal / violet-detail palette instead of stock lensing's red/blue.
+mark_hue_shift = 265
+
+[corpus]
+# Instance-local Qdrant on 6335 (shared, read-only, with lensing-spotify).
+qdrant_url = "http://localhost:6335"
+collection = "spotify_tracks"
+manual_collection = "manual-tracks"
+embedding_dim = 200
+metadata_root = "metadata"
+content_field = "content"
+
+# No corpus filter: engagement is predicted from intrinsic song metadata, which
+# every track carries, so the embedding_source ("learned" vs "fallback")
+# distinction that gates lensing-spotify is irrelevant here. Use all 12,256
+# tracks. (must/must_not empty ⇒ Qdrant match-all.)
+[corpus.filter]
+desc = "all tracks (metadata is present regardless of embedding source)"
+must = []
+must_not = []
+
+# Target PIVOT (2026-06-08): the model feeds the Pathfinder W_FIT term, which
+# wants a per-track [0,1] desirability. "rotation" = (play_count >= 2), i.e.
+# "did the user come back to this track" — a binary taste-fit signal that is
+# both more learnable (AUC ~0.77) than engagement magnitude and naturally
+# spread for fit_norm. transform = none (it's already 0/1). Engagement is kept
+# as a documented non-target field (the ceiling finding stands).
+# NOTE: build with quality.nonpositive_price = FALSE — rotation == 0 is the
+# valid negative class, not an outlier to exclude.
+[target]
+field = "rotation"
+transform = "none"
+# rotation is a binary label (play_count >= 2); train classifiers and rank by
+# AUC/logloss, not regression MAE. See experiments/PROJECT-FACTS.md (the binary
+# metric pivot, 2026-06-09).
+task = "binary"
+
+[target.format]
+style = "number"
+symbol = ""
+locale = "en-US"
+
+[metrics]
+primary = "AUC"
+columns = ["AUC", "logloss", "accuracy"]
+percent = ["accuracy"]
+value_unit = "P(rotation)"
+best_models_size = 12
+
+# ---- Fields: the corpus payload schema ----
+
+[[fields]]
+name = "rotation"
+role = "target"
+
+# Old target, demoted to a documented non-target field (target-derived, so it
+# stays OFF as a feature — using it would leak).
+[[fields]]
+name = "engagement"
+label = "engagement (former target)"
+role = "numeric"
+encode = "log1p"
+default_on = false
+group = "playback"
+
+[[fields]]
+name = "embedding_source"
+role = "filter_only"
+
+# --- Playback signals: components of / proxies for the target. Features only
+#     for a deliberate sanity-ceiling build; OFF by default. ---
+
+[[fields]]
+name = "play_count"
+label = "play count"
+role = "numeric"
+encode = "log1p"
+default_on = false
+group = "playback"
+
+[[fields]]
+name = "completion_ratio"
+label = "completion"
+role = "numeric"
+encode = "raw"
+default_on = false
+group = "playback"
+
+[[fields]]
+name = "skip_rate"
+label = "skip rate"
+role = "numeric"
+encode = "raw"
+default_on = false
+group = "playback"
+
+[[fields]]
+name = "shuffle_rate"
+label = "shuffle rate"
+role = "numeric"
+encode = "raw"
+default_on = false
+group = "playback"
+
+[[fields]]
+name = "distinct_sessions"
+label = "distinct sessions"
+role = "numeric"
+encode = "log1p"
+default_on = false
+group = "playback"
+
+# --- Intrinsic song metadata: the canonical feature set (default ON). ---
+
+[[fields]]
+name = "artist_popularity"
+label = "artist popularity"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = true
+
+[[fields]]
+name = "track_popularity"
+label = "track popularity"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = true
+
+[[fields]]
+name = "artist_followers"
+label = "artist followers"
+role = "numeric"
+encode = "log1p"
+default_on = true
+
+[[fields]]
+name = "release_year"
+label = "release year"
+role = "numeric"
+encode = "raw"
+default_on = true
+
+[[fields]]
+name = "artist_count"
+label = "credited artists"
+role = "numeric"
+encode = "raw"
+default_on = true
+
+# --- Acoustic features (af_*): what the track SOUNDS like, fetched from
+#     ReccoBeats (a non-Spotify drop-in for the deprecated Spotify
+#     audio-features endpoint) keyed by track_uri; see pipeline/. INTRINSIC and
+#     orthogonal to artist/genre identity; 64.8% coverage (indicator=true flags
+#     misses). TESTED 2026-06-08 and default_on = false: on an identical split
+#     they made xgboost slightly WORSE (MAE 2.684→2.775), so the canonical build
+#     stays the one-hot baseline. Kept available for experiments / a noise-band
+#     re-test. See experiments/PROJECT-FACTS.md. ---
+
+[[fields]]
+name = "af_danceability"
+label = "danceability"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = false
+group = "audio"
+
+[[fields]]
+name = "af_energy"
+label = "energy"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = false
+group = "audio"
+
+[[fields]]
+name = "af_valence"
+label = "valence"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = false
+group = "audio"
+
+[[fields]]
+name = "af_acousticness"
+label = "acousticness"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = false
+group = "audio"
+
+[[fields]]
+name = "af_instrumentalness"
+label = "instrumentalness"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = false
+group = "audio"
+
+[[fields]]
+name = "af_speechiness"
+label = "speechiness"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = false
+group = "audio"
+
+[[fields]]
+name = "af_liveness"
+label = "liveness"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = false
+group = "audio"
+
+[[fields]]
+name = "af_loudness"
+label = "loudness (dB)"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = false
+group = "audio"
+
+[[fields]]
+name = "af_tempo"
+label = "tempo (BPM)"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = false
+group = "audio"
+
+[[fields]]
+name = "af_key"
+label = "key (pitch class)"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = false
+group = "audio"
+
+[[fields]]
+name = "af_mode"
+label = "mode (maj/min)"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = false
+group = "audio"
+
+# --- Curation signals: library/playlist behavior. Not playback, but
+#     behaviorally entangled with engagement (soft leakage); OFF by default. ---
+
+[[fields]]
+name = "is_saved"
+label = "saved to library"
+role = "numeric"
+encode = "raw"
+indicator = true
+default_on = false
+group = "curation"
+
+[[fields]]
+name = "in_playlist_count"
+label = "playlist memberships"
+role = "numeric"
+encode = "raw"
+default_on = false
+group = "curation"
+
+[[fields]]
+name = "on_repeat_count"
+label = "on-repeat snapshots"
+role = "numeric"
+encode = "raw"
+default_on = false
+group = "curation"
+
+[[fields]]
+name = "first_played"
+label = "first played"
+role = "timestamp"
+
+[[fields]]
+name = "genre_primary"
+label = "primary genre"
+role = "categorical"
+vocab = { top_n = 40 }
+critical = true
+default_on = true
+
+[[fields]]
+name = "artist"
+role = "categorical"
+vocab = { top_n = 60 }
+default_on = true
+
+[[fields]]
+name = "album_type"
+label = "release type"
+role = "categorical"
+vocab = "all"
+default_on = true
+
+[[fields]]
+name = "top_platform"
+label = "top platform"
+role = "categorical"
+vocab = "all"
+default_on = false
+group = "playback"
+
+[[fields]]
+name = "track_name"
+label = "track"
+role = "display"
+
+[[fields]]
+name = "album"
+role = "display"
+
+[[fields]]
+name = "track_uri"
+label = "spotify URI"
+role = "display"
+
+# No [coordinates] (no geo fields) and no [currency] (single-"currency"
+# domain) — sections omitted entirely.
+
+[quality]
+outlier_group = "genre_primary"
+
+[agents]
+# 8095 is taken by lensing-spotify; this instance lives on 8096.
+api_base_url = "http://localhost:8096"
+report_dir = "experiments"
+facts_file = "experiments/PROJECT-FACTS.md"
+definition_naming = "<predictor>-<slug>"
+definition_naming_example = "xgboost-metadata-only"
+# Personal listening corpus — no web-scrape ingestion story.
+ingestion = false
+
+[quality.rule_labels]
+"nonpositive-price" = "engagement ≤ 0"
+"price-outlier" = "engagement outlier"
+"missing-fields" = "missing fields"
+"price-range" = "engagement out of range"
+"bedrooms-outlier" = "capped-numeric outlier"
+"duplicate-content" = "duplicate track"
+"short-content" = "thin description"
+# This domain has no currency; the rule is unbound and never fires.
+"foreign-currency" = "(n/a — no currency)"

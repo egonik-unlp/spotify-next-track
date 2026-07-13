@@ -1,0 +1,9 @@
+# Corpus-build pipeline deps. NOTE: gensim requires Python <3.13 — build this
+# venv with Python 3.12 (the instance's predictors/.venv is 3.14 and CANNOT host
+# gensim). See pipeline/corpus/README or CLAUDE.md.
+pandas
+pyarrow
+numpy
+gensim
+qdrant-client
+requests

@@ -1,0 +1,156 @@
+[[definitions]]
+name = "baseline-median"
+predictor = "baseline-median"
+dataset_tags = [
+    "ds-20260608-161709-p1-s42",
+    "ds-20260609-204419-p64-s42",
+]
+notes = "Phase-5 floor: group-median predictor; every model must beat this."
+created_at = "2026-06-08T16:18:57.332552881+00:00"
+updated_at = "2026-06-09T20:47:26.779626720+00:00"
+
+[definitions.hyperparams]
+
+[[definitions]]
+name = "ridge-metadata"
+predictor = "ridge"
+dataset_tags = [
+    "ds-20260608-161709-p1-s42",
+    "ds-20260608-172500-p128-s42",
+    "ds-20260609-204419-p64-s42",
+]
+notes = "Phase-5 linear comparator: how much of engagement is LINEARLY explainable from intrinsic metadata."
+created_at = "2026-06-08T16:18:57.352115838+00:00"
+updated_at = "2026-06-09T20:47:26.813591132+00:00"
+
+[definitions.hyperparams]
+alpha = 1.0
+auto_alpha = true
+huber_epsilon = 1.35
+loss = "squared"
+weight_gamma = 0.0
+
+[[definitions]]
+name = "xgboost-metadata"
+predictor = "xgboost"
+dataset_tags = [
+    "ds-20260608-161709-p1-s42",
+    "ds-20260608-172456-p16-s42",
+    "ds-20260608-172458-p64-s42",
+    "ds-20260608-172500-p128-s42",
+    "ds-20260608-173442-p128-s42",
+    "ds-20260608-175339-p1-s42",
+    "ds-20260608-175340-p1-s42",
+    "ds-20260608-202747-p64-s42",
+    "ds-20260608-203252-p64-s42",
+    "ds-20260608-204402-p64-s42",
+    "ds-20260608-205802-p64-s42",
+    "ds-20260609-204419-p64-s42",
+]
+notes = "Phase-5 low-drama default: bounded predictions, native one-hot/indicator/missing handling; expected champion candidate."
+created_at = "2026-06-08T16:18:57.374224281+00:00"
+updated_at = "2026-06-09T20:47:26.843597808+00:00"
+
+[definitions.hyperparams]
+colsample_bytree = 0.8
+early_stopping_rounds = 0
+learning_rate = 0.05
+max_depth = 6
+min_child_weight = 1.0
+n_estimators = 500
+reg_lambda = 1.0
+seed = 42
+subsample = 0.8
+val_fraction = 0.15
+weight_gamma = 0.0
+
+[[definitions]]
+name = "xgboost-classifier-rotation"
+predictor = "xgboost-classifier"
+dataset_tags = [
+    "rotation-auc-champion",
+    "DS-META",
+    "ds-20260609-204419-p64-s42",
+]
+created_at = "2026-06-09T17:36:45.850412293+00:00"
+updated_at = "2026-06-09T20:47:26.889622964+00:00"
+
+[definitions.hyperparams]
+colsample_bytree = 0.8
+learning_rate = 0.05
+max_depth = 6
+min_child_weight = 1.0
+n_estimators = 500
+reg_lambda = 1.0
+seed = 42
+subsample = 0.8
+
+[[definitions]]
+name = "xgboost-classifier-rotation-p64"
+predictor = "xgboost-classifier"
+dataset_tags = [
+    "ds-20260609-204419-p64-s42",
+    "ds-20260712-182109-p64-s42",
+]
+notes = "Phase-1 bake-off winner on full-64-d binary rotation (2026 corpus, 23,529 rows). AUC 0.7204 / logloss 0.6075 / acc 0.6585, seed 42. Best of 4 families (xgb > catboost 0.7111 > ngboost 0.6917 > pyramid-mlp 0.6781). Phase-2 depth/lr sweep best (depth8/lr0.03, AUC 0.7261) was within the noise band (+0.0057 < 2sigma 0.0126), so the default-depth6 config is saved; depth8/lr0.03 flagged for 3-seed confirmation. See experiments/2026-06-12-classifier-bakeoff-p64.md."
+created_at = "2026-06-12T12:17:36.858707891+00:00"
+updated_at = "2026-07-12T18:24:02.177717214+00:00"
+
+[definitions.hyperparams]
+colsample_bytree = 0.8
+learning_rate = 0.05
+max_depth = 6
+min_child_weight = 1.0
+n_estimators = 500
+reg_lambda = 1.0
+seed = 42
+subsample = 0.8
+
+[[definitions]]
+name = "burn-deep-embeddings-highvocab"
+predictor = "burn-deep-classifier"
+dataset_tags = ["ds-20260612-143014-p64-s42"]
+created_at = "2026-06-12T14:36:55.398712720+00:00"
+updated_at = "2026-06-12T14:37:35.872970551+00:00"
+
+[definitions.hyperparams]
+activation = "relu"
+batch_size = 256
+checkpoint_every = 0
+dropout = 0.1
+embed_dim = 16
+epochs = 250
+hidden = [
+    128,
+    64,
+]
+lr = 0.001
+patience = 20
+topology = "embeddings"
+val_fraction = 0.15
+
+[[definitions]]
+name = "burn-ae-classifier-rotation"
+predictor = "burn-ae-classifier"
+dataset_tags = ["ds-20260609-204419-p64-s42"]
+notes = "AE pretrain (177->128->64 latent, MSE) then transplant encoder into a fine-tuned softmax classifier (head [64]). End-to-end fine-tune with early stop."
+created_at = "2026-06-15T15:15:16.932394072+00:00"
+
+[definitions.hyperparams]
+activation = "relu"
+ae_dropout = 0.0
+ae_epochs = 60
+ae_lr = 0.001
+batch_size = 256
+checkpoint_every = 0
+clf_hidden = [64]
+dropout = 0.1
+enc_hidden = [
+    128,
+    64,
+]
+epochs = 150
+freeze_encoder = false
+lr = 0.001
+patience = 20
+val_fraction = 0.15

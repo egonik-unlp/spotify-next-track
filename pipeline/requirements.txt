@@ -1,0 +1,8 @@
+# Content-embedding pipeline (Option A): builds the spotify_tracks_content
+# collection — a multilingual sentence embedding of each track's INTRINSIC
+# metadata (title/artist/album/genre/era), as an alternative to the sibling
+# project's behavioral co-listening word2vec vectors.
+#
+# Reuses predictors/.venv (torch already present); these are the extra deps:
+sentence-transformers>=3.0
+qdrant-client>=1.9

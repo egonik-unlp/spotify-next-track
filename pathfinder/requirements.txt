@@ -1,0 +1,7 @@
+# Runtime deps for the pathfinder sidecar (pathfinder.service), installed into
+# pathfinder/.venv by `zig build pathfinder-setup`. Kept separate from the
+# predictor venv (predictors/.venv) — the pathfinder needs the Qdrant client,
+# which the predictors do not.
+numpy>=1.26
+qdrant-client>=1.7
+requests>=2.28

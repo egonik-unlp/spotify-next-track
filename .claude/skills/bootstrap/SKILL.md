@@ -1,0 +1,227 @@
+---
+name: bootstrap
+description: Initialize this template around a NEW dataset/prediction problem: probe a Qdrant corpus and infer its payload schema, interview the user into a domain.toml (field roles, quality levers, metrics, nouns), render the agent layer, reset the empirical record, decide how manual entries are fetched/presented (ingestion), build the first dataset with tuned quality levers, and set up the starter model definitions for a first evaluation. Use when the user wants to bootstrap, initialize, or adapt this framework to their own data/target variable, or asks "how do I point this at my dataset".
+user-invocable: true
+argument-hint: "[probe|configure|reset|ingestion|first-run] "
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Bash(curl *)
+  - Bash(python3 *)
+  - Bash(zig build *)
+  - Bash(docker compose *)
+  - Bash(cargo test *)
+  - Bash(sleep *)
+---
+<!-- GENERATED from agents-src/skills/bootstrap/SKILL.md by agents-src/render.py — edit the template (and domain.toml), not this file; then run `zig build render-agents`. -->
+
+Initialize this Lensing template around the user's dataset. This skill
+automates BOOTSTRAP.md — read it first; it is the authoritative checklist.
+Everything flows from **`domain.toml`** (the single source of domain truth)
+and the corpus assumption: a Qdrant collection of embedded documents with
+JSON metadata payloads.
+
+Work phase by phase, conversationally — every phase ends with the user
+confirming before you write anything. Resume at whatever phase the argument
+names or the repo state implies (e.g. domain.toml already customized → skip
+to ingestion/first-run).
+
+## Phase −1 — Environment & toolchain
+
+Check what's installed before anything else; install only with the user's
+explicit go-ahead, per tool:
+
+| tool | check | install if missing |
+|---|---|---|
+| Rust (cargo/rustc) | `cargo --version` | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh -s -- -y` then `. ~/.cargo/env` |
+| zig (build runner) | `zig version` | their package manager, or https://ziglang.org/download |
+| docker + compose | `docker compose version` | their package manager / Docker docs |
+| node + npm (UI) | `node --version` | their package manager / nvm |
+| python ≥ 3.11 | `python3 --version` | their package manager |
+
+Then the Lensing code itself:
+
+- **Working inside this template checkout** (the normal case): everything
+  is already here — `cargo build --release --workspace` (the committed
+  `Cargo.lock` pins the dependency tree) and `zig build` drive the rest.
+- **Once the Lensing crates are published to crates.io**: the Rust binaries
+  can instead be fetched with
+  `cargo install lensing-server lensing-pipeline lensing-predictor-burn-mlp lensing-predictor-burn-cnn lensing-predictor-blend`
+  — but the template repo remains the full distribution (UI, Python/Julia
+  predictors, registry, agent layer aren't crates). Prefer the template;
+  mention `cargo install` for binary-only hosts (training workers,
+  inference nodes — see docs/DEPLOY.md).
+- One-time predictor toolchains as needed: `zig build py-setup` (Python
+  venv), `zig build julia-setup` (Flux predictors).
+
+## Phase 0 — Probe the corpus
+
+Qdrant first (default `http://localhost:6335`; ask if theirs differs):
+
+```sh
+curl -s <qdrant>/collections                                   # what exists
+curl -s -X POST <qdrant>/collections/<name>/points/scroll \
+  -H content-type:application/json \
+  -d '{"limit": 16, "with_payload": true, "with_vector": false}'
+```
+
+From the sample, build and SHOW a schema inference table: payload key →
+observed JSON type → coverage in sample → proposed role (`categorical` |
+`numeric` | `coordinates` | `filter_only` | `timestamp` | `display`) →
+proposed options (encode log1p for heavy-tailed sizes,
+indicator for sparse numerics, vocab top-N for high-cardinality
+categoricals, critical for must-have fields). Do NOT propose a `target`
+role for any field — the prediction target is the user's call alone, asked
+in Phase 1. The shipped `domain.toml` is a neutral placeholder and the
+worked example at `crates/lensing-core/src/example-domain.toml` is
+reference material, not a preference: never carry its target (or any
+plausible-looking field) over as an assumed target. If several fields could
+plausibly be targets, list them neutrally as candidates without ranking.
+Also: where the metadata
+nests (`metadata_root`), which key holds the embedded text
+(`content_field`), the embedding dim (scroll once with
+`"with_vector": true, "limit": 1`), and a candidate corpus filter. If they
+have no corpus yet, explain the requirement (vectors + JSON payloads) and
+offer `docker compose --profile qdrant up -d` plus their own embedding
+pipeline — this skill does not embed documents.
+
+## Phase 1 — Interview → domain.toml
+
+Ask only what you cannot infer; propose defaults for everything else —
+with ONE exception: the **target is always asked, never inferred**. It is
+the first question of the interview, asked open-endedly ("which field
+should the models predict?") with no pre-selected suggestion:
+
+1. **Target**: field (the user's answer — no default), then **transform and
+   display format read off the target's *own* distribution from Phase 0, not
+   off a default.** There is no default transform: inspect the sampled values.
+   `log1p` fits a strictly-positive, heavy-tailed target (and only then) — it
+   is one option, never the starting assumption; `none` fits signed, bounded,
+   rating-like, count, or already-symmetric targets (anything that can be ≤ 0
+   breaks `log1p`). Show the user the observed range/skew and your reasoning,
+   and let them confirm. Display format follows the same evidence:
+   `style = "number"`, `symbol = ""` is the baseline for any quantity; reach
+   for `style = "money"` + a currency symbol **only** when the target is
+   literally a monetary amount. Never assume the target is positive, money, or
+   heavy-tailed because the framework's worked example happens to be a price.
+2. **Nouns + title**: entity noun ("listing"/"vehicle"/"posting"), target
+   noun, project name/title.
+3. **Fields = the dataset-pane levers.** Walk the inference table together.
+   Each `[[fields]]` entry becomes a build-form toggle (`default_on`), and
+   the `[quality]` bindings become the preflight/filter levers in the
+   dataset pane: `outlier_group` (which categorical groups the
+   target-outlier MAD rule), `capped_numeric` (which numeric gets the
+   sanity cap), `critical` fields (the missing-fields rule), plus per-rule
+   labels in the user's vocabulary. Field ORDER is column order — put
+   numerics first in the order they should appear.
+4. **Coordinates** (only with a geo field): plausible lat/lon bounds —
+   out-of-bounds geocodes count as missing.
+5. **Currency**: multi-currency corpus → `[currency]` (pair, rate endpoint
+   template, reconcile collection); single-currency → delete the section.
+6. **Metrics**: primary + columns + % metrics + value unit.
+7. **[agents]**: API port, naming convention, `ingestion` on/off (decided
+   properly in Phase 3).
+
+Then: write `domain.toml`, validate via `cargo test -p lensing-core` (the
+embedded-domain tests re-read it) — fix anything it rejects, and run
+`rm CLAUDE.md && zig build render-agents` so the skills/agents AND the
+repo-root `CLAUDE.md` speak the new domain. (The template ships
+`CLAUDE.md` as a bootstrap-pending stub and the renderer preserves the
+stub until it is deleted — hence the `rm`. Never leave the stub or
+another project's CLAUDE.md in place.) `zig build check` must pass
+before moving on.
+
+## Phase 2 — Reset the empirical record (DESTRUCTIVE — explicit confirmation)
+
+The repo ships the original project's history. Confirm each, then:
+
+- Move `experiments/*.md` reports into `experiments/archive/` (or
+  delete if the user prefers); seed `experiments/PROJECT-FACTS.md` with the empty skeleton
+  (leaderboard / noise bands / lineage / pitfalls tables + "No facts yet —
+  the first campaign seeds this").
+- Empty `models.toml`'s `[[definitions]]` entries (server must be stopped).
+- Reset `docs/experiments.tex` title/abstract to the new project; trim
+  `docs/figures/make_figures.py` to its style header (set PRIMARY_METRIC /
+  VALUE_UNIT); rewrite PRODUCT.md's one-pager.
+- Never touch `data/` or the Postgres volume of the ORIGINAL project if the
+  user is bootstrapping in a copy — and if they bootstrapped in-place by
+  mistake, stop and say so before deleting anything.
+
+## Phase 3 — Ingestion: how their "track equivalent" arrives
+
+Decide together how one-off entries are fetched and presented:
+
+| option | what to do |
+|---|---|
+| **Scrape from source sites** | Fill in the "Domain notes — FILLED IN BY BOOTSTRAP" section of `agents-src/agents/listing-generator.md` with THEIR source-site lore (portals, embedded-JSON tricks, field-name translations, regional quirks); keep `[agents] ingestion = true`; re-render. |
+| **Manual entry only** | `[agents] ingestion = false` (drops the agent); the UI's New-entry form (generated from `[[fields]]`, with `suggestions` datalists and `required` flags) is the whole story — tune those field options now. |
+| **API/CSV import later** | Same as manual for now; note it as a follow-up (the `POST /api/listings` flat-fields shape is the integration point). |
+
+Either way, review how an entry is *presented*: field `label`s, `display`
+role fields (photos, source links), and which fields the predict path must
+strip (the target + display fields — automatic).
+
+## Phase 4 — First run: levers live in the dataset pane
+
+```sh
+zig build db-up          # Postgres (compose)
+zig build serve          # in the user's terminal — long-running
+curl -s localhost:8096/api/collections/validate -H content-type:application/json \
+  -d '{"collection": "<theirs>"}'        # shape verdict + field coverage
+curl -s localhost:8096/api/datasets/preflight -H content-type:application/json \
+  -d '{"quality": {...}, "sample": 8}'   # per-rule counts BEFORE building
+```
+
+Iterate the preflight with the user — these counts are the levers doing
+their job (outlier thresholds, ranges, content floors). When the config
+reads right, build the first dataset (the **dataset-design** skill owns the
+details), then open `/datasets/<id>` and confirm the pane shows their
+fields, their rule labels, their target histogram.
+
+## Phase 5 — Starter models for the first evaluation
+
+Propose a small starter slate **for the user to confirm** — not a fixed
+recipe. The shape of the target and the dataset (decided in Phases 1/4)
+drives the picks; explain each in those terms, never as "what the price
+project used":
+
+1. `baseline-median` — always. The floor every model must beat ("group
+   median"); it is target-agnostic and frames every later result.
+2. A robust general-purpose regressor — `xgboost` is the usual first pick:
+   it makes no distributional assumption about the target, gives bounded
+   predictions, and handles one-hots / indicators / missing values natively.
+3. Optionally a third seat chosen by data shape, e.g. a neural predictor
+   (`burn-mlp`) when rows are plentiful (≳ 10k), or `svm` / `kernel-ridge`
+   on smaller tables (≲ 5k). **Only if the user chose `transform = log1p`**
+   does the log-space-MLP guardrail apply — set `clamp_output: true` so an
+   un-inverted prediction can't blow up; with `transform = none` it is not
+   needed.
+
+These are starting baselines for a first read, not commitments — confirm the
+slate with the user before creating definitions (via the
+**model-definitions** skill). Launch one run each on the first dataset, watch
+them complete, then seed `experiments/PROJECT-FACTS.md`'s leaderboard with the results.
+Hand the user off to the **experiment-designer** agent to design the first
+real campaign (the **experiment-runner** agent executes the approved design).
+
+## Ground rules
+
+- Every file write and every destructive step is announced and confirmed
+  first. Phase 2 doubly so.
+- **No default target, no default transform, no assumed model recipe.** The
+  shipped domain is a neutral placeholder and the worked example (prices) is
+  reference material, not a bias. Never assume, pre-select, or rank a target
+  field — it comes only from the user's explicit answer in Phase 1. The
+  transform (`log1p` vs `none`), the display format (`number` vs `money`),
+  and the starter-model slate all follow from the *probed target and dataset*
+  and are confirmed with the user — never carried over from the price origin.
+  In particular: do not reach for `log1p`, a currency symbol, or a log-space
+  MLP guardrail unless the target's own distribution calls for it.
+- Never write under `data/` by hand; never hand-edit the rendered
+  `.claude/.agents/.gemini` outputs (edit `agents-src/` + `domain.toml`,
+  then `zig build render-agents`).
+- The Rust crates, predictors, `registry.toml` and the UI should NOT need
+  changes — if the domain seems to require it (a missing quality-rule kind,
+  a new field role), say so explicitly rather than improvising code.

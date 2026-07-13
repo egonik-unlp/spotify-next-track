@@ -1,0 +1,21 @@
+# Shared deps for the Python predictors that need more than the stdlib
+# (ridge, torch-cnn, xgboost, lightgbm, random-forest). Installed into
+# predictors/.venv by `zig build py-setup`, which pins the PyTorch CPU wheel
+# index. baseline-median stays stdlib-only on system python3.
+numpy>=1.26
+scikit-learn>=1.4
+torch>=2.2
+xgboost>=2.0
+lightgbm>=4.3
+# Extra classifier families: catboost-classifier (ordered boosting) and
+# ngboost-classifier (natural-gradient boosting, k_categorical). ngboost pins
+# pandas<3.0 via lifelines; catboost is happy there too.
+catboost>=1.2
+ngboost>=0.5
+# Model export (the `export` subcommand → portable model.onnx): the ONNX
+# runtime/checker plus the tree-model converters (skl2onnx for random-forest,
+# onnxmltools for xgboost/lightgbm). Ridge/SVM/kernel-ridge build the graph by
+# hand from their saved params; the neural nets use torch.onnx.
+onnx>=1.16
+skl2onnx>=1.16
+onnxmltools>=1.12

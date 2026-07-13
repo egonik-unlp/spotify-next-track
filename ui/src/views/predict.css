@@ -1,0 +1,215 @@
+/* Corpus-grounded prediction view: mode tabs, search, basket, result card. */
+
+.predict-tabs {
+  display: flex;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.predict-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: -1px;
+  color: var(--ink-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.predict-tab:hover {
+  color: var(--ink);
+}
+.predict-tab.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.predict-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.predict-search {
+  flex: 1 1 22rem;
+  min-width: 16rem;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+.predict-search:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.predict-toggle,
+.predict-split-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+}
+.predict-split-pick select {
+  font: inherit;
+  padding: 2px var(--sp-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* Two-column on wide screens: results left, prediction card right. */
+.predict-pick,
+.predict-blend {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+@media (max-width: 60rem) {
+  .predict-pick,
+  .predict-blend {
+    grid-template-columns: 1fr;
+  }
+}
+/* Blend lays the basket above its results. */
+.predict-blend {
+  grid-template-columns: 1fr;
+}
+
+.predict-result-title,
+.predict-card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 600;
+}
+.predict-result-sub,
+.predict-card-sub {
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+  margin-top: 2px;
+}
+
+/* Prediction card */
+.predict-card {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: var(--sp-4);
+  background: var(--paper);
+}
+.predict-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.predict-figures {
+  display: flex;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+}
+.predict-figure-label {
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+  margin-bottom: 2px;
+}
+.predict-figure-value {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.predict-consensus-note {
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+  margin: var(--sp-3) 0 var(--sp-2);
+}
+.predict-members {
+  width: 100%;
+}
+.predict-warnings {
+  margin: var(--sp-2) 0 0;
+  padding-left: var(--sp-4);
+  color: var(--ink-dim);
+  font-size: var(--fs-sm);
+}
+
+/* Badges */
+.predict-badge {
+  display: inline-block;
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.predict-badge-test {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+.predict-badge-train,
+.predict-badge-unseen,
+.predict-badge-fallback {
+  background: var(--chip-bg, rgba(127, 127, 127, 0.16));
+  color: var(--ink-dim);
+}
+
+/* Blend basket + chips */
+.predict-basket {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+  background: var(--paper);
+}
+.predict-basket-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.predict-basket-empty {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-sm);
+}
+.predict-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.predict-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-1) 2px var(--sp-2);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  font-size: var(--fs-sm);
+}
+.predict-chip button {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+  font-size: 1.1em;
+  line-height: 1;
+  padding: 0 2px;
+}
+.predict-chip button:hover {
+  color: var(--ink);
+}
+
+.run-row.is-selected {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}

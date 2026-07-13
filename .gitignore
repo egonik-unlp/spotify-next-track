@@ -1,0 +1,28 @@
+.env
+data/
+target/
+node_modules/
+ui/dist/
+predictors/flux-mlp/Manifest.toml
+predictors/flux-cnn/Manifest.toml
+predictors/.venv/
+pathfinder/.venv/
+# Python bytecode caches at any depth (nested predictor/pipeline dirs included)
+__pycache__/
+*.pyc
+pathfinder/.spotify-token.json
+# Raw Spotify export data (instance data; rebuilt into the Qdrant corpus)
+extended-2026/
+docs/figures/*.pdf
+docs/experiments.pdf
+docs/api.pdf
+dist/
+.zig-cache/
+
+# Vendored corpus-build pipeline: large metadata caches (regenerable via enrich),
+# working intermediates, the rebuilt master CSV, and the gensim venv.
+pipeline/corpus/cache/
+pipeline/corpus/out/
+pipeline/corpus/master_df.csv
+pipeline/corpus/.venv/
+pipeline/corpus/__pycache__/

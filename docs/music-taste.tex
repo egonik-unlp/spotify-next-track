@@ -1,0 +1,381 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{accent}{HTML}{C0392B}
+\definecolor{blu}{HTML}{2C6FBB}
+\definecolor{ink}{HTML}{2B2B2B}
+
+\titleformat{\section}{\Large\bfseries\color{ink}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries\color{blu}}{\thesubsection}{0.6em}{}
+\setlist{itemsep=2pt,topsep=3pt}
+\graphicspath{{figures/}}
+
+\newcommand{\artist}[1]{\textit{#1}}
+
+\begin{document}
+
+\begin{titlepage}
+\centering
+\vspace*{3cm}
+{\color{accent}\rule{\textwidth}{2pt}}\\[0.8em]
+{\Huge\bfseries A Portrait of a Listener}\\[0.4em]
+{\Large Your music taste, read from the machine}\\[0.6em]
+{\large\itshape Un retrato de quien escucha --- tu gusto musical, leído por la máquina}\\[0.8em]
+{\color{accent}\rule{\textwidth}{2pt}}\\[2cm]
+{\large A data portrait derived from 23{,}529 tracks of listening history,\\
+the concepts a neural taste-model learned, and GPT-labeled sparse-autoencoder atoms.}\\[1cm]
+{\normalsize Spotify Engagement Lab \quad$\cdot$\quad rotation dataset \texttt{ds-20260612-143014-p64-s42}}\\[0.3em]
+{\normalsize 2026-07-12}
+\vfill
+\end{titlepage}
+
+% ============================================================
+\section*{How to read this document}
+This report is bilingual. \textbf{Part~I is in English}; \textbf{Part~II es la
+versión en español} (identical content). It is built from three sources: (1)~the
+raw listening history of a single Spotify user (23{,}529 tracks); (2)~two neural
+networks trained to predict which tracks that user \emph{replays}
+(\texttt{rotation} $=$ played $\geq 2$ times), the best taste-models on record;
+and (3)~a sparse-autoencoder (SAE) probe of those models' hidden layers, whose
+learned ``atoms'' were labeled by GPT (\texttt{gpt-4o-mini}). Method and caveats
+are in the Provenance appendix --- read it: the model captures a \emph{real but
+modest} slice of taste, and the honest picture is as interesting as the flattering
+one.
+
+\clearpage
+\begin{center}{\color{blu}\Large\bfseries PART I \quad$\cdot$\quad ENGLISH}\end{center}
+\vspace{0.5em}
+
+\section{The one-paragraph portrait}
+You are, above all, an \textbf{electronic listener with a rock heart and an
+Argentine passport}. Of the 23{,}529 tracks in your history you come back to
+\textbf{47.3\%} of them --- a high replay rate for a library this eclectic. What
+you \emph{return} to skews electronic and produced: intelligent dance, downtempo,
+IDM, deep and organic house. But the artists you play most are as likely to be
+guitar bands --- German industrial, British art-rock, and a deep seam of Argentine
+rock and indie. You favour the \textbf{instrumental over the lyrical}, the
+\textbf{moody over the sunny}, and \textbf{curated mid-fame artists over chart
+stars}. You are not a genre loyalist; you are a texture loyalist.
+
+\section{What you actually replay}
+\subsection{The artists you come back to}
+Ranked by total plays among replayed tracks:
+
+\begin{center}
+\begin{tabular}{@{}rl@{\hskip 2em}rl@{}}
+\toprule
+\# & Artist & \# & Artist \\
+\midrule
+1 & \artist{Rammstein} & 11 & \artist{Caribou} \\
+2 & \artist{Babasónicos} & 12 & \artist{Massive Attack} \\
+3 & \artist{Peces Raros} & 13 & \artist{Laika Perra Rusa} \\
+4 & \artist{Kraftwerk} & 14 & \artist{Daft Punk} \\
+5 & \artist{Four Tet} & 15 & \artist{Tosca} \\
+6 & \artist{Aphex Twin} & 16 & \artist{Air} \\
+7 & \artist{Underworld} & 17 & \artist{Thievery Corporation} \\
+8 & \artist{The Avalanches} & 18 & \artist{Radiohead} \\
+9 & \artist{Usted Señálemelo} & 19 & \artist{Gorillaz} \\
+10 & \artist{Joy Orbison} & 20 & \artist{Daphni} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Three pillars}
+\begin{description}[leftmargin=1.4em,style=nextline]
+\item[Electronic auteurs \& intelligent dance.] \artist{Four Tet}, \artist{Aphex
+Twin}, \artist{Caribou}/\artist{Daphni}, \artist{Underworld}, \artist{Daft Punk},
+\artist{Kraftwerk}, \artist{Joy Orbison}, \artist{Tosca}, \artist{Thievery
+Corporation}, \artist{The Avalanches}. Downtempo, big beat, IDM, deep/organic
+house, Düsseldorf electronic. This is the centre of gravity.
+\item[Argentine rock \& indie.] \artist{Babasónicos}, \artist{Peces Raros},
+\artist{Usted Señálemelo}, \artist{Laika Perra Rusa}. A distinct national thread ---
+argentine indie, argentine rock, argentine alternative --- woven right through the
+electronic core.
+\item[Alt-rock crossover.] \artist{Radiohead}, \artist{Gorillaz},
+\artist{Massive Attack}, \artist{Rammstein}. Rock that shakes hands with
+electronics --- trip-hop, art-rock, industrial.
+\end{description}
+
+\subsection{Genre families: what earns a replay}
+Not every genre earns its place in the library. Measuring \emph{replay lift} --- a
+family's share of your \emph{replays} divided by its share of the whole library ---
+electronic/dance is the clear winner, while hip-hop and jazz are more likely to be
+heard once and set aside.
+
+\begin{center}\includegraphics[width=0.86\textwidth]{taste_genre_lift.pdf}\end{center}
+
+\section{Your acoustic fingerprint}
+Comparing the average replayed track to the average play-once-and-drop track
+isolates what, sonically, earns a second listen. The single strongest signal is
+\textbf{instrumentalness}: the tracks you return to are markedly more instrumental
+--- consistent with an electronic/downtempo core where the voice is texture, not
+message. Replays are also a touch more energetic and danceable, and slightly
+\emph{less} acoustic and \emph{less} bright (lower valence): produced, propulsive,
+faintly melancholic.
+
+\begin{center}\includegraphics[width=0.86\textwidth]{taste_acoustic.pdf}\end{center}
+
+\section{When your music was made}
+Your replayed music centres on the \textbf{2010s} (median release year
+\textbf{2014}) but reaches back through the 2000s and 1990s and touches the
+Kraftwerk-era 1970s. Modern-leaning, but not novelty-driven.
+
+\begin{center}\includegraphics[width=0.78\textwidth]{taste_era.pdf}\end{center}
+
+You also replay \textbf{mid-fame} artists (median artist popularity 55/100,
+$\sim$390k followers) rather than chart stars --- a curatorial, slightly-off-centre
+palette rather than a mainstream one.
+
+\section{What the machine sees}
+The neural taste-models don't store ``you like Four Tet.'' They learn abstract
+\emph{feature detectors} in their hidden layers; a sparse autoencoder pulls those
+apart into individual ``atoms,'' and GPT named each one from the tracks that most
+excite it. Two honest truths emerged. First, \textbf{your taste is not cleanly
+separable} --- most atoms are \emph{polysemantic}, blending genres, because what
+unites your replays is texture and identity more than any one label. Second, the
+concepts that best predict a \emph{replay} are exactly the portrait above.
+
+\subsection{Concepts that predict a replay ($+$)}
+\begin{center}
+\begin{tabular}{@{}rll@{}}
+\toprule
+corr & Concept (GPT label) & Model \\
+\midrule
+$+0.39$ & Chillwave \& organic house & mlp \\
+$+0.36$ & Bossa nova \& deep house & mlp \\
+$+0.33$ & Upbeat electronic (reggaeton, deep house) & emb \\
+$+0.32$ & Electronic classics & mlp \\
+$+0.32$ & Mellow indie \& dance & emb \\
+$+0.30$ & Argentine rock favourites & emb \\
+$+0.29$ & Cumbia \& organic house & emb \\
+$+0.26$ & Chill \& downtempo & emb \\
+$+0.26$ & Argentine rock \& ambient & emb \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Concepts that predict a skip ($-$)}
+\begin{center}
+\begin{tabular}{@{}rll@{}}
+\toprule
+corr & Concept (GPT label) & Model \\
+\midrule
+$-0.31$ & Folk \& alternative-rock (dropped) & mlp \\
+$-0.24$ & Electro-swing \& indie (dropped) & mlp \\
+$-0.24$ & Dance-pop \& indie (dropped) & mlp \\
+$-0.16$ & ``Unpopular'' one-and-done tracks & emb \\
+$-0.13$ & Indie \& chillwave you skip & emb \\
+$-0.12$ & Dance-pop \& alt-metal you skip & emb \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The negatives are as telling as the positives: \textbf{dance-pop, electro-swing
+and folk} are the sounds most likely to get one play and no more.
+
+\section{The portrait in one line}
+\begin{quote}\itshape
+Instrumental, produced, slightly melancholic electronic music --- intelligent dance
+and downtempo at the core, a spine of Argentine rock and indie, and an alt-rock
+crossover streak --- replayed from mid-fame, curatorial artists, mostly from the
+2010s. Dance-pop and folk need not apply.
+\end{quote}
+
+\clearpage
+\begin{center}{\color{blu}\Large\bfseries PARTE II \quad$\cdot$\quad ESPAÑOL}\end{center}
+\vspace{0.5em}
+
+\section{El retrato en un párrafo}
+Eres, ante todo, \textbf{alguien de la electrónica, con corazón de rock y
+pasaporte argentino}. De los 23{,}529 temas de tu historial vuelves al
+\textbf{47{,}3\,\%} --- una tasa de reescucha alta para una biblioteca tan
+ecléctica. A lo que \emph{regresas} tiende a lo electrónico y producido:
+\emph{intelligent dance}, \emph{downtempo}, IDM, \emph{deep} y \emph{organic
+house}. Pero los artistas que más suenas son con la misma frecuencia bandas de
+guitarras --- industrial alemán, art-rock británico y una veta profunda de rock e
+indie argentinos. Prefieres lo \textbf{instrumental sobre lo lírico}, lo
+\textbf{melancólico sobre lo luminoso}, y \textbf{artistas de fama media y
+curados por sobre las estrellas de las listas}. No eres leal a un género; eres
+leal a una textura.
+
+\section{Lo que realmente reescuchas}
+\subsection{Los artistas a los que vuelves}
+Ordenados por reproducciones totales entre los temas reescuchados:
+
+\begin{center}
+\begin{tabular}{@{}rl@{\hskip 2em}rl@{}}
+\toprule
+\# & Artista & \# & Artista \\
+\midrule
+1 & \artist{Rammstein} & 11 & \artist{Caribou} \\
+2 & \artist{Babasónicos} & 12 & \artist{Massive Attack} \\
+3 & \artist{Peces Raros} & 13 & \artist{Laika Perra Rusa} \\
+4 & \artist{Kraftwerk} & 14 & \artist{Daft Punk} \\
+5 & \artist{Four Tet} & 15 & \artist{Tosca} \\
+6 & \artist{Aphex Twin} & 16 & \artist{Air} \\
+7 & \artist{Underworld} & 17 & \artist{Thievery Corporation} \\
+8 & \artist{The Avalanches} & 18 & \artist{Radiohead} \\
+9 & \artist{Usted Señálemelo} & 19 & \artist{Gorillaz} \\
+10 & \artist{Joy Orbison} & 20 & \artist{Daphni} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Tres pilares}
+\begin{description}[leftmargin=1.4em,style=nextline]
+\item[Autores de la electrónica e \emph{intelligent dance}.] \artist{Four Tet},
+\artist{Aphex Twin}, \artist{Caribou}/\artist{Daphni}, \artist{Underworld},
+\artist{Daft Punk}, \artist{Kraftwerk}, \artist{Joy Orbison}, \artist{Tosca},
+\artist{Thievery Corporation}, \artist{The Avalanches}. \emph{Downtempo},
+\emph{big beat}, IDM, \emph{deep}/\emph{organic house}, electrónica de
+Düsseldorf. Es tu centro de gravedad.
+\item[Rock e indie argentinos.] \artist{Babasónicos}, \artist{Peces Raros},
+\artist{Usted Señálemelo}, \artist{Laika Perra Rusa}. Una hebra nacional bien
+marcada --- indie, rock y alternativo argentinos --- entretejida en el núcleo
+electrónico.
+\item[Cruce con el rock alternativo.] \artist{Radiohead}, \artist{Gorillaz},
+\artist{Massive Attack}, \artist{Rammstein}. Rock que le da la mano a la
+electrónica: \emph{trip-hop}, art-rock, industrial.
+\end{description}
+
+\subsection{Familias de género: qué se gana una reescucha}
+No todos los géneros se ganan su lugar. Midiendo el \emph{empuje de reescucha} ---
+la participación de una familia en tus \emph{reescuchas} dividida por su
+participación en toda la biblioteca --- la electrónica/dance gana con claridad,
+mientras que el hip-hop y el jazz tienden a escucharse una vez y dejarse de lado.
+
+\begin{center}\includegraphics[width=0.86\textwidth]{taste_genre_lift.pdf}\end{center}
+\begin{center}\small\itshape (Etiquetas de los ejes en inglés en la figura: ``replay lift''
+$=$ empuje de reescucha.)\end{center}
+
+\section{Tu huella acústica}
+Comparar el tema reescuchado promedio con el que se toca una vez y se descarta
+aísla qué, sonoramente, se gana una segunda escucha. La señal más fuerte es la
+\textbf{instrumentalidad}: los temas a los que vuelves son marcadamente más
+instrumentales --- coherente con un núcleo electrónico/\emph{downtempo} donde la
+voz es textura, no mensaje. Las reescuchas también son algo más enérgicas y
+bailables, y un poco \emph{menos} acústicas y \emph{menos} luminosas (menor
+\emph{valence}): producidas, propulsivas, levemente melancólicas.
+
+\begin{center}\includegraphics[width=0.86\textwidth]{taste_acoustic.pdf}\end{center}
+
+\section{De qué época es tu música}
+Tu música reescuchada se centra en los \textbf{años 2010} (año de lanzamiento
+mediano \textbf{2014}) pero se extiende por los 2000 y los 90 y toca los 70 de la
+era Kraftwerk. Con inclinación a lo moderno, pero no por novedad.
+
+\begin{center}\includegraphics[width=0.78\textwidth]{taste_era.pdf}\end{center}
+
+Además reescuchas artistas de \textbf{fama media} (popularidad mediana 55/100,
+$\sim$390k seguidores) antes que estrellas de listas --- una paleta curada y algo
+descentrada más que \emph{mainstream}.
+
+\section{Lo que ve la máquina}
+Los modelos neuronales no guardan ``te gusta Four Tet''. Aprenden
+\emph{detectores de rasgos} abstractos en sus capas ocultas; un
+\emph{autoencoder} disperso (SAE) los separa en ``átomos'' individuales, y GPT
+nombró cada uno a partir de los temas que más lo activan. Surgieron dos verdades
+honestas. Primera: tu gusto \textbf{no es claramente separable} --- la mayoría de
+los átomos son \emph{polisemánticos}, mezclan géneros, porque lo que une tus
+reescuchas es más la textura y la identidad que una sola etiqueta. Segunda: los
+conceptos que mejor predicen una \emph{reescucha} son exactamente el retrato de
+arriba.
+
+\subsection{Conceptos que predicen una reescucha ($+$)}
+\begin{center}
+\begin{tabular}{@{}rll@{}}
+\toprule
+corr & Concepto (etiqueta GPT) & Modelo \\
+\midrule
+$+0.39$ & \emph{Chillwave} y \emph{organic house} & mlp \\
+$+0.36$ & Bossa nova y \emph{deep house} & mlp \\
+$+0.33$ & Electrónica animada (reggaetón, \emph{deep house}) & emb \\
+$+0.32$ & Clásicos electrónicos & mlp \\
+$+0.32$ & Indie suave y dance & emb \\
+$+0.30$ & Favoritos del rock argentino & emb \\
+$+0.29$ & Cumbia y \emph{organic house} & emb \\
+$+0.26$ & \emph{Chill} y \emph{downtempo} & emb \\
+$+0.26$ & Rock argentino y \emph{ambient} & emb \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Conceptos que predicen un descarte ($-$)}
+\begin{center}
+\begin{tabular}{@{}rll@{}}
+\toprule
+corr & Concepto (etiqueta GPT) & Modelo \\
+\midrule
+$-0.31$ & Folk y rock alternativo (descartados) & mlp \\
+$-0.24$ & \emph{Electro-swing} e indie (descartados) & mlp \\
+$-0.24$ & \emph{Dance-pop} e indie (descartados) & mlp \\
+$-0.16$ & Temas ``poco populares'' de una sola escucha & emb \\
+$-0.13$ & Indie y \emph{chillwave} que salteas & emb \\
+$-0.12$ & \emph{Dance-pop} y \emph{alt-metal} que salteas & emb \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Los negativos dicen tanto como los positivos: \textbf{dance-pop, electro-swing y
+folk} son los sonidos con más probabilidad de recibir una sola reproducción.
+
+\section{El retrato en una línea}
+\begin{quote}\itshape
+Música electrónica instrumental, producida y algo melancólica --- \emph{intelligent
+dance} y \emph{downtempo} en el núcleo, una columna de rock e indie argentinos y
+una veta de cruce con el rock alternativo --- reescuchada de artistas de fama media
+y curados, sobre todo de los años 2010. El \emph{dance-pop} y el folk que no se
+molesten en aplicar.
+\end{quote}
+
+\clearpage
+\section*{Provenance \& honest caveats \quad$\cdot$\quad Procedencia y advertencias}
+
+\textbf{Data.} A single user's Spotify Extended Streaming History, materialized as
+the rotation dataset \texttt{ds-20260612-143014-p64-s42} (23{,}529 tracks; target
+\texttt{rotation} $=$ play\_count $\geq 2$; 11{,}127 replayed / 47.3\%). Aggregate
+statistics (artists, genres, acoustics, era) are computed \emph{directly} over
+this data and are exact.
+
+\textbf{Models.} Two \texttt{burn-deep-classifier} neural nets, the best
+taste-models on record on this dataset:
+\texttt{emb-128-64-ed8-highvocab} (topology embeddings, AUC \textbf{0.72274}) and
+\texttt{mlp-256-128-64-highvocab} (topology mlp, AUC 0.71800). They predict a
+binary replay signal from song metadata (artist/genre one-hots $+$ acoustic PCA).
+
+\textbf{Interpretability.} Per-layer sparse autoencoders (2$\times$ overcomplete,
+$\ell_1=0.0015$, 40 epochs) trained on each model's hidden activations; analyses
+\texttt{interp-run-20260712-171243-f65f7-msae} (emb) and
+\texttt{interp-run-20260712-171915-c52e4-msae} (mlp). The atoms surfaced here are
+the ones most correlated with the replay target (12 per layer); their top-12
+activating tracks were sent to \textbf{GPT (\texttt{gpt-4o-mini})} for a concept
+label and description.
+
+\textbf{The honest caveat.} This model captures a \emph{real but modest} slice of
+your taste. On a held-out split the replay signal is only weakly decodable from
+the hidden layers (linear $R^2 \approx 0.14$), and the SAE found \emph{no clean,
+single-genre ``taste atom''} --- the atoms are polysemantic, and a dataset-level
+probe surfaced zero monosemantic target atoms at this data scale. In plain terms:
+your taste is driven by \emph{artist and texture identity} more than by any tidy
+genre rule the model could isolate, so the model-derived concepts (\S6) are
+suggestive, while the aggregate portrait (\S2--\S5) is the solid ground. The
+GPT labels are automated readings of 12 tracks each and occasionally blur; they
+are illustrative, not definitive.
+
+\vfill
+\begin{center}\small
+Generated from the Spotify Engagement Lab
+$\cdot$ campaign \texttt{2026-07-12-high-vocab-capacity-scan}
+$\cdot$ figures: \texttt{docs/figures/make\_taste\_figures.py}
+\end{center}
+
+\end{document}
