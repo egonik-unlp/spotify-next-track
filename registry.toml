@@ -1780,3 +1780,21 @@ type = "int"
 default = 5
 min = 0
 max = 10000
+
+[[predictors]]
+name = "seq-markov"
+display_name = "Next-track Markov (baseline)"
+language = "Python"
+framework = "none"
+description = "First-order co-listening Markov (track bigram + artist/genre back-off), train-only. The bar the sequence model must beat. Reads a SEQUENCE artifact."
+command = "predictors/.venv/bin/python"
+args = ["predictors/seq_baselines.py", "--dataset", "{dataset}", "--output", "{run_dir}", "--mode", "markov"]
+
+[[predictors]]
+name = "seq-popularity"
+display_name = "Next-track popularity (baseline)"
+language = "Python"
+framework = "none"
+description = "Context-free popularity floor over the sequence artifact."
+command = "predictors/.venv/bin/python"
+args = ["predictors/seq_baselines.py", "--dataset", "{dataset}", "--output", "{run_dir}", "--mode", "popularity"]
