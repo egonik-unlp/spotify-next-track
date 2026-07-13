@@ -33,11 +33,11 @@
 schema_version = 1
 
 [project]
-name = "spotify-predict-engagement"
-title = "Spotify Engagement from Metadata"
+name = "spotify-next-track"
+title = "Spotify Next-Track (session recommendation)"
 entity_noun = "track"
 entity_noun_plural = "tracks"
-target_noun = "taste fit"
+target_noun = "next track"
 
 [branding]
 mark_seed = "spotify-engagement"
