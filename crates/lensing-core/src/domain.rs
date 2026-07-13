@@ -58,9 +58,47 @@ pub struct Domain {
     #[serde(default)]
     pub quality: QualityBindings,
     pub metrics: MetricsSpec,
+    /// Sequence / next-item configuration. Required iff `[target].task =
+    /// "ranking"`; absent for pointwise domains.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<SequenceSpec>,
     /// Interpretability-subsystem parameters (layer/embedding/SAE probes).
     #[serde(default)]
     pub interp: Interp,
+}
+
+/// Next-item / session configuration for a `ranking` task. The dataset is built
+/// as ordered per-session item sequences (see the sequences producer), not a
+/// flat feature matrix; the model predicts the next item and is ranked by
+/// Recall@k / MRR / hit-rate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SequenceSpec {
+    /// Payload field grouping plays into a session (e.g. "session_id").
+    pub session_field: String,
+    /// Payload field giving intra-session order (a timestamp, e.g. "ts").
+    pub order_field: String,
+    /// Session-boundary gap in minutes.
+    #[serde(default = "default_gap_minutes")]
+    pub gap_minutes: u32,
+    /// Plays shorter than this (ms) count as skips and are dropped.
+    #[serde(default = "default_skip_threshold_ms")]
+    pub skip_threshold_ms: u32,
+    /// How the next-item label is chosen. Currently only "last_item".
+    #[serde(default = "default_seq_label")]
+    pub label: String,
+    /// Qdrant collection whose vectors are the per-item latents used for
+    /// retrieval (e.g. "spotify_tracks_song_ae").
+    pub latent_source: String,
+}
+
+fn default_gap_minutes() -> u32 {
+    30
+}
+fn default_skip_threshold_ms() -> u32 {
+    30_000
+}
+fn default_seq_label() -> String {
+    "last_item".to_string()
 }
 
 /// Interpretability parameters, consumed by the `/api/interp/*` tools and the
@@ -146,6 +184,9 @@ pub enum Task {
     Binary,
     /// K>2 classes (softmax); predictions carry the K-vector.
     Multiclass,
+    /// Next-item retrieval over ordered sequences. Uses the `[sequence]` block
+    /// instead of a scalar `[target]`; ranked by Recall@k / MRR / hit-rate.
+    Ranking,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -375,7 +416,8 @@ impl MetricsSpec {
     /// `None` when the metric is unknown or absent on this run — callers then
     /// skip the run for ranking.
     pub fn extract(&self, name: &str, m: &crate::Metrics) -> Option<f64> {
-        match name.to_lowercase().as_str() {
+        let lname = name.to_lowercase();
+        match lname.as_str() {
             "mae" => m.mae,
             "rmse" => m.rmse,
             "mape" => m.mape,
@@ -386,6 +428,10 @@ impl MetricsSpec {
             "auc" | "roc_auc" | "macro_auc" => m.auc,
             "brier" => m.brier,
             "macro_f1" | "f1" => m.macro_f1,
+            "mrr" => m.mrr,
+            // ranking cutoff metrics carry a `@k` suffix (recall@10, hit@10)
+            _ if lname.starts_with("recall") => m.recall_at_k,
+            _ if lname.starts_with("hit") => m.hit_rate,
             _ => None,
         }
     }
@@ -415,12 +461,15 @@ impl MetricsSpec {
     }
 
     fn extract_name_known(&self, name: &str) -> bool {
-        matches!(
-            name.to_lowercase().as_str(),
-            "mae" | "rmse" | "mape" | "medape" | "r²" | "r2" | "accuracy" | "acc"
-                | "logloss" | "log_loss" | "auc" | "roc_auc" | "macro_auc" | "brier"
-                | "macro_f1" | "f1"
-        )
+        let lname = name.to_lowercase();
+        lname.starts_with("recall")
+            || lname.starts_with("hit")
+            || matches!(
+                lname.as_str(),
+                "mae" | "rmse" | "mape" | "medape" | "r²" | "r2" | "accuracy" | "acc"
+                    | "logloss" | "log_loss" | "auc" | "roc_auc" | "macro_auc" | "brier"
+                    | "macro_f1" | "f1" | "mrr"
+            )
     }
 }
 
@@ -470,10 +519,14 @@ impl Domain {
                 bail!("duplicate field {:?}", f.name);
             }
         }
-        match self.field(&self.target.field) {
-            Some(f) if f.role == FieldRole::Target => {}
-            Some(f) => bail!("[target].field {:?} must have role \"target\", not {:?}", f.name, f.role),
-            None => bail!("[target].field {:?} is not declared in [[fields]]", self.target.field),
+        // A ranking task predicts the next sequence item, not a scalar payload
+        // field, so it uses [sequence] instead of a role="target" field.
+        if self.target.task != Task::Ranking {
+            match self.field(&self.target.field) {
+                Some(f) if f.role == FieldRole::Target => {}
+                Some(f) => bail!("[target].field {:?} must have role \"target\", not {:?}", f.name, f.role),
+                None => bail!("[target].field {:?} is not declared in [[fields]]", self.target.field),
+            }
         }
         let coord_fields: Vec<&FieldDesc> =
             self.fields.iter().filter(|f| f.role == FieldRole::Coordinates).collect();
@@ -517,6 +570,22 @@ impl Domain {
                 "[target].transform must be \"none\" for a {:?} task, not {:?}",
                 self.target.task, self.target.transform
             );
+        }
+        // A ranking task requires a [sequence] block whose session/order fields
+        // are declared; a pointwise task must not carry one.
+        match (self.target.task, &self.sequence) {
+            (Task::Ranking, None) => bail!("[target].task = \"ranking\" requires a [sequence] block"),
+            (Task::Ranking, Some(seq)) => {
+                for (key, name) in
+                    [("session_field", &seq.session_field), ("order_field", &seq.order_field)]
+                {
+                    if self.field(name).is_none() {
+                        bail!("[sequence].{key} {name:?} is not declared in [[fields]]");
+                    }
+                }
+            }
+            (_, Some(_)) => bail!("[sequence] is only valid with [target].task = \"ranking\""),
+            (_, None) => {}
         }
         Ok(())
     }

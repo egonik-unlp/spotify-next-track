@@ -20,7 +20,7 @@ pub mod registry;
 pub mod run;
 pub mod shuffle;
 
-pub use artifact::{Dataset, InferenceInput};
+pub use artifact::{Dataset, InferenceInput, SequenceDataset};
 pub use best_models::*;
 pub use currency::*;
 pub use definition::*;
