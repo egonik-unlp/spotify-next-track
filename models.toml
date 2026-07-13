@@ -1,1 +1,59 @@
-definitions = []
+[[definitions]]
+name = "markov-baseline"
+predictor = "seq-markov"
+dataset_tags = ["seq-20260713-014226"]
+notes = "First-order co-listening Markov (transit.rs affinity), train-only. The bar: R@10 0.107 / MRR 0.069 (2026-07-13 sweep)."
+created_at = "2026-07-13T18:38:08.095420562+00:00"
+
+[definitions.hyperparams]
+
+[[definitions]]
+name = "popularity-baseline"
+predictor = "seq-popularity"
+dataset_tags = ["seq-20260713-014226"]
+notes = "Context-free popularity floor (R@10 ~0.001)."
+created_at = "2026-07-13T18:38:08.109545323+00:00"
+
+[definitions.hyperparams]
+
+[[definitions]]
+name = "gru-infonce-h128"
+predictor = "seq-nexttrack"
+dataset_tags = ["seq-20260713-014226"]
+notes = "Best-loss sequence model (InfoNCE, sweep winner). R@10 0.089 — ties the Markov bar on R@10, loses MRR."
+created_at = "2026-07-13T18:38:34.242637149+00:00"
+
+[definitions.hyperparams]
+arch = "gru"
+batch_size = 128
+bidirectional = false
+dropout = 0.1
+epochs = 40
+hidden = 128
+k = 10
+loss = "infonce"
+lr = 0.001
+num_layers = 1
+patience = 6
+residual = false
+
+[[definitions]]
+name = "gru-infonce-h256"
+predictor = "seq-nexttrack"
+dataset_tags = ["seq-20260713-014226"]
+notes = "Topology best (width h256). R@10 0.096 — marginal best model, still a tie vs the bar."
+created_at = "2026-07-13T18:38:34.250741657+00:00"
+
+[definitions.hyperparams]
+arch = "gru"
+batch_size = 128
+bidirectional = false
+dropout = 0.1
+epochs = 40
+hidden = 256
+k = 10
+loss = "infonce"
+lr = 0.001
+num_layers = 1
+patience = 6
+residual = false
