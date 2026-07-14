@@ -307,12 +307,19 @@ def last_item_loss(pred: torch.Tensor, y: torch.Tensor,
 # --------------------------------------------------------------------------- #
 # Train                                                                       #
 # --------------------------------------------------------------------------- #
-def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
-    hp = load_hp(hp_spec)
-    torch.manual_seed(SEED)
-    rng = np.random.default_rng(SEED)
+def fit(art, hp: dict, seed: int = SEED):
+    """Train the recurrent next-latent model on the artifact's TRAIN sessions
+    and return the best (early-stopped) model, in eval mode.
 
-    art = load_artifact(dataset)
+    Pure training — no disk writes, no retrieval eval — so other predictors
+    (e.g. the GRU x Markov blend) can reuse the EXACT training procedure
+    (seeding, val split, per-step/last-item objective, early stopping) and get
+    byte-identical weights. `train()` below is a thin wrapper: fit + eval +
+    persist. `seed` defaults to the module SEED so existing behavior is
+    unchanged."""
+    torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)
+
     D = art.latent_dim
     latents = art.item_latents
 
@@ -342,7 +349,6 @@ def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
                           hp["dropout"], bidirectional=hp["bidirectional"],
                           residual=hp["residual"])
     opt = torch.optim.Adam(model.parameters(), lr=hp["lr"])
-    run_dir.mkdir(parents=True, exist_ok=True)
 
     def batch_loss(x, y, mask, lengths):
         """Loss for one padded batch + its sample weight, branching on the
@@ -399,6 +405,16 @@ def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
 
     model.load_state_dict(best_state)
     model.eval()
+    return model
+
+
+def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
+    hp = load_hp(hp_spec)
+    art = load_artifact(dataset)
+    latents = art.item_latents
+
+    model = fit(art, hp)
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     # Retrieval eval on TEST sessions. Precompute normalized item latents once;
     # the model's predicted next-latent for a prefix -> cosine over the vocab.

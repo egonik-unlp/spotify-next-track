@@ -57,3 +57,22 @@ lr = 0.001
 num_layers = 1
 patience = 6
 residual = false
+
+[[definitions]]
+name = "blend-gru-markov"
+predictor = "seq-blend"
+dataset_tags = ["seq-20260713-014226"]
+notes = "CHAMPION: z-blend of GRU-infonce + train-only Markov (alpha 0.5). R@10 0.173 / MRR 0.096 — beats the Markov bar (0.107/0.069) beyond CI. First model to beat the bar."
+created_at = "2026-07-14T14:17:22.024219157+00:00"
+
+[definitions.hyperparams]
+alpha = 0.5
+arch = "gru"
+batch_size = 128
+epochs = 40
+hidden = 256
+k = 10
+loss = "infonce"
+lr = 0.001
+patience = 6
+seed = 1337

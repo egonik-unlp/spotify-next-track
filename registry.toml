@@ -1802,6 +1802,238 @@ type = "bool"
 default = false
 
 [[predictors]]
+name = "seq-blend"
+display_name = "Next-track GRU x Markov blend (sequence)"
+language = "Python"
+framework = "PyTorch"
+description = "Blend predictor: z-normalized GRU-infonce next-latent cosine scores combined with the train-only first-order Markov (track bigram + artist/genre back-off) affinity, alpha*z(gru)+(1-alpha)*z(markov) over the candidates, then cosine/retrieval eval. One run trains the GRU + builds the Markov scorer + blends. Reads a SEQUENCE artifact. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/seq_blend.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+
+[[predictors.params]]
+name = "hidden"
+label = "recurrent hidden width"
+type = "int"
+default = 256
+min = 16
+max = 1024
+
+[[predictors.params]]
+name = "arch"
+label = "recurrent cell"
+type = "enum"
+default = "gru"
+options = ["gru", "lstm"]
+
+[[predictors.params]]
+name = "loss"
+label = "training objective"
+type = "enum"
+default = "infonce"
+options = ["cosine", "infonce"]
+
+[[predictors.params]]
+name = "epochs"
+type = "int"
+default = 40
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "patience"
+label = "early-stop patience (epochs, 0 = off)"
+type = "int"
+default = 6
+min = 0
+max = 10000
+
+[[predictors.params]]
+name = "lr"
+label = "learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 1337
+min = 0
+max = 1000000
+
+[[predictors.params]]
+name = "alpha"
+label = "blend weight on the GRU leg (1-alpha on Markov)"
+type = "float"
+default = 0.5
+min = 0.0
+max = 1.0
+
+[[predictors.params]]
+name = "k"
+label = "Recall@k reported in metrics.recall_at_k"
+type = "int"
+default = 10
+min = 1
+max = 1000
+
+[[predictors.params]]
+name = "batch_size"
+label = "batch size (sessions)"
+type = "int"
+default = 128
+min = 1
+max = 8192
+
+[[predictors]]
+name = "seq-ann"
+display_name = "Next-track ANN (feed-forward, sequence)"
+language = "Python"
+framework = "PyTorch"
+description = "The GRU's NON-recurrent feed-forward twin (the ensemble's A leg): pools each session prefix (mean-pool ++ last-item latent -> 128-d) through a 2-hidden-layer MLP to predict the next-track latent; cosine retrieval over the vocab. Same InfoNCE + per-step teacher forcing + early stopping as seq-nexttrack, no recurrence. Reads a SEQUENCE artifact. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/seq_ann.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+
+[[predictors.params]]
+name = "hidden"
+label = "MLP hidden width (both hidden layers)"
+type = "int"
+default = 128
+min = 16
+max = 1024
+
+[[predictors.params]]
+name = "loss"
+label = "training objective"
+type = "enum"
+default = "infonce"
+options = ["cosine", "infonce"]
+
+[[predictors.params]]
+name = "epochs"
+type = "int"
+default = 30
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "lr"
+label = "learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "dropout"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 1337
+min = 0
+max = 1000000
+
+[[predictors.params]]
+name = "k"
+label = "Recall@k reported in metrics.recall_at_k"
+type = "int"
+default = 10
+min = 1
+max = 1000
+
+[[predictors]]
+name = "seq-stacker"
+display_name = "Next-track XGBoost stacker (meta-learner, sequence)"
+language = "Python"
+framework = "XGBoost"
+description = "The ensemble meta-learner (X leg): an xgboost binary:logistic reranker that LEARNS to combine the base-leg full-vocab scores (Markov / GRU / ANN, configurable via `legs`) with candidate features [log1p(play_count), recency-in-prefix, artist-match, genre-match]. Trained on true-next (positive) + popularity-sampled negatives per TRAIN session; at eval it scores all vocab items -> full-vocab vector -> the shared leave-last-out retrieval eval. One run trains any requested base GRU/ANN legs + builds the Markov leg + trains the stacker. Reads a SEQUENCE artifact. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/seq_stacker.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+
+[[predictors.params]]
+name = "legs"
+label = "base legs to stack (which base-leg score columns)"
+type = "enum"
+default = "markov+gru+ann"
+options = ["markov+gru", "markov+ann", "markov+gru+ann"]
+
+[[predictors.params]]
+name = "n_negatives"
+label = "popularity-sampled negatives per train session"
+type = "int"
+default = 50
+min = 1
+max = 5000
+
+[[predictors.params]]
+name = "xgb_rounds"
+label = "boosting rounds (n_estimators)"
+type = "int"
+default = 200
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "xgb_max_depth"
+label = "tree max depth"
+type = "int"
+default = 6
+min = 1
+max = 32
+
+[[predictors.params]]
+name = "xgb_lr"
+label = "xgboost learning rate (eta)"
+type = "float"
+default = 0.1
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "base_hidden"
+label = "base GRU/ANN hidden width"
+type = "int"
+default = 128
+min = 16
+max = 1024
+
+[[predictors.params]]
+name = "base_epochs"
+label = "base GRU/ANN training epochs"
+type = "int"
+default = 30
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "base_loss"
+label = "base GRU/ANN training objective"
+type = "enum"
+default = "infonce"
+options = ["cosine", "infonce"]
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 1337
+min = 0
+max = 1000000
+
+[[predictors.params]]
+name = "k"
+label = "Recall@k reported in metrics.recall_at_k"
+type = "int"
+default = 10
+min = 1
+max = 1000
+
+[[predictors]]
 name = "seq-markov"
 display_name = "Next-track Markov (baseline)"
 language = "Python"
