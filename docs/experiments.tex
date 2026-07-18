@@ -58,7 +58,7 @@ band of \texttt{catboost}), the first ANN to clear the rotation save bar, saved
 as \texttt{burn-deep-embeddings-highvocab}. An eighth campaign then probes the inverse lever and refutes it: the classic Facebook GBDT$\to$LR trick generalized to GBDT$\to$MLP --- training a fresh head on the frozen champion tree's one-hot leaf indices --- caps \num{1.8}--\num{2.4} noise bands \emph{below} the bare xgboost champion (best head AUC \num{0.6978}) with badly broken calibration, a seventh convergent confirmation that learned representations layered on the trees do not help. A ninth campaign then probes how far the standing identity-resolution lever can go: a vocab-cap scan on the bare GBDT, holding the frozen champion config and moving \emph{only} the artist/genre one-hot cardinality, finds the lever \emph{largely spent} --- the first jump ($60/40\to300/120$) carries the gain, and past 300/120 each step pays only sub-band returns; xgboost reaches a new in-lineage single-split best AUC \num{0.7349} at 1000/300 (only $+0.005$, $\sim$0.4 band, over the anchor --- no save fired), \texttt{catboost} tracks it, and the full-vocabulary point could not be built (host memory ceiling). Section~\ref{sec:anns} consolidates
 why artificial neural nets structurally underperform on this one-hot-heavy
 feature matrix, how the representation-aware net resolves the diagnosis, and how
-enough identity resolution finally lets the embedding topology pay off.
+enough identity resolution finally lets the embedding topology pay off. A parallel line of work --- \emph{next-track} sequence recommendation, scored on a leak-free session split by Recall@10 --- is also consolidated (Sections~\ref{sec:nexttrack}--\ref{sec:nexttrack-phase2}): a GRU$\times$Markov rank-fusion blend beats the first-order co-listening bar by $\sim$$+61\%$ R@10, and adding a content-kNN third leg on a rich PCA-192 item space (R+M+C) is the current best-on-record row at R@10 \num{0.1859}. Its task, metrics and champion are unrelated to the rotation boards and must never be read against them.
 \end{abstract}
 
 \section{Introduction}
@@ -1783,6 +1783,540 @@ random-split AUCs are valid measurements of same-era ranking --- but it reframes
 what they mean. \emph{Source:
 \texttt{2026-07-12-taste-drift-temporal-split.md}.}
 
+\section{Next-track sequence recommendation: the task, the Markov bar, and the fusion champion}
+\label{sec:nexttrack}
+Every campaign above targets the binary \emph{rotation} signal. The remaining
+sections fold in a \emph{separate} line of work --- \emph{next-track} sequence
+recommendation --- whose task, metrics and champion are unrelated to the
+rotation leaderboards and must never be read against them. This section
+consolidates the four campaigns that established the task, its baseline bar and
+its fusion champion; the two sections that follow
+(Sections~\ref{sec:nexttrack-compression} and~\ref{sec:nexttrack-phase2})
+develop the item-representation and model-family axes and crown the current
+best-on-record row.
+
+\paragraph{Task and split.} The task is next-item \emph{retrieval}: given a
+listening \emph{session} (an ordered sequence of tracks), rank the catalog and
+recover the next distinct track the user actually played. It is scored on a
+single leak-free chronological \emph{next-distinct} split of the sequence
+artifact \dsid{seq-20260713-014226} (\num{7154} sessions / \num{19402} items;
+\num{5723} train / \num{1431} test at cut 2024-08-24). The \textbf{cold-item
+rate is 0.55} --- more than half of test-session targets never appear in any
+training session --- so absolute recall is modest \emph{by construction} and
+every result is read against the incumbent baseline, not an absolute bar.
+
+\paragraph{Metrics.} The headline metric is \textbf{Recall@10} (R@10, the
+fraction of test sessions whose held-out next track appears in the top ten
+retrieved), reported beside mean reciprocal rank (MRR) and, since 2026-07-14,
+the first-class \emph{graded-relevance} diagnostics: \emph{artist@10} /
+\emph{genre@10} (a top-ten candidate shares the truth's artist / primary genre)
+and \emph{artist\_mrr}. All confidence intervals here are bootstrap 95\% CIs
+over \num{2000} resamples of the \num{1431} test sessions, and the decisive
+statistic is the \emph{paired} per-session $\Delta$ against a named reference
+(the Markov bar, a same-space GRU anchor, or the champion). The graded metrics
+are the honest scorecard: the champion lands the right \emph{artist} in the
+top ten $\sim$32\% of the time and the right \emph{genre} $\sim$40\%, far more
+useful than the $\sim$17\% exact-recall number the cold-item rate caps.
+
+\paragraph{The Markov bar.} The reference every arm is measured against is the
+first-order \emph{Markov} co-occurrence model (\texttt{B2}: a train-only
+\texttt{track\_bigram} with artist/genre back-off, the transition term the
+sibling app already ships) at R@10 \num{0.1069}, MRR \num{0.0694}. Popularity
+(\texttt{B0}) and recency (\texttt{B1}) floors sit near zero (R@10
+\num{0.0007}). A board \emph{win} requires beating the reference on
+\emph{both} R@10 and MRR beyond the paired-$\Delta$ / marginal-CI tests, then a
+reproduction confirm.
+
+Table~\ref{tab:nexttrack-lb} is the standing next-track best-on-record board.
+The current champion \emph{row} --- the rank-fusion \emph{R+M+C} z-blend on the
+PCA-192 item space --- is crowned in Section~\ref{sec:nexttrack-phase2}; the
+prior champion \emph{R+M} z-blend on the AE-64 space, crowned in
+Section~\ref{sec:nexttrack-blend} below, remains the productization anchor (the
+two-leg blend that maps onto the app's transition slot until the three-leg
+blend is registered as a predictor). \textbf{None of these ranking predictors
+is best-models-promotable}: they are train-only (no \texttt{predict}
+subcommand), and the R+M+C champion is an off-server fusion driver, so a
+confirmed win is a best-on-record \emph{row}, not a promoted model.
+
+\begin{table}[ht]
+  \centering
+  \caption{Next-track best-on-record board (RANKING regime), on the leak-free
+  next-distinct split (\num{1431} test sessions; bootstrap 95\% CI over
+  \num{2000} resamples). R@10, MRR, artist@10, genre@10 higher-better; the
+  Markov bar is the incumbent reference. Champion row and prior champion
+  bolded; best cell per metric bolded. \textbf{Not comparable to any rotation
+  board above.} Item spaces: AE-64 (\dsid{spotify\_tracks\_song\_ae}); PCA-$k$
+  (\dsid{spotify\_tracks\_song\_pca$k$}), all fit from the leak-safe
+  \dsid{spotify\_tracks\_content} source.}
+  \label{tab:nexttrack-lb}
+  {\footnotesize\setlength{\tabcolsep}{4.5pt}\begin{tabular}{lccccl}
+    \toprule
+    Model & R@10 [95\% CI] & MRR & art@10 & gen@10 & Note \\
+    \midrule
+    \best{R+M+C, PCA-192} (champion row) & \best{0.1859 [0.166, 0.207]} & \best{0.1025} & 0.331 & 0.394 & best on record \\
+    R+M+C, PCA-128                        & 0.1824 [0.162, 0.203] & 0.0993 & 0.332 & 0.396 & content additive \\
+    \best{R+M, AE-64} (prior champion)    & 0.1726 [0.154, 0.192] & 0.0963 & 0.322 & 0.397 & prod.\ anchor; 3-seed \\
+    R+M+C, AE-64 (graded-preferred)       & 0.1740 [0.154, 0.194] & 0.1014 & \best{0.330} & 0.400 & content only tied \\
+    R+M, PCA-192                          & 0.1712 [0.151, 0.192] & 0.0952 & 0.329 & 0.398 & $\approx$ prior champion \\
+    R+M, PCA-128                          & 0.1670 [0.148, 0.187] & 0.0920 & 0.329 & 0.398 & GRU gain not carried \\
+    R+A+M, AE-64                          & 0.1684 & 0.0943 & --- & --- & ANN leg redundant \\
+    LSTM single, PCA-128                  & 0.1272 [0.110, 0.145] & 0.0495 & 0.335 & \best{0.458} & best single; $\ll$ blend \\
+    GRU single, PCA-192                   & 0.1230 [0.106, 0.140] & 0.0534 & \best{0.338} & 0.450 & dim point-optimum \\
+    GRU single, PCA-128 (base)            & 0.1146 [0.099, 0.132] & 0.0489 & 0.333 & 0.452 & confirmed base space \\
+    B2 first-order Markov (bar)           & 0.1069 [0.092, 0.124] & 0.0694 & 0.298 & 0.389 & app incumbent \\
+    ANN pooled-MLP, PCA-128               & 0.0901 [0.076, 0.105] & 0.0394 & 0.299 & 0.435 & loses to the GRU \\
+    XGB stacker (M+G / M+G+A)             & 0.080--0.087 & 0.042--0.049 & 0.31 & 0.38 & combiner underperforms \\
+    content-kNN (song-AE)                 & 0.0636 [0.050, 0.077] & 0.0321 & 0.272 & 0.405 & the additive C leg \\
+    item2vec (train-only SGNS)            & 0.0517 & 0.0214 & 0.166 & 0.312 & drags the blend \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\subsection{The sequence sweep: a GRU-infonce ties the Markov bar}
+\label{sec:nexttrack-sweep}
+\emph{Rationale.} The instance's opening campaign asked the founding question:
+does a session-context sequence model --- a GRU/LSTM over the ordered prefix,
+predicting the next track's 64-dim song-AE latent and retrieving by cosine ---
+beat the first-order Markov transition model the sibling app already ships,
+\emph{forward}, on the leak-free session split? Four arms crossed the recurrent
+cell (GRU, LSTM), capacity (\texttt{hidden} 128, 256) and, decisively, the
+training loss (cosine regression versus \texttt{InfoNCE} contrastive), all on
+\dsid{seq-20260713-014226} at 60 epochs.
+
+\emph{Results.} No arm beat the bar. The decision rule required beating
+\texttt{B2} on \emph{both} R@10 and MRR beyond non-overlapping CIs; the best arm
+(M3, GRU \texttt{hidden}128 \texttt{InfoNCE}) reached a statistical \emph{tie}
+with the Markov bar on R@10 (\num{0.0894}, paired-$\Delta$ CI includes zero) but
+\emph{lost} on MRR (\num{0.0388} versus \num{0.0694}) and Recall@20. The
+dominant lever was the loss objective: \texttt{InfoNCE} was $\approx 2.3\times$
+cosine on R@10 (\num{0.0894} versus \num{0.0391}), while capacity (\texttt{h256})
+and the LSTM cell barely moved the cosine arms (all $\sim$0.038--0.041).
+
+\emph{Interpretation.} A latent-plus-single-cosine-hop is a harder route to the
+\emph{exact} next track than a co-listening bigram: the bigram directly
+memorizes ``what follows what,'' while the GRU must land near the right point in
+a 64-d content space and then retrieve, losing on precise ranking (MRR). The
+finding is consistent with the parent lab's taste-drift result --- \num{0.55}
+cold items, identity/adjacency-driven behavior --- and it set the agenda:
+\texttt{InfoNCE} is the base loss, and the natural next arm is a \emph{blend} of
+the GRU's candidate scores with the Markov bigram.
+\emph{Source: \texttt{2026-07-13-nexttrack-sequence-sweep.md}.}
+
+\subsection{Topology scan: depth, width and direction are a spent lever}
+\label{sec:nexttrack-topology}
+\emph{Rationale.} With the loss fixed at \texttt{InfoNCE}, this scan isolated
+network \emph{topology}: does depth (stacked layers), width (\texttt{hidden}
+256), an inter-layer residual stack or bidirectionality lift the sequence model
+over the Markov bar? The \texttt{seq-nexttrack} predictor gained
+\texttt{num\_layers}, \texttt{residual} and \texttt{bidirectional}; because a
+bidirectional RNN under per-step teacher forcing would leak future items, the
+bidirectional arm used a leak-free last-item objective (encode the full prefix,
+predict only the held-out next item).
+
+\emph{Results.} Refuted. No arm beat the bar on both metrics. The best arm
+(width \texttt{h256}, R@10 \num{0.0957}) is a \emph{tie} with the bar on R@10
+and loses on MRR (\num{0.0411} versus \num{0.0694}). Depth is flat 1$\to$2
+layers (\num{0.0894}$\to$\num{0.0922}, in-band) and \emph{hurts} at 3 layers
+(\num{0.0825}, out-of-band below the bar); the residual stack over depth-2/h256
+added nothing. The bidirectional arm collapsed (\num{0.0482}), but this is an
+\emph{objective} artifact, not a directionality verdict: the leak-free last-item
+objective supplies $\sim$1 training target per session versus teacher forcing's
+$\sim$13 next-step pairs, so it trained on $\sim$13$\times$ less signal.
+
+\emph{Interpretation.} Architecture is not the lever for next-track on this
+corpus. The transferable latent-retrieval signal caps at R@10 $\sim$0.09--0.10
+across depth, width, residual and direction, below the co-listening bigram ---
+consistent with the whole arc that the loss objective moved the needle and
+capacity/topology do not. The one remaining unexplored lever was the candidate
+framing / fusion, which the next campaign pulled decisively.
+\emph{Source: \texttt{2026-07-13-nexttrack-topology-scan.md}.}
+
+\subsection{The GRU$\times$Markov fusion champion, and why more ensembling fails}
+\label{sec:nexttrack-blend}
+\emph{Rationale.} The sweep and the topology scan agreed that the best single
+GRU only \emph{ties} the Markov bar on R@10 while losing on MRR. This campaign
+asked whether \emph{combining} models beats the bar, and how far ensembling
+goes. Three legs were defined, each emitting full-vocab candidate scores:
+\textbf{M} = the train-only Markov bigram (the bar), \textbf{R} = the
+GRU-infonce-h256 recurrence, and \textbf{A} = an ANN bag-of-prefix MLP (a
+feed-forward twin of R). They were combined by a weighted z-normalized blend
+($\alpha\cdot z(\text{leg})+\dots$) and, as a learned alternative, an XGB
+stacker (a GBDT meta-learner over per-candidate features).
+
+\emph{Results.} The \textbf{R+M z-blend} ($\alpha{=}0.5$) \emph{beats the bar
+decisively}: R@10 \num{0.1726} $[0.154, 0.192]$, MRR \num{0.0963}, a paired
+$\Delta$ over Markov of $+\num{0.0657}$ $[+0.049, +0.083]$ (CI entirely above
+zero) --- $\sim$$+61\%$ R@10, $+39\%$ MRR --- on a robust plateau across
+$\alpha \in [0.25, 0.75]$ and reproduced across three seeds (\num{0.1705} /
+\num{0.1726} / \num{0.1726}). It was registered as the \texttt{seq-blend}
+predictor and the \texttt{blend-gru-markov} definition, the first next-track
+champion. Further ensembling then \emph{failed} to improve on it: R+A+M
+(\num{0.1684}) is slightly worse, R+A ($\approx$ GRU alone, \num{0.0894}) is
+much worse, and both XGB stacker variants (M+R \num{0.1020}; M+R+A \num{0.0887})
+barely clear Markov alone.
+
+\begin{table}[ht]
+  \centering
+  \caption{The fusion campaign: the R+M z-blend beats the Markov bar
+  decisively, and no richer ensemble improves on it. R@10 and MRR
+  higher-better; champion bolded. \emph{Not comparable to any rotation board.}}
+  \label{tab:nexttrack-blend}
+  {\small\setlength{\tabcolsep}{5pt}\begin{tabular}{lccl}
+    \toprule
+    Model & R@10 [95\% CI] & MRR & Note \\
+    \midrule
+    \best{R+M z-blend $\alpha{=}0.5$} (champion) & \best{0.1726 [0.154, 0.192]} & \best{0.0963} & $\Delta$ vs Markov $+0.066$ [$+0.05,+0.08$] \\
+    R+A+M z-blend                                & 0.1684 & 0.0943 & ANN leg redundant with GRU \\
+    B2 Markov bar (M)                            & 0.1069 [0.092, 0.123] & 0.0694 & the reference \\
+    XGB stacker M+R                              & 0.1020 & 0.0561 & learned combiner $\ll$ z-blend \\
+    GRU alone (R)                                & 0.0957 & 0.0411 & ties the bar on R@10 only \\
+    R+A z-blend                                  & 0.0894 & 0.0377 & $\approx$ GRU alone \\
+    XGB stacker M+R+A                            & 0.0887 & 0.0572 & barely clears Markov \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{Interpretation.} The win is about signal \emph{diversity}, not model
+count. The GRU (latent similarity) and Markov (co-occurrence counts) rank
+\emph{different} correct next-tracks, so fusing them roughly doubles the hit
+rate; piling on more of the \emph{same} kind of signal --- another neural
+latent predictor (A), redundant with R --- adds nothing. The learned XGB
+stacker \emph{underperforms} the simple z-blend, counter to the usual
+``stacking beats blending'' intuition: its pointwise binary-with-negatives
+training does not optimize the ranking objective as well as directly fusing
+normalized scores. The remaining headroom is bounded by the \num{0.55}
+cold-item rate and requires \emph{genuinely new signal}, not more model fusion
+--- the hypothesis the graded-relevance campaign tests next.
+\emph{Source: \texttt{2026-07-14-nexttrack-blend-and-ensemble.md}.}
+
+\subsection{Graded-relevance metrics and new base learners: content is the only additive signal}
+\label{sec:nexttrack-graded}
+\emph{Rationale.} Two threads in one campaign. (A) Make the evaluation credit
+landing the right \emph{band/vibe} even when the exact track is wrong --- the
+observation that ``the first choice is usually not the exact track, but the
+artist is usually right'' --- by promoting \emph{artist@k}, \emph{genre@k} and
+\emph{artist\_mrr} to first-class metrics wired end-to-end
+(\texttt{seq\_common.eval\_from\_scores} $\to$ Rust \texttt{Metrics} /
+\texttt{MetricsSpec} $\to$ \texttt{domain.toml} $\to$ UI). (B) Try genuinely new
+leak-free base learners --- \textbf{C} = content-kNN (cosine of each candidate's
+song-AE latent to the prefix, no training), \textbf{M2} = a second-order Markov
+trigram with back-off, and \textbf{I} = a train-only item2vec SGNS --- scored on
+both the exact and the new graded metrics.
+
+\emph{Results.} The exact-metric path was byte-identical (purely additive
+keys); the champion reproduced R@10 \num{0.1726} / MRR \num{0.0963} exactly. No
+new base learner beat the bar standalone (M2 \num{0.1076} $\approx$ M
+\num{0.1069}; the trigram falls through to the bigram --- sessions are too short
+to fire; item2vec \num{0.0517} is the weakest leg). Blended into the champion,
+\textbf{content is the only additive signal}: \textbf{R+M+C} (adding the content
+leg) is the top blend on MRR (\num{0.0963}$\to$\num{0.1014}), artist@10
+(\num{0.3215}$\to$\num{0.3298}) and artist\_mrr, and ties the champion on exact
+R@10 (paired $\Delta$ $+\num{0.0014}$, CI straddles zero). Item2vec \emph{drags}
+the blend (R+M+I \num{0.1349}); the trigram is neutral.
+
+\emph{Interpretation.} Content-kNN ranks \emph{different} near-correct tracks
+(latent vibe similarity) than the GRU (session recurrence) and Markov
+(co-occurrence), exactly the diversity the fusion campaign predicted new signal
+would need. On the AE-64 space the content leg only \emph{tied} the champion on
+exact recall while lifting the graded metrics --- so it was carried forward as
+the graded-preferred third leg, not a new exact champion. That ``tie'' becomes a
+\emph{win} once the item space is richer (Section~\ref{sec:nexttrack-phase2}):
+on PCA-192 the same R+M+C construction is the strongest on record. Co-listening
+item2vec and the trigram Markov added nothing on this data.
+\emph{Source: \texttt{2026-07-14-nexttrack-graded-relevance-and-new-legs.md}.}
+
+\section{Next-track sequence recommendation: the item-representation compression bake-off}
+\label{sec:nexttrack-compression}
+Every campaign above targets the binary \emph{rotation} signal. This section
+folds in the first report from a \emph{separate} line of work --- \emph{next-track}
+sequence recommendation --- whose task, metrics and champion are unrelated to the
+rotation leaderboards and must never be read against them. The task is
+retrieval: given a listening \emph{session} (an ordered sequence of tracks),
+rank the catalog and recover the next distinct track the user actually played.
+It is scored on a leak-free chronological \emph{next-distinct} split (\num{7154}
+sessions / \num{19402} items; \num{5723} train / \num{1431} test at cut
+2024-08-24; cold-item rate 0.55), and its headline metric is \textbf{Recall@10}
+(R@10, the fraction of test sessions whose held-out next track appears in the
+top ten retrieved), reported beside mean reciprocal rank (MRR) and the
+category-hit diagnostics artist@10 / genre@10 / artist\_mrr. All confidence
+intervals here are bootstrap 95\% CIs over \num{2000} resamples of the
+\num{1431} test sessions. The standing champion of this track --- the reference
+this campaign is read against --- is a rank-fusion \emph{R+M z-blend}
+(\texttt{blend-gru-markov}, $\alpha{=}0.5$) of a sequence GRU with a first-order
+Markov co-occurrence model on the 64-dim multimodal song-autoencoder space
+(\texttt{spotify\_tracks\_song\_ae}, ``AE-64''), at R@10 \num{0.173}
+$[0.154, 0.192]$, MRR \num{0.096}, three-seed confirmed.
+
+\emph{Rationale.} The champion's item space --- a 64-dim AE latent --- was one
+arbitrary early choice, and the sequence GRU predicts \emph{into} and retrieves
+\emph{over} whatever geometry that space imposes. This campaign asks which
+\emph{compression} is the best space for the GRU: linear PCA versus the
+nonlinear autoencoder, each at latent dim 32 / 64 / 128. Five alternative spaces
+were baked from the \emph{same} leak-safe 384-dim content source
+(\texttt{spotify\_tracks\_content}), each fit unsupervised over all \num{23529}
+items using only intrinsic content/acoustic/catalog fields (text-384 $+$
+z-scored numerics $+$ \texttt{af\_*} acoustics $+$ genre/album-type multi-hot),
+never a behavioral or target field. Each space was then scored under a
+\emph{frozen} GRU readout (\texttt{gru-infonce-h256}: \texttt{arch=gru},
+\texttt{loss=infonce}, \texttt{hidden=256}, one layer, dropout 0.1, 40 epochs,
+lr \num{1e-3}, batch 128, $k{=}10$), so the item latent space is the only axis
+that moves. The design bet was that the AE's equal-weight-per-block
+reconstruction loss would \emph{preserve} the small acoustic/catalog blocks that
+PCA's text-dominated global variance would starve; the null was that dim, not
+the compressor, sets the ceiling. Every artifact passed an identical parity gate
+(same \num{7154} sessions / \num{19402} items / split / cut), so the comparison
+is apples-to-apples, and the paired-$\Delta$ is the per-session R@10 difference
+against the in-batch AE-64 control.
+
+\emph{Results.} The parity gate passed: the AE-64 control reproduced its
+on-record R@10 \num{0.0957} $\in [0.081, 0.112]$, so the ranking is valid. All
+six spaces trained cleanly (Table~\ref{tab:nexttrack-compression};
+Figure~\ref{fig:nexttrack-compression}). \textbf{PCA-128}
+(\dsid{spotify\_tracks\_song\_pca128}, artifact \texttt{seq-20260715-030509};
+run \runid{run-20260715-042100-a1d9d}) is the single-GRU winner at R@10
+\num{0.1146}, a paired-$\Delta$ of $+\num{0.0189}$ $[+0.0042, +0.0335]$ over the
+AE-64 control --- a CI \emph{entirely above zero}, the only arm that clears the
+control significantly --- and it also tops MRR (\num{0.0489}), artist@10
+(\num{0.3326}) and artist\_mrr (\num{0.2644}). PCA-64 is the runner-up
+(\num{0.1041}, paired-$\Delta$ straddling zero: a tie). The two 32-dim spaces
+(AE-32 \num{0.0545}, PCA-32 \num{0.0412}) sit far below the 64-dim control, both
+with paired-$\Delta$ CIs entirely below zero. The training-free content-kNN
+probe (a pure cosine retrieval in each space, last column of the report) is flat
+at $\sim$0.06 across all six spaces and does \emph{not} track the GRU ranking:
+PCA-128's probe R@10 (\num{0.0636}) exactly ties the AE-64 control
+(\num{0.0636}), and AE-32 tops the probe (\num{0.0720}) despite ranking
+near-worst under the GRU.
+
+\begin{table}[ht]
+  \centering
+  \caption{The item-representation compression bake-off: six item spaces (linear
+  PCA vs the nonlinear AE $\times$ latent dim 32 / 64 / 128), each scored under
+  the \emph{same} frozen \texttt{gru-infonce-h256} readout on the next-distinct
+  split (\num{1431} test sessions; bootstrap 95\% CI over \num{2000} resamples;
+  paired-$\Delta$ vs the in-batch AE-64 control). All six succeeded. R@10, MRR,
+  artist@10 and genre@10 higher-better. Winner (PCA-128) bolded; best cell per
+  metric bolded. \emph{Not comparable to any rotation board.}}
+  \label{tab:nexttrack-compression}
+  {\small\begin{tabular}{llccccc}
+    \toprule
+    Space & Run id & R@10 [95\% CI] & paired-$\Delta$ vs AE-64 & MRR & artist@10 & genre@10 \\
+    \midrule
+    \best{PCA-128} (winner) & \best{\runid{run-20260715-042100-a1d9d}} & \best{0.1146 [0.099, 0.132]} & \best{$+0.0189$ [$+0.004$, $+0.034$]} & \best{0.0489} & \best{0.3326} & 0.4521 \\
+    PCA-64 (runner-up)      & \runid{run-20260715-042100-8851d} & 0.1041 [0.088, 0.121] & $+0.0084$ [$-0.005$, $+0.022$] (tie) & 0.0416 & 0.3117 & 0.4598 \\
+    AE-64 (control)         & \runid{run-20260715-042059-dd261} & 0.0957 [0.081, 0.111] & --- (control) & 0.0411 & 0.2942 & 0.4500 \\
+    AE-128                  & \runid{run-20260715-042059-e96ae} & 0.0929 [0.078, 0.108] & $-0.0028$ [$-0.015$, $+0.009$] (tie) & 0.0398 & 0.3026 & \best{0.4640} \\
+    AE-32                   & \runid{run-20260715-042059-d3f9e} & 0.0545 [0.043, 0.066] & $-0.0412$ [$-0.055$, $-0.027$] & 0.0274 & 0.2376 & 0.3955 \\
+    PCA-32                  & \runid{run-20260715-042059-b1242} & 0.0412 [0.031, 0.052] & $-0.0545$ [$-0.069$, $-0.041$] & 0.0224 & 0.2187 & 0.3816 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_compression}
+  \caption{Latent dimension, not the compressor, is the lever. Both series climb
+  steeply from dim 32 to 64; PCA (blue) then keeps climbing to 128 and
+  \emph{overtakes} the AE, while the AE (grey) plateaus --- its 128-dim point
+  (\num{0.0929}) actually dips below its own 64-dim control (\num{0.0957}). At
+  dim 32 the AE edges PCA, a low-capacity crossover that reverses once dim is
+  generous. The AE-64 control (red ring) is the champion's item space; the
+  PCA-128 winner (green star) is the only arm whose paired-$\Delta$ CI clears
+  zero. Error bars are bootstrap 95\% CIs; the neighbouring CIs overlap, so the
+  win rests on the \emph{paired} test, not the marginal intervals.}
+  \label{fig:nexttrack-compression}
+\end{figure}
+
+The single-GRU win, however, does \textbf{not} survive into the production
+blend. Re-fusing the winning PCA-128 GRU leg with the Markov leg
+(\texttt{seq-blend}, $\alpha{=}0.5$, seed 1337;
+run \runid{run-20260715-044920-36dce}) scores R@10 \num{0.1670}
+$[0.148, 0.187]$, MRR \num{0.0923} --- \emph{below} the AE-64 champion blend
+(\num{0.173}, MRR \num{0.096}) on both metrics, with overlapping CIs. By the
+decision rule this is not a board event: nothing was promoted, the AE-64
+champion blend stands, and PCA-128 is carried forward only as the sanctioned
+Phase-2 base space.
+
+\emph{Interpretation.} Four things follow. First, \textbf{latent dimensionality
+is the dominant lever and the compressor is secondary}: for PCA the trend is
+monotone (\num{0.041} $\to$ \num{0.104} $\to$ \num{0.115} across dim 32/64/128),
+and 32 dims starve the space regardless of method. Second, the design's
+\textbf{acoustic-preservation hypothesis is refuted}: at generous dim the linear
+PCA beats the nonlinear AE (PCA-128 $>$ AE-128, PCA-64 $\ge$ AE-64), and although
+AE-32 preserves the numeric/acoustic blocks near-perfectly it ranks near the
+bottom --- so acoustic preservation is irrelevant to next-track retrieval. What
+helps is a \emph{variance-ordered, decorrelated} target geometry (PCA-128
+captures cumulative EVR \num{0.982}) that the GRU finds easier to regress into
+than the AE's entangled equal-weight latents; PCA's global-variance ordering is
+a feature here, not the liability the hypothesis assumed. Third, the AE's edge
+is a purely \emph{low-capacity} phenomenon (AE-32 $>$ PCA-32): the nonlinear
+bottleneck packs more usable structure into 32 dims, but the advantage
+evaporates and reverses once dim is generous. Fourth, the flat content-kNN probe
+that fails to track the GRU ranking is a \emph{flagged divergence}: the
+intrinsic retrieval richness of these spaces is similar, so PCA-128's gain comes
+from the \emph{learnability} of its target geometry for the trained GRU, not
+from a demonstrably richer space in the absolute --- which is exactly why the
+decision rule flagged rather than auto-promoted it. The load-bearing caution for
+downstream work is the blend result: a clearly stronger GRU leg (\num{0.1146}
+vs \num{0.096}) bought \emph{nothing} at the blend, because the Markov leg is
+representation-independent and the extra tracks the better GRU recovers evidently
+overlap what Markov already supplies. \textbf{Representation gains measured on
+the single GRU do not automatically translate to the production blend}, so the
+compression axis is genuine progress for the single model but essentially spent
+for the blend. \emph{Source:
+\texttt{2026-07-15-nexttrack-compression-representation-bakeoff.md}.}
+
+
+\section{Next-track Phase 1b/2: the dimension ceiling, the model-family sweep, and the R+M+C champion}
+\label{sec:nexttrack-phase2}
+The compression bake-off (Section~\ref{sec:nexttrack-compression}) found latent
+\emph{dimension} to be the dominant lever and left PCA still climbing at 128.
+Two follow-on campaigns located the dimension ceiling, then swept the model
+family on the chosen spaces --- and, in the process, crowned a new
+best-on-record row.
+
+\subsection{The compression dimension ceiling: PCA peaks at 192}
+\label{sec:nexttrack-dim}
+\emph{Rationale.} With dimension established as the lever, this leg extended the
+PCA sweep upward (PCA-192, PCA-256) to locate the real optimum before Phase 2
+committed a base space, and added AE-192 to test whether PCA $\ge$ AE holds at
+higher dimension. The protocol was identical: all reps fit from the leak-safe
+\dsid{spotify\_tracks\_content} source, scored under the \emph{same} frozen
+\texttt{gru-infonce-h256} readout, each new sequence artifact passing the exact
+parity gate; the reference is PCA-128 (\runid{run-20260715-042100-a1d9d}), the
+Phase-1 winner, and the paired per-session $\Delta$ is measured against it.
+
+\emph{Results.} The PCA R@10-versus-dimension curve \textbf{peaks at
+$\sim$192} (R@10 \num{0.1230}) and \emph{turns over} by 256 (\num{0.1167}); it
+was not still climbing. The full trend is
+$32\!\to\!\num{0.041}$, $64\!\to\!\num{0.104}$, $128\!\to\!\num{0.115}$,
+$\mathbf{192\!\to\!\num{0.123}}$, $256\!\to\!\num{0.117}$
+(Figure~\ref{fig:nexttrack-dim}). PCA-192 is the point-optimum, but its paired
+$\Delta$ versus PCA-128 is $+\num{0.0084}$ $[-0.0007, +0.0189]$ --- it misses
+the ``CI entirely above zero'' bar by \num{0.0007}, a whisker --- so by the
+mechanical rule \textbf{PCA-128 stands as the Phase-2 base}, with PCA-192
+flagged as the confirm-and-promote candidate. PCA $\ge$ AE holds strongly and
+the gap is widest at 192 (PCA-192 \num{0.123} versus AE-192 \num{0.098}); the AE
+plateaus flat at $\sim$0.09--0.10 from dim 64 upward.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_dim_curve}
+  \caption{The dimension ceiling is found. Extending the compression sweep of
+  Figure~\ref{fig:nexttrack-compression} to PCA-192/256 and AE-192, the PCA
+  curve (blue) peaks at $\sim$192 (R@10 \num{0.123}) and turns over by 256, while
+  the AE (grey) plateaus flat at $\sim$0.09--0.10 and never catches it --- the
+  PCA$\,\ge\,$AE gap is widest at 192. PCA-192 is the point-optimum (green star)
+  but its paired $\Delta$ over PCA-128 grazes zero, so PCA-128 (the marked base)
+  stays the Phase-2 single-model base. Error bars are bootstrap 95\% CIs over
+  the \num{1431} test sessions.}
+  \label{fig:nexttrack-dim}
+\end{figure}
+
+\emph{Interpretation.} Extra variance past $\sim$192 (PCA-256 captures
+cumulative EVR \num{0.997}) is low-signal / noise dimensions the GRU cannot
+exploit and that slightly dilute the target geometry. The AE's flat plateau
+reconfirms the bake-off's refuted hypothesis at higher dimension: its
+equal-weight reconstruction objective keeps spending capacity on the tiny
+numeric/acoustic blocks (reconstruction $R^2 \approx 0.999$ at 192) rather than
+the high-variance text/catalog structure the GRU needs. As before, the
+training-free content-kNN probe stays flat ($\sim$0.064--0.070) and does not
+reproduce the GRU's peak, so the dimension optimum is about target
+\emph{learnability}, not intrinsic retrieval richness.
+\emph{Source: \texttt{2026-07-15b-nexttrack-compression-dim-extension.md}.}
+
+\subsection{The model-family sweep and the new champion, R+M+C on PCA-192}
+\label{sec:nexttrack-modelsweep}
+\emph{Rationale.} With the compression axis settled (PCA-128 base, PCA-192
+candidate), this campaign swept the model \emph{family} on the chosen spaces:
+does a different recurrent cell (LSTM), a non-recurrent pooled MLP (ANN), or a
+\emph{learned} XGB stacker beat the fixed GRU$\times$Markov z-blend --- and does
+adding the content-kNN third leg (R+M+C) on the \emph{rich} PCA space finally
+beat the champion? A frozen held config ran across all arms; only the model
+family and the representation varied, and the server was serialized
+(\texttt{-{}-max-runs 1}) to avoid the thread-oversubscription trap.
+
+\emph{Results.} A \textbf{new best-on-record row}: the \textbf{R+M+C z-blend on
+PCA-192} (GRU $\times$ train-only Markov $\times$ content-kNN, equal thirds)
+reaches R@10 \num{0.1859} $[0.166, 0.207]$, MRR \num{0.1025}, a paired $\Delta$
+over the prior champion of $+\num{0.0133}$ $[+0.0007, +0.0259]$ --- entirely
+above zero, with no MRR regression (Table~\ref{tab:nexttrack-phase2};
+Figure~\ref{fig:nexttrack-phase2}). The content leg is genuinely additive on the
+rich space, beating same-space R+M by $+\num{0.0154}$ (PCA-128) / $+\num{0.0147}$
+(PCA-192), both CIs above zero --- \emph{stronger} than the AE-64 R+M+C that
+only tied (Section~\ref{sec:nexttrack-graded}), because the richer, higher-EVR
+space makes the content leg pay off. The learned \textbf{XGB stacker badly
+underperforms} the fixed z-blend (\num{0.080}--\num{0.087}, losing even to its
+own single GRU base leg), reconfirming the fusion campaign; the \textbf{LSTM is
+the best single model} (PCA-128 \num{0.1272}, paired $\Delta$ over the GRU
+$+\num{0.0126}$, CI above zero) but far below the blends; and the Phase-2 single
+base \textbf{stays PCA-128} (GRU-192's edge still grazes zero).
+
+\begin{table}[ht]
+  \centering
+  \caption{Phase-2 model-family sweep on the rich PCA spaces, ranked by R@10
+  (higher-better). The fixed z-blend is the combiner of record; the learned XGB
+  stacker underperforms it badly. Champion row and prior champion bolded; best
+  cell per metric bolded. Paired $\Delta$ is per-session against the named
+  reference. \emph{Not comparable to any rotation board.}}
+  \label{tab:nexttrack-phase2}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{lp{2.4cm}ccp{2.9cm}}
+    \toprule
+    Model & Run id / source & R@10 [95\% CI] & MRR & paired $\Delta$ \\
+    \midrule
+    \best{R+M+C, PCA-192} (champ.\ row) & \runid{analyze\_rmc} (A4) & \best{0.1859 [0.166, 0.207]} & \best{0.1025} & vs champ $+0.0133$ [$+0.001,+0.026$] \\
+    R+M+C, PCA-128                        & \runid{analyze\_rmc} (A2) & 0.1824 [0.162, 0.203] & 0.0993 & vs champ $+0.0098$ (tie) \\
+    \best{R+M, AE-64} (prior champion)   & \runid{run-20260714-170928-645ae} & 0.1726 [0.154, 0.192] & 0.0963 & --- (reference) \\
+    R+M, PCA-192                          & \runid{run-20260715-142440-96f53} & 0.1712 [0.151, 0.192] & 0.0952 & vs champ $-0.0014$ (tie) \\
+    R+M, PCA-128                          & \runid{run-20260715-044920-36dce} & 0.1670 [0.148, 0.187] & 0.0920 & vs champ $-0.0056$ (tie) \\
+    LSTM single, PCA-128                  & \runid{run-20260715-142440-546d0} & 0.1272 [0.110, 0.145] & 0.0495 & vs GRU-128 $+0.0126$ ($>0$) \\
+    GRU single, PCA-192                   & \runid{run-20260715-142440-89d6a} & 0.1230 [0.106, 0.140] & 0.0534 & vs GRU-128 $+0.0084$ (tie) \\
+    ANN pooled-MLP, PCA-128               & \runid{run-20260715-142440-7e528} & 0.0901 [0.076, 0.105] & 0.0394 & vs GRU-128 $-0.0245$ \\
+    XGB stacker M+G, PCA-128              & \runid{run-20260715-142440-371b1} & 0.0867 [0.073, 0.101] & 0.0493 & vs GRU-128 $-0.0280$ \\
+    XGB stacker M+G+A, PCA-192            & \runid{run-20260715-142440-f111d} & 0.0853 [0.071, 0.099] & 0.0490 & vs GRU-192 $-0.0377$ \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.85\textwidth]{nexttrack_phase2_families}
+  \caption{The Phase-2 model-family sweep. The fixed z-blend is the combiner of
+  record: R+M+C on PCA-192 (green) is the new champion row, the content leg is
+  genuinely additive on the rich space, and the learned XGB stacker (red) badly
+  underperforms --- it loses even to its own single GRU base leg. LSTM edges GRU
+  as the best single model (grey) but sits far below the blends. The first-order
+  Markov bar (\num{0.107}) is the incumbent reference; the champion row is at
+  \num{0.186}.}
+  \label{fig:nexttrack-phase2}
+\end{figure}
+
+\emph{The crown, and its two honest caveats.} The board-event candidate was
+confirmed by reproducing the GRU-192 leg five times (the original plus four
+reruns) and recomputing R+M+C each time; the paired $\Delta$ over the prior
+champion was $+\num{0.0133}$ $[+0.0007, +0.0259]$ \emph{every} rerun, with the
+MRR lead intact, so R+M+C on PCA-192 was recorded as the new champion row. Two
+caveats travel with the crown and must not be omitted. First, \textbf{the
+reproduction spread was exactly zero} because \texttt{seq-nexttrack} training is
+deterministic on this CPU --- all five GRU-192 checkpoints were byte-identical
+--- so the confirm verified \emph{determinism, not seed-robustness}; the only
+uncertainty quantified is the single-split bootstrap. Second, \textbf{the paired
+$\Delta$ lower bound is $+\num{0.0007}$}: the crown clears zero by a whisker on a
+single split. The crown is real by the pre-agreed criterion, but the margin over
+the prior champion is thin, and hardening it needs a second leak-free test split
+(or seed-varied legs once the blend is generalized to three legs).
+
+\emph{Interpretation.} The compression-plus-model-family thread is otherwise
+closed: PCA-128 is the single-model base, the LSTM is the best single model, the
+learned stacker is dead as a combiner, and the fixed z-blend is the combiner of
+record. The load-bearing result is that \emph{content is the one leg that adds
+genuinely new ranking signal, and it pays off more on the higher-EVR PCA
+space} --- the exception to the standing rule that single-model / representation
+gains do not carry to the blend (the R+M pair on the rich PCA spaces only ties
+the AE-64 champion). The productization gap remains: the champion is train-only
+and off-server, so the prior champion R+M on AE-64 stays the deployable anchor
+until the three-leg blend is registered with a \texttt{predict} subcommand.
+\emph{Source: \texttt{2026-07-15c-nexttrack-phase2-model-sweep.md}.}
+
 \section{Conclusions}
 \label{sec:conclusions}
 Thirteen campaigns (Jun--Jul 2026) on the pivoted rotation target converge
@@ -1839,8 +2373,10 @@ the lever all along.
 (11) A capacity scan on the high-vocab matrix confirmed the dense net is at its ceiling there: neither widening nor deepening beats the $[128,64]$ control by a band, a third embedding layer \emph{hurts} ($-\num{0.0152}$, dilution not starvation), and the best \texttt{mlp} ties the best \texttt{embeddings} --- capacity, not the embeddings mechanism, was the lever, and it is spent (Section~\ref{sec:anns-capacity}).
 (12) Finally, the honest forward question was asked --- and it reframes the whole leaderboard. A first-class chronological (train-earlier / test-later) split drops the champion from AUC \num{0.735} to \num{0.619}, a $\sim$0.11 collapse that is \emph{universal} across xgboost, catboost and logistic and is genuine taste non-stationarity, not right-censoring; a walk-forward read lands at \num{0.59}--\num{0.67} every year, never near the random baseline (Section~\ref{sec:drift}). Every on-record AUC is therefore an upper bound on same-era ranking; real forward ``will I replay a song I discover next'' skill is $\sim$0.62--0.63. The mechanism is identity churn --- unseen future artists fall into \texttt{\_\_other\_\_} and the model must lean on the weaker $\sim$0.60 intrinsic floor --- which is precisely why higher vocab caps and bigger nets, both same-era memorization levers, do not transfer forward. This does not overturn any random-split number; it clarifies what they measure and makes richer generalizable intrinsic signal the only remaining lever for forward performance.
 
+(13) A parallel line of work --- \emph{next-track} sequence recommendation, whose task and metrics are unrelated to the rotation boards above (Sections~\ref{sec:nexttrack}--\ref{sec:nexttrack-phase2}) --- was consolidated across seven campaigns. A session GRU alone only \emph{ties} the first-order Markov co-listening bar and loses on MRR, and neither loss-tuning nor any topology (depth/width/residual/direction) beats it. But a \emph{rank-fusion} R+M z-blend (GRU $\times$ Markov) beats the bar decisively ($+61\%$ R@10, three-seed confirmed) because the two legs rank \emph{different} correct tracks; a learned XGB stacker underperforms the fixed z-blend and adding redundant neural legs does not help --- the win is signal diversity, not model count. The one genuinely additive new signal is \emph{content}: an item-representation sweep found latent \emph{dimension} (not the compressor) is the lever and peaks at PCA-192, and on that rich space a three-leg R+M+C z-blend is the current best-on-record row at R@10 \num{0.1859}, MRR \num{0.1025} (paired $\Delta$ over the prior champion $+\num{0.0133}$, CI$>$0). Two caveats bound the crown: the reproduction confirm had zero spread because \texttt{seq-nexttrack} is deterministic on this CPU (so it verified determinism, not seed-robustness), and the paired-$\Delta$ lower bound clears zero by only $+\num{0.0007}$ on a single split. Every next-track ranking predictor is train-only and off-server, so the crown is a best-on-record \emph{row}, not a promoted model, and the prior champion R+M on AE-64 remains the productization anchor.
+
 \section{Source reports}
-This synthesis consolidates thirteen campaign reports from \texttt{experiments/}:
+This synthesis consolidates twenty campaign reports from \texttt{experiments/}:
 \begin{itemize}
   \item \texttt{2026-06-09-ae-xgboost-blend.md} --- autoencoder-latent +
     XGBoost blend on rotation (Section~\ref{sec:ae-blend}).
@@ -1884,6 +2420,34 @@ This synthesis consolidates thirteen campaign reports from \texttt{experiments/}
   \item \texttt{2026-07-12-taste-drift-temporal-split.md} --- the chronological
     versus random split; a universal $\sim$0.11 AUC drop reframing the
     leaderboard as an upper bound on same-era ranking (Section~\ref{sec:drift}).
+  \item \texttt{2026-07-15-nexttrack-compression-representation-bakeoff.md} ---
+    the first \emph{next-track} sequence-recommendation campaign folded in: an
+    item-representation compression bake-off (PCA vs autoencoder $\times$ latent
+    dim 32/64/128) under a frozen GRU readout. PCA-128 is the single-GRU winner
+    (paired-$\Delta$ $+0.0189$, CI$>$0) but the win does not carry into the R+M
+    blend, so nothing was promoted (Section~\ref{sec:nexttrack-compression}).
+  \item \texttt{2026-07-13-nexttrack-sequence-sweep.md} --- the founding
+    next-track campaign: a GRU/LSTM sequence sweep against the first-order
+    Markov bar; the best GRU-infonce ties on R@10 but loses on MRR
+    (Section~\ref{sec:nexttrack-sweep}).
+  \item \texttt{2026-07-13-nexttrack-topology-scan.md} --- depth / width /
+    residual / bidirectional topology scan; architecture is a spent lever, all
+    arms cap below the Markov bar (Section~\ref{sec:nexttrack-topology}).
+  \item \texttt{2026-07-14-nexttrack-blend-and-ensemble.md} --- the
+    GRU$\times$Markov R+M z-blend beats the bar $+61\%$ R@10 (the first
+    next-track champion); no richer ensemble improves on it and the learned XGB
+    stacker underperforms (Section~\ref{sec:nexttrack-blend}).
+  \item \texttt{2026-07-14-nexttrack-graded-relevance-and-new-legs.md} ---
+    first-class graded-relevance metrics (artist@k / genre@k / artist\_mrr) and
+    new leak-free base learners; content-kNN is the only additive signal, tying
+    the champion on AE-64 (Section~\ref{sec:nexttrack-graded}).
+  \item \texttt{2026-07-15b-nexttrack-compression-dim-extension.md} --- the
+    PCA/AE dimension sweep extended to 192/256; the curve peaks at PCA-192 and
+    turns over, so PCA-128 stays the Phase-2 base (Section~\ref{sec:nexttrack-dim}).
+  \item \texttt{2026-07-15c-nexttrack-phase2-model-sweep.md} --- the
+    model-family sweep on the rich PCA spaces; the fixed z-blend beats the
+    learned stacker, LSTM is the best single model, and R+M+C on PCA-192 is
+    crowned the new best-on-record row (Section~\ref{sec:nexttrack-modelsweep}).
 \end{itemize}
 
 \end{document}

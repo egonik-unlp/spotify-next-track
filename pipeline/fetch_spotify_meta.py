@@ -24,7 +24,7 @@ import urllib.request
 
 from qdrant_client import QdrantClient
 
-QDRANT_URL = "http://localhost:6335"
+QDRANT_URL = "http://localhost:6337"
 DST = "spotify_tracks_content"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 API = "https://api.spotify.com/v1"

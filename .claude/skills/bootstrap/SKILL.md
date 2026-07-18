@@ -58,7 +58,7 @@ Then the Lensing code itself:
 
 ## Phase 0 — Probe the corpus
 
-Qdrant first (default `http://localhost:6335`; ask if theirs differs):
+Qdrant first (default `http://localhost:6337`; ask if theirs differs):
 
 ```sh
 curl -s <qdrant>/collections                                   # what exists

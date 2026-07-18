@@ -1,7 +1,7 @@
 <!-- GENERATED from agents-src/root/CLAUDE.md by agents-src/render.py — edit the template (and domain.toml), not this file; then run `zig build render-agents`. -->
-# Spotify Engagement from Metadata
+# Spotify Next-Track (session recommendation)
 
-A taste fit-prediction lab: a Qdrant corpus of embedded
+A next track-prediction lab: a Qdrant corpus of embedded
 tracks feeds dataset builds (PCA + metadata features),
 language-neutral predictor plugins train on them, and lensing-server orchestrates
 runs, promoted models and predictions behind a React UI.
@@ -28,7 +28,7 @@ runs, promoted models and predictions behind a React UI.
   export), runs + metrics, promoted-model records, the best-models group,
   dataset index, run events. `zig build migrate-data` backfills it from the
   files and prints a consistency report — it never modifies the files.
-- The **best-models group** (top-12 by AUC)
+- The **best-models group** (top-12 by recall@10)
   is server-maintained: recomputed on every run completion and model
   promotion/deletion, auto-promoting top runs. Served at
   `GET /api/best-models`; consensus predictions at
@@ -37,7 +37,7 @@ runs, promoted models and predictions behind a React UI.
   `best_models` table.
 - **`data/`** holds the binary artifacts (datasets, run dirs, model
   snapshots). NEVER write under `data/` by hand.
-- The Qdrant corpus (`spotify_tracks` at `http://localhost:6335`) is hosted by
+- The Qdrant corpus (`spotify_tracks` at `http://localhost:6337`) is hosted by
   this instance's own compose stack (`zig build db-up` starts it via the
   `qdrant` profile); manual entries live in `manual-tracks`.
 - **Refreshing / injecting newer corpus data** — the corpus-build pipeline is
@@ -103,8 +103,10 @@ runs, promoted models and predictions behind a React UI.
   judgment the deterministic recompute can't apply (family diversity,
   suspicious-metric exclusion, pinning); spawn after a campaign concludes or
   new models are registered.
-- **report-curator** — maintains docs/experiments.tex (+ figures) from the
-  campaign reports; destructive edits stop for approval.
+- **report-curator** — maintains four lockstep docs from the campaign reports
+  (+ shared figures): docs/experiments.{tex,es.tex} (English + Spanish, whole
+  series) and docs/next-track.{tex,es.tex} (English + Spanish, next-track
+  family only); destructive edits stop for approval.
 - **listing-generator** (agent) — URL → manual track → consensus
   predictions via `POST /api/best-models/predict`.
 - **upstream-sync** (agent) — sync upstream lensing framework changes into

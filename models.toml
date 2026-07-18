@@ -40,9 +40,20 @@ residual = false
 [[definitions]]
 name = "gru-infonce-h256"
 predictor = "seq-nexttrack"
-dataset_tags = ["seq-20260713-014226"]
+dataset_tags = [
+    "seq-20260713-014226",
+    "seq-20260715-030446",
+    "seq-20260715-030452",
+    "seq-20260715-030457",
+    "seq-20260715-030503",
+    "seq-20260715-030509",
+    "seq-20260715-131139",
+    "seq-20260715-131145",
+    "seq-20260715-131150",
+]
 notes = "Topology best (width h256). R@10 0.096 — marginal best model, still a tie vs the bar."
 created_at = "2026-07-13T18:38:34.250741657+00:00"
+updated_at = "2026-07-15T13:12:40.156916786+00:00"
 
 [definitions.hyperparams]
 arch = "gru"
@@ -61,9 +72,14 @@ residual = false
 [[definitions]]
 name = "blend-gru-markov"
 predictor = "seq-blend"
-dataset_tags = ["seq-20260713-014226"]
+dataset_tags = [
+    "seq-20260713-014226",
+    "seq-20260715-030509",
+    "seq-20260715-131139",
+]
 notes = "CHAMPION: z-blend of GRU-infonce + train-only Markov (alpha 0.5). R@10 0.173 / MRR 0.096 — beats the Markov bar (0.107/0.069) beyond CI. First model to beat the bar."
 created_at = "2026-07-14T14:17:22.024219157+00:00"
+updated_at = "2026-07-15T14:24:40.644713823+00:00"
 
 [definitions.hyperparams]
 alpha = 0.5

@@ -14,7 +14,7 @@ album, genre, era) — non-behavioral, and additive to the structured one-hots
 bucket).
 
 Run:  predictors/.venv/bin/python pipeline/embed_content.py
-Env:  QDRANT_URL (default http://localhost:6335)
+Env:  QDRANT_URL (default http://localhost:6337)
       SRC_COLLECTION (default spotify_tracks)
       DST_COLLECTION (default spotify_tracks_content)
       MODEL (default sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2)
@@ -25,7 +25,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 from sentence_transformers import SentenceTransformer
 
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6335")
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6337")
 SRC = os.environ.get("SRC_COLLECTION", "spotify_tracks")
 DST = os.environ.get("DST_COLLECTION", "spotify_tracks_content")
 MODEL = os.environ.get(

@@ -21,7 +21,7 @@ cd "$ROOT"
 # ---- config ------------------------------------------------------------------
 SRC_DIR="${1:-}"                                # local bundle dir (optional)
 DUMP_BASE_URL="${DUMP_BASE_URL:-}"              # http base (optional)
-QDRANT_URL="${QDRANT_URL:-http://localhost:6335}"
+QDRANT_URL="${QDRANT_URL:-http://localhost:6337}"
 PG_SERVICE="${PG_SERVICE:-postgres}"
 PG_USER="${LENSING_DB_USER:-pg}"
 PG_DB="${LENSING_DB_NAME:-lensing}"

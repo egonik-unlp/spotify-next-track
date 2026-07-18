@@ -34,7 +34,7 @@ import xgboost as xgb
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 
-QDRANT_URL = "http://localhost:6335"
+QDRANT_URL = "http://localhost:6337"
 AE_COLLECTION = "spotify_tracks_song_ae"
 ART = Path("pipeline/artifacts")
 UA = {"User-Agent": "Mozilla/5.0 lensing/1.0", "Accept": "application/json"}

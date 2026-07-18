@@ -14,7 +14,7 @@ allowed-tools:
 <!-- GENERATED from agents-src/skills/model-definitions/SKILL.md by agents-src/render.py — edit the template (and domain.toml), not this file; then run `zig build render-agents`. -->
 
 Manage **model definitions**: named, reusable configurations (predictor + concrete
-hyperparameters + dataset tags) for this repo's taste fit-prediction experiments.
+hyperparameters + dataset tags) for this repo's next track-prediction experiments.
 
 ## Concepts — keep these straight
 
@@ -23,7 +23,7 @@ hyperparameters + dataset tags) for this repo's taste fit-prediction experiments
 | **Predictor** | training code + param *schema* | `registry.toml` (hand-edited) | — |
 | **Definition** | named preset: predictor + concrete hyperparam *values* + dataset tags | `models.toml` (repo root, server-managed) | definitions |
 | **Promoted model** | frozen weights snapshot of a succeeded/stopped run (or any run with a saved checkpoint) | `data/models/<name>/` (gitignored) | models |
-| **Best-models group** | server-maintained top-12 by AUC over runs + promoted models; recomputed automatically on run completion and promotion | `GET /api/best-models` (mirrored in `data/best-models.json` + Postgres) | — |
+| **Best-models group** | server-maintained top-12 by recall@10 over runs + promoted models; recomputed automatically on run completion and promotion | `GET /api/best-models` (mirrored in `data/best-models.json` + Postgres) | — |
 
 Definitions and promoted models have **separate namespaces**; renaming one never
 touches the other. Names must match `^[a-z0-9][a-z0-9-]{0,63}$` — validate before
@@ -99,7 +99,7 @@ curl -s localhost:8096/api/models -H content-type:application/json \
 ```
 
 Promotion (and every run completion) automatically triggers the server's
-best-models recompute — the top-12-by-AUC
+best-models recompute — the top-12-by-recall@10
 group at `GET localhost:8096/api/best-models` stays current on its own, and
 top runs nobody promoted get auto-promoted as `best-<predictor>-<run-slug>`.
 For judgment calls on the group (pin a confirmed champion, exclude a
@@ -148,7 +148,7 @@ the **dataset-design** skill.
    render fraction metrics as %. Treat failures as data points: capture
    `.stderr_tail` and any
    blowup pattern (they often become the most interesting finding).
-4. **Present & confirm.** Show the results table sorted by AUC plus draft
+4. **Present & confirm.** Show the results table sorted by recall@10 plus draft
    findings. Do not persist anything until the user approves.
 5. **Persist.** Save the winner as a definition (`POST /api/definitions`, or
    clone the baseline and PATCH) named per the convention
@@ -167,24 +167,24 @@ existing files:
 Goal: … (fixed baseline: dataset id, held hyperparams, reference champion
 with its metrics and run id)
 
-Outcome in one line: **<key finding> — <AUC / logloss / accuracy> —
+Outcome in one line: **<key finding> — <recall@10 / artist@10 / genre@10 / mrr / hit@10> —
 definition `<name>`**
 
-## Results (sorted by AUC; all on <ds-id>)
-| config | AUC | logloss | accuracy | run |
+## Results (sorted by recall@10; all on <ds-id>)
+| config | recall@10 | artist@10 | genre@10 | mrr | hit@10 | run |
 (bold the winner row and the best cell per metric; include failed runs)
 
 ## Findings
 (interpretation: why the winner wins, trade-offs, failure modes, saturation)
 
 ## Best on record after this work
-| model | AUC | logloss | accuracy | run |   ← winner vs. previous champions
+| model | recall@10 | artist@10 | genre@10 | mrr | hit@10 | run |   ← winner vs. previous champions
 
 ## Follow-ups
 - next experiments worth running
 ```
 
-Conventions: AUC in raw taste fit units with thousands
+Conventions: recall@10 in raw next track units with thousands
 separators; percentage metrics rendered as %; a run id in every table row;
 name the dataset id; reference prior experiments by filename when building
 on them.

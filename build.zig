@@ -14,7 +14,7 @@
 //!
 //! Options (pass as -Dname=value):
 //!   -Dport=8095                      lensing-server port for `serve`
-//!   -Dqdrant-url=http://host:6335    Qdrant base URL for `serve` / `dataset`
+//!   -Dqdrant-url=http://host:6337    Qdrant base URL for `serve` / `dataset`
 //!   -Dcollection=<name>              Qdrant collection for `serve` / `dataset`
 //!                                    (default: domain.toml corpus.collection)
 //!   -Ddatabase-url=postgres://...    metadata database for `serve` / `migrate-data`
@@ -40,8 +40,8 @@ pub fn build(b: *std.Build) void {
     const qdrant_url = b.option(
         []const u8,
         "qdrant-url",
-        "Qdrant base URL (default http://localhost:6335)",
-    ) orelse "http://localhost:6335";
+        "Qdrant base URL (default http://localhost:6337)",
+    ) orelse "http://localhost:6337";
     const collection = b.option(
         []const u8,
         "collection",
@@ -50,8 +50,8 @@ pub fn build(b: *std.Build) void {
     const database_url = b.option(
         []const u8,
         "database-url",
-        "Postgres metadata database (default postgres://pg:pg@localhost:5436/lensing)",
-    ) orelse "postgres://pg:pg@localhost:5436/lensing";
+        "Postgres metadata database (default postgres://pg:pg@localhost:5437/lensing)",
+    ) orelse "postgres://pg:pg@localhost:5437/lensing";
 
     // ---------------- backend: the Rust workspace ----------------
     // Release profile on purpose: training and PCA are CPU-bound, and
@@ -84,7 +84,7 @@ pub fn build(b: *std.Build) void {
     // docker compose owns both the Postgres and Qdrant lifecycle; --wait blocks
     // on the healthchecks so dependents always see an accepting socket. This
     // instance hosts its OWN Qdrant corpus locally (the `qdrant` profile),
-    // serving spotify_tracks on :6335 — no external/sibling container required.
+    // serving spotify_tracks on :6337 — no external/sibling container required.
     // A fresh qdrant_storage volume starts EMPTY: populate it via a Qdrant
     // snapshot restore or pipeline/refresh_corpus.sh.
     const compose_up = b.addSystemCommand(&.{

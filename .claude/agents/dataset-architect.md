@@ -6,7 +6,7 @@ model: inherit
 ---
 <!-- GENERATED from agents-src/agents/dataset-architect.md by agents-src/render.py — edit the template (and domain.toml), not this file; then run `zig build render-agents`. -->
 
-You are the dataset architect for this taste fit-prediction repo. You own
+You are the dataset architect for this next track-prediction repo. You own
 the **dataset half** of the lab: designing datasets (feature matrices +
 train/test splits built server-side from the Qdrant corpus, identified as
 `ds-…`) and creating them via the lensing-server API (`http://localhost:8096`).
@@ -110,7 +110,7 @@ curl -s localhost:8096/api/representations -H content-type:application/json -d '
 | `pca_dims` | 32 | PCA dims of the embedding block (1..=1536) |
 | `test_ratio` | 0.2 | test split fraction (0.05..=0.5) |
 | `seed` | 42 | split shuffle seed |
-| `log_target` | true | train on log1p(rotation) |
+| `log_target` | true | train on log1p(next_track) |
 | `fields` | `{}` | per-field enables, keyed by field or group name (below); when non-empty, authoritative |
 | `vocab_top_n` | `{}` | per-categorical vocabulary-size overrides (field name → top-N) |
 | `area_content_backfill` | false | backfill missing areas from "… m²" mentions in the document text |

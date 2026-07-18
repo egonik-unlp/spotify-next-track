@@ -102,8 +102,10 @@ runs, promoted models and predictions behind a React UI.
   judgment the deterministic recompute can't apply (family diversity,
   suspicious-metric exclusion, pinning); spawn after a campaign concludes or
   new models are registered.
-- **report-curator** — maintains docs/experiments.tex (+ figures) from the
-  campaign reports; destructive edits stop for approval.
+- **report-curator** — maintains four lockstep docs from the campaign reports
+  (+ shared figures): docs/experiments.{tex,es.tex} (English + Spanish, whole
+  series) and docs/next-track.{tex,es.tex} (English + Spanish, next-track
+  family only); destructive edits stop for approval.
 - **listing-generator** (agent) — URL → manual {{entity_noun}} → consensus
   predictions via `POST /api/best-models/predict`.
 - **upstream-sync** (agent) — sync upstream lensing framework changes into

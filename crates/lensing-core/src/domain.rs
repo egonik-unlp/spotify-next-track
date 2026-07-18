@@ -89,6 +89,12 @@ pub struct SequenceSpec {
     /// Qdrant collection whose vectors are the per-item latents used for
     /// retrieval (e.g. "spotify_tracks_song_ae").
     pub latent_source: String,
+    /// Graded-relevance item fields the eval ALSO credits (artist@k / genre@k):
+    /// a top-k candidate sharing the truth's value on one of these counts as a
+    /// (partial) hit. Documentation of the eval's hardcoded "artist"/"genre";
+    /// the predictor reads the artifact, not this config.
+    #[serde(default)]
+    pub relevance_fields: Vec<String>,
 }
 
 fn default_gap_minutes() -> u32 {
@@ -429,7 +435,13 @@ impl MetricsSpec {
             "brier" => m.brier,
             "macro_f1" | "f1" => m.macro_f1,
             "mrr" => m.mrr,
-            // ranking cutoff metrics carry a `@k` suffix (recall@10, hit@10)
+            // graded-relevance ranking: artist_mrr must be matched before the
+            // `artist`-prefix arm below so it maps to its own field.
+            "artist_mrr" => m.artist_mrr,
+            // ranking cutoff metrics carry a `@k` suffix (recall@10, hit@10,
+            // artist@10, genre@10) — also artist_recall / genre_recall aliases.
+            _ if lname.starts_with("artist") => m.artist_recall_at_k,
+            _ if lname.starts_with("genre") => m.genre_recall_at_k,
             _ if lname.starts_with("recall") => m.recall_at_k,
             _ if lname.starts_with("hit") => m.hit_rate,
             _ => None,
@@ -464,6 +476,8 @@ impl MetricsSpec {
         let lname = name.to_lowercase();
         lname.starts_with("recall")
             || lname.starts_with("hit")
+            || lname.starts_with("artist")
+            || lname.starts_with("genre")
             || matches!(
                 lname.as_str(),
                 "mae" | "rmse" | "mape" | "medape" | "r²" | "r2" | "accuracy" | "acc"

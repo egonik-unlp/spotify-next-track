@@ -1,6 +1,6 @@
 ---
 name: information-capture
-description: Compare how much taste fit-relevant information competing MLP models capture inside their own hidden activations, using a sparse autoencoder (SAE) trained per hidden layer via the pg-server interpretability API. Use when the user wants to compare MLP models (or blend legs) on information capture — capacity/utilization, interpretable concepts, per-segment representation, concept-vs-decodability by depth, and the taste fit-relevant embedding signal a model drops — beyond leaderboard AUC. Runs `POST /api/interp/model-sae` and distills a side-by-side comparison. For a full campaign write-up, delegate to the information-capture-analyst agent.
+description: Compare how much next track-relevant information competing MLP models capture inside their own hidden activations, using a sparse autoencoder (SAE) trained per hidden layer via the pg-server interpretability API. Use when the user wants to compare MLP models (or blend legs) on information capture — capacity/utilization, interpretable concepts, per-segment representation, concept-vs-decodability by depth, and the next track-relevant embedding signal a model drops — beyond leaderboard recall@10. Runs `POST /api/interp/model-sae` and distills a side-by-side comparison. For a full campaign write-up, delegate to the information-capture-analyst agent.
 user-invocable: true
 argument-hint: "[model ...] [compare-embedding]"
 allowed-tools:
@@ -15,8 +15,8 @@ Compare **information capture** across MLP models: how much of the target's
 structure each trained net actually re-represents inside its own hidden layers,
 read with a sparse autoencoder (SAE) — the nonlinear sibling of the layer probe.
 This answers a question the leaderboard can't: two MLPs can post the same
-AUC while one *captures* far more structure (and drops less of the
-embedding's taste fit-relevant signal) than the other.
+recall@10 while one *captures* far more structure (and drops less of the
+embedding's next track-relevant signal) than the other.
 
 This is an **agent-layer wrapper** over the existing interpretability API
 (`POST /api/interp/model-sae`); it computes nothing itself — it orchestrates the
@@ -27,7 +27,7 @@ results are documented in `docs/interpretability-toolkit-explained.md` (§2) and
 ## What "information capture" means here
 
 The toolkit separates three fates of a signal (per
-`docs/interpretability-toolkit-explained.md`): a taste fit-relevant signal
+`docs/interpretability-toolkit-explained.md`): a next track-relevant signal
 can be **absent** from the input, **present but discarded** (compression), or
 **present but unused** (modelling). The per-model SAE reads the *model's* side of
 that: for each hidden layer it reports
@@ -38,14 +38,14 @@ that: for each hidden layer it reports
   count = the layer is using a small slice of its width.
 - **n_interpretable_concepts** — atoms whose activation correlates with the
   target above the engine's concept bar; a proxy for how many nameable,
-  taste fit-relevant features the layer has formed.
+  next track-relevant features the layer has formed.
 - **segments** — per one-hot category value, whether a dedicated atom *separates*
   that segment (`represented: true/false`). Surfaces rare-segment structure the
   bulk fit buries.
-- **concept_vs_decodability** — joins the linear taste fit R² at each depth
+- **concept_vs_decodability** — joins the linear next track R² at each depth
   (`linear_r2_target`/`linear_r2_log`) with the interpretable-concept count there,
   so you can see where in the net decodable structure and nameable concepts form.
-- **dropped_vs_embedding** (only with `compare_embedding`) — taste fit-relevant
+- **dropped_vs_embedding** (only with `compare_embedding`) — next track-relevant
   concepts present in the *embedding* SAE that no atom in this layer tracks: the
   signal the model discarded. Roughly doubles run time (it trains a dataset SAE
   first).
@@ -151,14 +151,14 @@ dropped-signal count.
 ### 5. Present the comparison
 
 Build a side-by-side table, one row per model, and interpret it against
-AUC — not instead of it:
+recall@10 — not instead of it:
 
 ```
-| model | predictor | best-layer util | Σ concepts | segments repr. | dropped | peak linear R² | AUC |
+| model | predictor | best-layer util | Σ concepts | segments repr. | dropped | peak linear R² | recall@10 |
 ```
 
 Read it: does the leaderboard leader also capture the most structure, or is it
-winning while discarding taste fit-relevant signal a rival keeps? Where in
+winning while discarding next track-relevant signal a rival keeps? Where in
 depth do concepts form vs. where the target becomes decodable? Which rare
 segments does each model represent? Flag any model whose capacity looks
 degenerate (near-zero utilization, no interpretable concepts) — a likely

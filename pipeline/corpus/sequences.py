@@ -62,14 +62,15 @@ def _drop_consecutive_loops(uris: list[str]) -> list[str]:
     return out
 
 
-def _fetch_latents(client: QdrantClient, ids: list[int]) -> dict[int, list[float]]:
-    """Retrieve song-AE vectors for the given point ids, batched. Ids without
+def _fetch_latents(client: QdrantClient, ids: list[int],
+                   collection: str = LATENT_COLLECTION) -> dict[int, list[float]]:
+    """Retrieve item latent vectors for the given point ids, batched. Ids without
     a point (no latent) are simply absent from the returned dict."""
     vecs: dict[int, list[float]] = {}
     for i in range(0, len(ids), RETRIEVE_BATCH):
         batch = ids[i : i + RETRIEVE_BATCH]
         points = client.retrieve(
-            collection_name=LATENT_COLLECTION,
+            collection_name=collection,
             ids=batch,
             with_vectors=True,
             with_payload=False,
@@ -80,7 +81,8 @@ def _fetch_latents(client: QdrantClient, ids: list[int]) -> dict[int, list[float
     return vecs
 
 
-def run() -> dict:
+def run(latent_collection: str = LATENT_COLLECTION,
+        latent_dim: int = LATENT_DIM) -> dict:
     # ---- 1. Load + non-skip filter ----
     plays = pd.read_parquet(SESSIONS_PARQUET)
     plays["ts"] = pd.to_datetime(plays["ts"], utc=True)
@@ -95,7 +97,13 @@ def run() -> dict:
     cand_id_by_uri = {u: uri_to_id[u] for u in candidate_uris if u in uri_to_id}
 
     client = QdrantClient(url=QDRANT_URL)
-    id_to_vec = _fetch_latents(client, list(cand_id_by_uri.values()))
+    # Derive the true latent dim from the collection config; treat the caller's
+    # --latent-dim as an assertion so a mismatched flag fails loud, not silent.
+    actual_dim = client.get_collection(latent_collection).config.params.vectors.size
+    assert actual_dim == latent_dim, (
+        f"--latent-dim {latent_dim} != collection {latent_collection!r} dim {actual_dim}"
+    )
+    id_to_vec = _fetch_latents(client, list(cand_id_by_uri.values()), latent_collection)
 
     # Keep only uris whose id resolved to an actual vector. Sort for a stable,
     # reproducible item-index assignment.
@@ -104,7 +112,7 @@ def run() -> dict:
     n_items = len(vocab_uris)
 
     # ---- item_latents matrix, row = item index ----
-    latents = np.zeros((n_items, LATENT_DIM), dtype=np.float32)
+    latents = np.zeros((n_items, latent_dim), dtype=np.float32)
     for u, i in item_index.items():
         latents[i] = np.asarray(id_to_vec[cand_id_by_uri[u]], dtype=np.float32)
 
@@ -160,7 +168,7 @@ def run() -> dict:
     for i in range(0, len(vocab_ids), RETRIEVE_BATCH):
         batch = vocab_ids[i : i + RETRIEVE_BATCH]
         for p in client.retrieve(
-            collection_name=LATENT_COLLECTION,
+            collection_name=latent_collection,
             ids=batch,
             with_vectors=False,
             with_payload=True,
@@ -186,8 +194,8 @@ def run() -> dict:
         "kind": "sequence",
         "n_sessions": n_sessions,
         "n_items": n_items,
-        "latent_dim": LATENT_DIM,
-        "latent_source": LATENT_COLLECTION,
+        "latent_dim": latent_dim,
+        "latent_source": latent_collection,
         "split": {
             "strategy": "chronological_by_session_start",
             "cut": cut.isoformat(),
@@ -229,6 +237,7 @@ def _validate(dataset_id: str | None = None) -> None:
     d = SEQ_ROOT / dataset_id
     man = json.load(open(d / "sequence-manifest.json"))
     n_items = man["n_items"]
+    latent_dim = man["latent_dim"]
 
     sessions = np.frombuffer((d / "sessions.u32").read_bytes(), dtype="<u4")
     offsets = np.frombuffer((d / "offsets.u32").read_bytes(), dtype="<u4")
@@ -240,7 +249,7 @@ def _validate(dataset_id: str | None = None) -> None:
     assert sessions.max() < n_items, "item index out of range"
     lengths = np.diff(offsets)
     assert (lengths >= 2).all(), "every session must have >= 2 items"
-    assert latents.size == n_items * LATENT_DIM, "item_latents size mismatch"
+    assert latents.size == n_items * latent_dim, "item_latents size mismatch"
 
     train = np.frombuffer((d / "train_sessions.u32").read_bytes(), dtype="<u4")
     test = np.frombuffer((d / "test_sessions.u32").read_bytes(), dtype="<u4")
@@ -250,5 +259,15 @@ def _validate(dataset_id: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    m = run()
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--latent-collection", default=LATENT_COLLECTION,
+                    help="Qdrant collection of per-item latents (default "
+                         "spotify_tracks_song_ae; must be a leak-safe item space, "
+                         "NEVER the 200-dim behavioral spotify_tracks)")
+    ap.add_argument("--latent-dim", type=int, default=LATENT_DIM,
+                    help="expected latent dim; asserted against the collection config")
+    a = ap.parse_args()
+    m = run(latent_collection=a.latent_collection, latent_dim=a.latent_dim)
     _validate(m["dataset_id"])

@@ -25,7 +25,7 @@ from sentence_transformers import SentenceTransformer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import predict_spotify_url as P  # reuse fetch + feature build + Encoder
 
-QDRANT_URL = "http://localhost:6335"
+QDRANT_URL = "http://localhost:6337"
 COL = "spotify_tracks_song_ae"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

@@ -102,6 +102,19 @@ pub struct Metrics {
     /// multi-target sequences); higher-better.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hit_rate: Option<f64>,
+    // ---- graded-relevance ranking (credit the right band/vibe) ----
+    /// Artist-recall@k: fraction of cases where some top-k candidate shares the
+    /// true next item's artist (graded relevance ⊇ exact recall); higher-better.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist_recall_at_k: Option<f64>,
+    /// Genre-recall@k: fraction of cases where some top-k candidate shares the
+    /// true next item's genre; higher-better.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub genre_recall_at_k: Option<f64>,
+    /// Mean reciprocal rank of the first same-artist candidate over the full
+    /// ranking; higher-better.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist_mrr: Option<f64>,
 }
 
 /// One element of `predictions.json` written by a predictor.

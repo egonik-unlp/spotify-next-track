@@ -307,7 +307,7 @@ def last_item_loss(pred: torch.Tensor, y: torch.Tensor,
 # --------------------------------------------------------------------------- #
 # Train                                                                       #
 # --------------------------------------------------------------------------- #
-def fit(art, hp: dict, seed: int = SEED):
+def fit(art, hp: dict, seed: int = SEED, model: "SeqNextLatent | None" = None):
     """Train the recurrent next-latent model on the artifact's TRAIN sessions
     and return the best (early-stopped) model, in eval mode.
 
@@ -316,7 +316,13 @@ def fit(art, hp: dict, seed: int = SEED):
     (seeding, val split, per-step/last-item objective, early stopping) and get
     byte-identical weights. `train()` below is a thin wrapper: fit + eval +
     persist. `seed` defaults to the module SEED so existing behavior is
-    unchanged."""
+    unchanged.
+
+    `model` lets a caller pass a PRE-BUILT / PRE-INITIALIZED SeqNextLatent (e.g.
+    seq_ae_rnn transplants an autoencoder-pretrained encoder into it) so the
+    fine-tune runs the identical objective/optimizer/early-stopping starting
+    from those weights. When None (default) a fresh model is constructed exactly
+    as before, so existing behavior is byte-identical."""
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
 
@@ -345,9 +351,10 @@ def fit(art, hp: dict, seed: int = SEED):
           f"batch {hp['batch_size']}, {hp['epochs']} epochs; objective "
           f"{'last-item (leak-free)' if hp['bidirectional'] else 'per-step teacher forcing'}"})
 
-    model = SeqNextLatent(D, hp["hidden"], hp["arch"], hp["num_layers"],
-                          hp["dropout"], bidirectional=hp["bidirectional"],
-                          residual=hp["residual"])
+    if model is None:
+        model = SeqNextLatent(D, hp["hidden"], hp["arch"], hp["num_layers"],
+                              hp["dropout"], bidirectional=hp["bidirectional"],
+                              residual=hp["residual"])
     opt = torch.optim.Adam(model.parameters(), lr=hp["lr"])
 
     def batch_loss(x, y, mask, lengths):

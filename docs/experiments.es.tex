@@ -1,0 +1,2702 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.6cm]{geometry}
+\usepackage[spanish]{babel}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{seqsplit}
+\graphicspath{{figures/}}
+\setlength{\emergencystretch}{3em}
+\newcommand{\runid}[1]{\texttt{\small\seqsplit{#1}}}
+\newcommand{\dsid}[1]{\texttt{\small #1}}
+\newcommand{\best}[1]{\textbf{#1}}
+\newcommand{\medape}{medAPE}
+\newcommand{\rsq}{$R^2$}
+
+\title{Engagement de Spotify a partir de Metadatos: Síntesis de Experimentos}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Este documento es la síntesis viva de las campañas de predicción de ajuste de
+gusto (taste-fit); los informes markdown de \texttt{experiments/} son el
+registro primario. El objetivo activo es una señal binaria de \emph{rotación}
+--- ¿ganó una pista una escucha repetida, $\text{play\_count}\ge 2$? ---
+predicha a partir de los \emph{metadatos intrínsecos} de una pista solamente
+(género, artista, popularidad de artista/pista, número de seguidores, año de
+lanzamiento, tipo de lanzamiento) sobre el corpus de escucha del usuario. La
+métrica principal es el área bajo la curva ROC (AUC); el objetivo de regresión
+de magnitud de engagement con el que abrió el laboratorio
+($\text{play\_count}\times \text{completion\_ratio}$, transformado con
+$\log1p$) se conserva como un campo científico documentado pero ya no se
+entrega. El embedding conductual de co-escucha y todos los campos de
+reproducción/curación quedan deliberadamente excluidos del conjunto de rasgos.
+Se incorporan abajo cinco campañas de jun-2026; convergen en un único hallazgo
+--- la identidad categórica de artista/género/álbum leída por árboles de
+gradient boosting supera a toda modalidad densa y a toda familia densa de
+distancia/margen --- y coronaron al primer campeón registrado y promovible del
+proyecto, \texttt{xgboost-classifier-rotation}, con AUC \num{0.7429} sobre el
+corpus original DS-META. Tres campañas de jun-12 luego re-plantearon la pregunta
+de familia sobre un corpus 2026 mayor (un dataset completo de 64-d,
+\num{23529} filas): un bake-off de cuatro familias de clasificadores en el que
+\texttt{xgboost-classifier} vuelve a ganar (AUC \num{0.7204}),
+\texttt{catboost} le sigue dentro de banda, y un \texttt{pyramid-mlp} denso
+queda último; un barrido de seis geometrías de arquitectura que cierra la
+familia de redes densas para AUC \emph{refutando} la hipótesis de presupuesto;
+y un bake-off de topología de un nuevo \texttt{burn-deep-classifier} en
+Rust/\texttt{burn} que, al alimentar los one-hots de identidad en \emph{crudo},
+repara la calibración de la red densa por completo (log-loss $2.0\to 0.62$) y
+eleva su AUC $\sim$2 bandas hasta \num{0.7038} --- pero aún queda $\sim$1--2
+bandas por debajo del nivel de los árboles, con los embeddings de entidad
+aprendidos famélicos por la baja cardinalidad de identidad. Una séptima campaña
+luego cierra ese hilo: una re-ejecución pareada del bake-off de topología sobre
+una matriz de \emph{mayor} cardinalidad de identidad (tope de artista
+$60\to300$, género $40\to120$) invierte el ranking --- \texttt{embeddings} ahora
+\emph{supera} a \texttt{mlp} (un vuelco de $+0.0130$ que revierte el resultado
+previo, confirmando la hipótesis de inanición) --- y eleva la red al nivel de
+los árboles dentro del dataset (AUC \num{0.7192}, dentro de $\sim$1 banda de
+\texttt{catboost}), la primera ANN en superar la barra de guardado de rotación,
+guardada como \texttt{burn-deep-embeddings-highvocab}. Una octava campaña luego
+sondea la palanca inversa y la refuta: el clásico truco de Facebook GBDT$\to$LR
+generalizado a GBDT$\to$MLP --- entrenar una cabeza fresca sobre los índices de
+hoja one-hot del árbol campeón congelado --- queda \num{1.8}--\num{2.4} bandas
+de ruido \emph{por debajo} del campeón xgboost puro (mejor AUC de cabeza
+\num{0.6978}) con calibración muy rota, una séptima confirmación convergente de
+que las representaciones aprendidas apiladas sobre los árboles no ayudan. Una
+novena campaña luego sondea hasta dónde puede llegar la palanca vigente de
+resolución de identidad: un barrido de tope de vocabulario sobre el GBDT puro,
+manteniendo la config campeona congelada y moviendo \emph{solo} la cardinalidad
+de one-hots de artista/género, halla la palanca \emph{en gran medida agotada}
+--- el primer salto ($60/40\to300/120$) lleva la ganancia, y pasado 300/120 cada
+paso paga solo retornos sub-banda; xgboost alcanza un nuevo mejor AUC de linaje
+single-split \num{0.7349} en 1000/300 (solo $+0.005$, $\sim$0.4 banda, sobre el
+ancla --- ningún guardado disparó), \texttt{catboost} lo sigue, y el punto de
+vocabulario completo no pudo construirse (techo de memoria del host). La
+Sección~\ref{sec:anns} consolida por qué las redes neuronales artificiales
+rinden estructuralmente peor sobre esta matriz de rasgos densa en one-hot, cómo
+la red consciente de la representación resuelve el diagnóstico, y cómo suficiente
+resolución de identidad finalmente hace que la topología de embeddings rinda. Se
+consolida además una línea de trabajo paralela --- recomendación de \emph{pista
+siguiente} (next-track), evaluada sobre una partición de sesiones sin fugas por
+recall@10 (Secciones~\ref{sec:nexttrack}--\ref{sec:nexttrack-phase2}): un blend
+de fusión de rankings GRU$\times$Markov supera la barra de co-escucha de primer
+orden en $\sim$$+61\%$ de recall@10, y añadir una tercera rama content-kNN sobre
+un espacio de ítems rico PCA-192 (R+M+C) es la fila «mejor registrada» actual
+con recall@10 \num{0.1859}; su tarea, métricas y campeón no tienen relación con
+las tablas de rotación y nunca deben leerse contra ellas.
+\end{abstract}
+
+\section{Introducción}
+Este documento es la síntesis viva de las campañas de experimentos; los informes
+markdown de \texttt{experiments/} son el registro primario. Cada sección
+transcribe (nunca recalcula) los resultados cuantitativos de una campaña,
+preserva sus identificadores de ejecución y de dataset de forma literal para
+trazabilidad, y añade la motivación y la interpretación que los informes
+escuetos omiten.
+
+\paragraph{Tarea y objetivo.} El laboratorio predice el \emph{ajuste de gusto} a
+partir de los metadatos intrínsecos de una pista sobre el corpus de escucha del
+usuario. Abrió con un objetivo de regresión de magnitud de engagement ---
+$\text{play\_count}\times\text{completion\_ratio}$, entrenado contra una
+transformación $\log1p$ y remapeado con $\text{expm1}$ --- pero el 2026-06-08 el
+objetivo activo giró a una señal binaria de \emph{rotación}:
+$\text{play\_count}\ge 2$, es decir, ¿ganó la pista una escucha repetida
+(Sección~\ref{sec:rotation-pivot})? La rotación es la entrada accionable al
+término de deseabilidad por pista del Playlist Pathfinder, es mucho más
+aprendible que la magnitud de engagement (los árboles alcanzan
+$\text{AUC}\approx 0.73$ en rotación frente a \rsq{}$\approx 0.3$ en engagement),
+y con una tasa base cercana al \SI{44.5}{\percent} está naturalmente repartida
+para la búsqueda de caminos. El engagement se conserva como campo científico
+documentado, pero la rotación es el objetivo entregado y toda tabla de abajo es
+sobre él.
+
+\paragraph{Métricas.} Como el objetivo es binario, la métrica principal es el
+área bajo la curva ROC (AUC, mejor cuanto más alto), la cantidad por la que la
+tabla de clasificación (Tabla~\ref{tab:lb-auc}) ordena y por la que el grupo de
+mejores modelos auto-promueve; se reporta junto a log-loss, exactitud y el
+puntaje de Brier. No obstante, coexisten dos regímenes de métrica distintos en
+las campañas de rotación. Las campañas abrieron con una lectura de
+\emph{regresión} --- error absoluto medio (MAE), RMSE y \rsq{} sobre la escala
+$[0,1]$ de P(rotación) --- y solo después adoptaron la lectura honesta de
+\emph{clasificación} una vez que el framework ganó un modo binario. El MAE se
+conserva en la tabla histórica de regresión (Tabla~\ref{tab:lb-mae}) para
+significancia de banda dentro de familia, pero se documenta allí como
+\emph{degenerado} sobre un objetivo binario: un SVR de tubo-$\epsilon$ puede
+publicar un MAE engañosamente bajo siendo peor que predecir la media
+(Sección~\ref{sec:svm}), una ilusión que las métricas de clasificación
+disuelven. Las métricas de porcentaje absoluto (MAPE/\medape{}) son
+indefinidas sobre rotación, ya que la mitad de las etiquetas son exactamente
+cero. La tabla histórica de engagement, donde el MAE \emph{sí} es la métrica
+principal natural, se preserva en \texttt{PROJECT-FACTS.md}; sus números viven
+en la escala de engagement $\log1p$ y no son comparables con nada de abajo.
+
+\paragraph{Rasgos.} El espacio de rasgos son los \emph{metadatos intrínsecos} de
+una pista solamente: género, artista, popularidad de artista/pista, número de
+seguidores, año de lanzamiento, número de artistas acreditados y tipo de
+lanzamiento. Las modalidades de embedding denso (word2vec de co-escucha,
+texto-contenido, acústica y el latente del song-autoencoder de la
+Sección~\ref{sec:ae-blend}) son señales \emph{conductuales o descriptivas}, no
+identidad categórica, y los predictores basados en payload sobre los one-hots de
+metadatos son los modelos canónicos aquí. Críticamente, la receta es \emph{libre
+de fugas}: los campos de reproducción que mecánicamente constituyen o aproximan
+el objetivo --- \texttt{play\_count}, \texttt{completion\_ratio},
+\texttt{skip\_rate}, \texttt{shuffle\_rate}, \texttt{distinct\_sessions}, y el
+campo \texttt{engagement} degradado mismo --- y los campos de curación
+conductualmente enredados quedan todos excluidos por defecto.
+
+\paragraph{Tres matrices de rasgos.} Las tres primeras campañas corrieron sobre
+el corpus original \emph{DS-META} (\num{12256} filas, solo metadatos). Las
+campañas de jun-12 corrieron sobre un corpus 2026 mayor, el dataset
+\emph{completo de 64-d} (\dsid{ds-20260609-204419-p64-s42}, \num{23529} filas,
+177 columnas: 64 latentes PCA song-AE $+$ 7 numéricos $+$ 106 one-hots de
+identidad con topes de vocabulario artista 60 / género 40 --- la matriz
+\emph{vocab-60/40}). Una campaña final de jun-12
+(Sección~\ref{sec:anns-highvocab}) re-ejecutó sobre una variante
+\emph{high-vocab} (\dsid{ds-20260612-143014-p64-s42}, \emph{mismas} \num{23529}
+filas / semilla de partición 42 / PCA64, difiriendo \emph{solo} en la
+cardinalidad de identidad: tope de artista $60\to300$, género $40\to120$; 497
+columnas incluyendo 426 one-hots --- artista 301, género 121, tipo-álbum 4).
+\textbf{Estas son tres matrices no comparables}: DS-META difiere del corpus
+completo de 64-d tanto en tamaño (\num{12256} frente a \num{23529} filas) como
+en conjunto de rasgos (solo metadatos frente a $+$64 latentes AE), y las
+matrices 60/40 y high-vocab difieren en cardinalidad de identidad (177 frente a
+497 columnas). Por tanto los números de AUC nunca deben leerse entre ellas ---
+ni contra el campeón DS-META de \num{0.7429}, ni entre las tablas 60/40 y
+high-vocab. Cada matriz lleva su propia tabla
+(Tablas~\ref{tab:lb-auc},~\ref{tab:lb-auc-p64} y~\ref{tab:lb-auc-highvocab});
+nada regresó cuando el xgboost 60/40 aterriza en \num{0.7204}, y toda familia
+puntúa \emph{más alto} sobre la matriz high-vocab más ancha porque la
+granularidad de identidad extra es señal genuina.
+
+\section{Trasfondo: familias de modelos y métricas}
+\label{sec:background}
+Esta sección da la teoría mínima para un lector que conoce ML pero no este
+repositorio. Está anclada a \texttt{PROJECT-FACTS.md} y crece solo cuando una
+nueva familia de predictores o métrica entra en los informes.
+
+\paragraph{Las familias en juego.}
+\begin{description}
+  \item[Árboles de gradient boosting (\texttt{xgboost},
+  \texttt{xgboost-classifier}, \texttt{catboost-classifier},
+  \texttt{ngboost-classifier}).]
+  Un ensamble aditivo de árboles poco profundos, cada uno ajustado al gradiente
+  residual de la etapa previa. Como \emph{regresor} su salida es un promedio de
+  hoja, acotado por el rango de los objetivos de entrenamiento; como
+  \emph{clasificador} emite una probabilidad calibrada a través de un enlace
+  logístico, la forma que gana en rotación. Los árboles parten sobre columnas
+  individuales, así que leen los one-hots dispersos de identidad de
+  artista/género/álbum de una pista \emph{sin pérdida} y capturan interacciones
+  no lineales sin cruces de rasgos manuales --- la razón por la que dominan este
+  corpus. \texttt{catboost} es una variante GBDT de ordered boosting con árboles
+  simétricos (oblivious) y manejo categórico nativo; sobre este corpus es la
+  segunda familia de árboles legítima, co-líder \emph{en banda} con xgboost.
+  \texttt{ngboost} es una variante de boosting de gradiente natural que ajusta
+  una \emph{distribución} predictiva completa; su maquinaria probabilística,
+  pagada con aprendices base poco profundos, le cuesta poder de ranking crudo
+  aquí. El costo de la familia GBDT en general es un ajuste no determinista (el
+  submuestreo y el muestreo de columnas cargan una semilla RNG interna), así que
+  dos ejecuciones con distintas semillas difieren levemente. El campeón
+  registrado \texttt{xgboost-classifier-rotation} es de esta familia.
+  \item[Regresión logística.] Log-odds lineal pasado por una sigmoide: un
+  clasificador lineal determinista, regularizado con $\ell_2$. Es el
+  \emph{piso lineal} natural para un objetivo binario --- el análogo de ridge en
+  el mundo de la regresión --- y sirve como control barato y reproducible sobre
+  el arnés. Al ser una única frontera lineal en un espacio de rasgos denso,
+  difumina la identidad categórica dispersa que los árboles explotan, y aterriza
+  muy por debajo de ellos en rotación.
+  \item[SVM de kernel / SVC (\texttt{svc} con kernels rbf / lineal / poly /
+  sigmoide).] Un clasificador de máximo margen que opera sobre distancias
+  inducidas por kernel entre puntos. Como \emph{regresor} (SVR) sobre un objetivo
+  binario el tubo $\epsilon$-insensible degenera --- el origen de la trampa del
+  MAE binario de la Sección~\ref{sec:svm}; como \emph{clasificador} de
+  probabilidad propio (SVC) la divergencia se desvanece pero todo kernel aún
+  pierde ante los árboles, porque un modelo de distancia densa / margen grande no
+  puede leer one-hots de identidad dispersos como lo hace una partición de árbol
+  alineada a ejes. El kernel sigmoide es el más débil y es el eco de refutación
+  documentado.
+  \item[Pyramid-MLP (\texttt{pyramid-mlp-classifier}).] Una red neuronal
+  artificial feed-forward con una pila de capas ocultas que se estrecha en
+  ``pirámide'', activaciones ReLU y un optimizador Adam, ajustada sobre la matriz
+  de rasgos escalada con StandardScaler. Es el único aprendiz \emph{denso}
+  (cada-entrada-a-cada-unidad-oculta) del proyecto sobre rotación. Como
+  desarrolla en extenso la Sección~\ref{sec:anns}, una red densa es exactamente
+  el régimen que los datos de gusto densos en one-hot combaten: debe aprender
+  pesos densos sobre una entrada mayormente-cero, y aterriza última en el
+  bake-off con una calibración reventada que un barrido de arquitectura prueba
+  que es estructural, no un artefacto de presupuesto.
+  \item[Red consciente de la representación (\texttt{burn-deep-classifier}).] Un
+  clasificador feed-forward en Rust/\texttt{burn} construido para reparar las
+  patologías del pyramid-MLP. Parte la matriz de rasgos en un bloque continuo
+  \emph{estandarizado} (64 PCA $+$ 7 numéricos) y un conjunto de grupos de
+  one-hots de identidad en \emph{crudo} (sin estandarizar; artista, género,
+  tipo-álbum), de modo que el escalador nunca convierte categorías raras en
+  picos atípicos (Sección~\ref{sec:anns-scaler}). Un enum \texttt{topology}
+  selecciona entre un \texttt{mlp} denso plano sobre las entradas concatenadas,
+  \texttt{embeddings} aprendidos por grupo, y una partición \texttt{wide\_deep}
+  (una ruta lineal ancha sobre los one-hots junto a una ruta profunda sobre el
+  bloque continuo). Como reporta la Sección~\ref{sec:anns-burn}, la
+  representación de one-hots en crudo arregla la calibración por completo y eleva
+  el AUC $\sim$2 bandas sobre la pirámide, pero la red aún queda $\sim$1--2
+  bandas por debajo del nivel de los árboles, y las variantes de embeddings no
+  ganan nada porque las cardinalidades de identidad aquí son demasiado bajas para
+  alimentarlas.
+  \item[Red de trasplante AE (\texttt{burn-ae-classifier}).] Una red en
+  Rust/\texttt{burn} de dos fases. La Fase 1 pre-entrena un autoencoder para
+  reconstruir el vector de rasgos \emph{completo} ensamblado --- el bloque
+  continuo estandarizado junto a los one-hots de identidad en \emph{crudo},
+  $D{=}177$ --- por error cuadrático medio; la Fase 2 trasplanta el encoder
+  entrenado a un clasificador softmax profundo (encoder $\to$ latente $\to$
+  cabeza $\to$ logits) y lo afina de extremo a extremo con entropía cruzada. Una
+  bandera \texttt{freeze\_encoder} elige un extractor de rasgos fijo frente a
+  afinar. Prueba si un pre-entrenamiento de reconstrucción \emph{no supervisado}
+  entrega al clasificador un latente que los one-hots crudos no le den ya a una
+  red desde cero; como reporta la Sección~\ref{sec:anns-ae}, no lo hace --- el
+  latente reconstructivo es agnóstico a la tarea, y la familia empata con el
+  \texttt{mlp} \texttt{burn-deep} plano sin alcanzar el nivel de los árboles.
+  \item[Blend Autoencoder-XGBoost (\texttt{autoencoder-xgboost}).] Un ensamble
+  ponderado $\hat{y}=w\cdot\hat{y}_{\text{ae}}+(1-w)\cdot\hat{y}_{\text{xgb}}$
+  que combina un regresor sobre un latente de song-autoencoder precomputado de
+  64 dimensiones con un modelo XGBoost de metadatos, con el peso $w$ ajustado en
+  un holdout de entrenamiento. Su propósito era probar si el latente AE denso
+  lleva señal de rotación que los one-hots de metadatos pierden; no lo hace, y el
+  ajustador correctamente lleva $w\to 0$, colapsando el ensamble a XGBoost
+  solo-metadatos (Sección~\ref{sec:ae-blend}).
+\end{description}
+
+\paragraph{Por qué un objetivo binario hace degenerado al MAE.} Para un objetivo
+continuo, el error absoluto medio es un resumen fiel de cuán lejos quedan las
+predicciones de la verdad. Sobre un objetivo $\{0,1\}$ no lo es: un modelo puede
+minimizar el MAE abrazando las etiquetas sin importar cómo las \emph{ordena} o
+\emph{calibra}. Un SVR con un tubo $\epsilon{=}0.1$ ajusta sus salidas a un
+escalón de dos niveles cerca de $\{0.1,0.9\}$, quedando solo $\sim 0.1$ de cada
+etiqueta --- un MAE bajo --- mientras su ranking es inútil (\rsq{} negativo). Las
+métricas que importan para una señal binaria de ajuste de gusto son por tanto las
+de clasificación:
+\begin{description}
+  \item[AUC (área bajo la curva ROC).] La probabilidad de que un positivo
+  aleatorio se ordene por encima de un negativo aleatorio; \num{0.5} es azar,
+  \num{1.0} es perfecto. Es libre de umbral y de escala, depende solo del
+  \emph{orden} de las probabilidades predichas, y es exactamente la propiedad que
+  el Pathfinder necesita de su término de deseabilidad. Es la métrica principal y
+  la clave de ordenamiento de la tabla.
+  \item[Log-loss.] La log-verosimilitud negativa de las etiquetas bajo las
+  probabilidades predichas; castiga los errores \emph{confiados} severamente y
+  así premia la calibración, no solo el ranking.
+  \item[Puntaje de Brier.] El error cuadrático medio entre la probabilidad
+  predicha y la etiqueta $\{0,1\}$ --- una medida de calibración-y-refinamiento
+  sobre la escala natural $[0,1]$, mejor cuanto más bajo.
+\end{description}
+Un modelo que gana en AUC \emph{y} log-loss \emph{y} Brier, como lo hace el
+campeón, gana en ranking y calibración a la vez; el artefacto del MAE binario que
+adula a un SVR degenerado no aparece en ninguno de ellos. La misma tríada luego
+expone la patología opuesta en una red densa (Sección~\ref{sec:anns}): un modelo
+puede publicar un AUC respetable --- ranking genuino --- mientras su log-loss y
+Brier son catastróficos, es decir, ordena aceptablemente pero está
+\emph{confiadamente equivocado}.
+
+\paragraph{Una nota sobre el objetivo logarítmico histórico.} El objetivo de
+regresión inaugural del laboratorio, engagement, es de cola pesada y no negativo,
+así que se entrenó contra una transformación $\log1p$ y se remapeó con
+$\text{expm1}$. Ese par de transformación carga un peligro --- un modelo no
+acotado en espacio logarítmico puede producir una gran predicción logarítmica
+positiva que $\text{expm1}$ amplifica a un valor enorme, la ``explosión de
+$\text{expm1}$'' --- razón por la cual las familias acotadas por construcción
+(árboles, kernels rbf) se prefieren sobre las no acotadas (modelos lineales,
+MLPs) sobre ese objetivo. El engagement sigue siendo un campo documentado y su
+tabla vive en \texttt{PROJECT-FACTS.md}, pero ya no es el objetivo entregado, así
+que el peligro de explosión es ahora una nota histórica al pie más que una
+restricción de diseño viva.
+
+\section{El giro a rotación: de la magnitud de engagement a una señal binaria de ajuste de gusto}
+\label{sec:rotation-pivot}
+El 2026-06-08 el objetivo activo giró de la magnitud de engagement a una señal
+binaria de \emph{rotación}, definida como $\text{play\_count} \ge 2$ --- ¿ganó la
+pista una escucha repetida? La rotación es la entrada accionable al término
+\texttt{W\_FIT} del Playlist Pathfinder, donde una deseabilidad por pista en
+$[0,1]$ sesga el camino A*; una probabilidad de rotación calibrada es un
+\texttt{fit\_norm} más limpio que una estimación de engagement
+$\log1p$-entonces-$\text{expm1}$. La rotación también resulta ser mucho más
+aprendible que la magnitud de engagement (los árboles de gradient boosting
+alcanzan $\text{AUC}\approx 0.73$ en rotación frente a \rsq{}$\approx 0.3$ en
+engagement) y está naturalmente repartida para la búsqueda de caminos, con una
+tasa base cercana al \SI{44.5}{\percent}. El engagement se conserva como campo
+científico documentado pero ya no es el objetivo entregado.
+
+El giro es decisivo para cómo debe leerse cada número de abajo. La rotación vive
+sobre la escala $[0,1]$, así que su MAE/\rsq{} \emph{no} son comparables con la
+tabla de engagement preservada en \texttt{PROJECT-FACTS.md}; y como la mitad de
+las etiquetas de rotación son exactamente cero, las métricas de porcentaje
+absoluto (MAPE/\medape{}) son indefinidas para esas filas. Por tanto coexisten
+dos regímenes de métrica distintos en las campañas de rotación: una lectura
+temprana de \emph{regresión} (MAE, RMSE, \rsq{}, unidades P(rotación)) y la
+lectura honesta posterior de \emph{clasificación} (AUC, log-loss, exactitud,
+Brier). Como muestran las campañas de abajo, la elección de métrica no es
+cosmética --- bajo MAE un SVR de kernel puede \emph{parecer} competitivo siendo
+peor que predecir la media, una ilusión que las métricas de clasificación
+disuelven.
+
+\section{Tablas de clasificación de rotación}
+\label{sec:leaderboard}
+Cuatro tablas. Las dos primeras son sobre el corpus original DS-META, una por
+régimen de métrica; la tercera y la cuarta son sobre el corpus completo de 64-d
+de 2026 mayor. \textbf{Ninguna de las tres tablas de AUC es comparable con las
+otras} --- se sitúan sobre tres matrices de rasgos no comparables (DS-META solo
+metadatos; la matriz \emph{vocab-60/40} completa de 64-d; y la matriz
+\emph{high-vocab} completa de 64-d, que comparte el corpus, las filas y la
+partición 60/40 pero eleva los topes de cardinalidad de identidad). Cada tabla
+lleva sus propias referencias dentro del dataset y nunca debe leerse entre ellas
+(véase la nota ``Tres matrices de rasgos'' de la Introducción). La tabla de AUC
+DS-META lleva el primer campeón de rotación registrado y promovible del proyecto;
+la tabla 60/40 lleva la definición xgboost registrada del nuevo corpus; la tabla
+high-vocab lleva la primera ANN en superar la barra de guardado de rotación
+(Sección~\ref{sec:anns-highvocab}). Finalmente, \textbf{todo AUC en las cuatro
+tablas se mide sobre una partición train/test \emph{aleatoria}}; una partición
+cronológica (entrenar-en-anterior, probar-en-posterior) cuenta una historia
+marcadamente distinta --- los números de abajo son cotas superiores del ranking
+de la misma era, y la habilidad honesta de predicción hacia adelante sobre este
+corpus es $\sim$0.11 de AUC más baja (Sección~\ref{sec:drift}).
+
+\begin{table}[ht]
+  \centering
+  \caption{Rotación, régimen de \emph{clasificación}, \textbf{corpus DS-META}
+  --- ordenado por AUC (mejor cuanto más alto). El campeón es la única definición
+  registrada y auto-promovida. Datasets: DS-META
+  \dsid{ds-20260609-141622-p1-s42} (115 cols, solo metadatos, pca floor); la fila
+  de 178 cols añade las 64 columnas de latente song-AE
+  (\dsid{ds-20260608-204402-p64-s42}). Banda de ruido de AUC $2\sigma=0.0126$.}
+  \label{tab:lb-auc}
+  \begin{tabular}{llcccc}
+    \toprule
+    Modelo & Dataset & AUC & log-loss & exactitud & ¿Registrado? \\
+    \midrule
+    \best{xgboost-classifier} (campeón) & DS-META & \best{0.7429} & \best{0.5883} & 0.6846 & \best{sí (rango 1)} \\
+    xgboost-classifier (178, +latente AE) & p64-s42 & 0.7350 & 0.6045 & 0.6818 & no \\
+    svc (poly $d{=}3$, mejor no-árbol)   & DS-META & 0.6855 & 0.6452 & 0.6450 & no \\
+    logistic ($C{=}1$, piso lineal)      & DS-META & 0.6762 & 0.6329 & 0.6491 & no \\
+    svc (rbf)                            & DS-META & 0.6722 & 0.6469 & 0.6426 & no \\
+    svc (lineal)                         & DS-META & 0.6363 & 0.6535 & 0.6373 & no \\
+    svc (sigmoide, peor)                 & DS-META & 0.6255 & 0.6673 & 0.6267 & no \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Rotación, régimen de \emph{clasificación}, \textbf{nuevo corpus
+  completo de 64-d} --- ordenado por AUC (mejor cuanto más alto). Dataset
+  \dsid{ds-20260609-204419-p64-s42} (\num{23529} filas, 177 cols: 64 PCA song-AE
+  $+$ 7 numéricos $+$ 106 one-hots de identidad). \textbf{No comparable con la
+  Tabla~\ref{tab:lb-auc}}: distinto tamaño de corpus y conjunto de rasgos; la
+  única referencia intra-corpus válida es el punto xgboost \num{0.7204}, que el
+  bake-off reprodujo byte a byte. La config por defecto del ganador se guarda como
+  la definición del nuevo corpus. El mejor del barrido de semilla única
+  (profundidad 8, lr 0.03, \num{0.7261}) está $+0.0057$ sobre el defecto ---
+  dentro de banda --- así que se marca para confirmar con 3 semillas, no se
+  promueve. El log-loss del pyramid-mlp es su techo de calibración documentado
+  (Sección~\ref{sec:anns}); las filas \texttt{burn-deep-classifier} son la red
+  consciente de la representación en Rust/\texttt{burn} que lo repara (log-loss
+  $\to\sim$0.62) pero aún queda por debajo del nivel de los árboles, así que
+  ninguna se registra (Sección~\ref{sec:anns-burn}). Banda de AUC
+  $2\sigma\approx 0.0126$ (estimación del corpus antiguo, aproximada aquí).}
+  \label{tab:lb-auc-p64}
+  \begin{tabular}{llcccl}
+    \toprule
+    Modelo & max\_depth/lr & AUC & log-loss & exactitud & Nota \\
+    \midrule
+    \best{xgboost-classifier} (ganador, guardado)  & 6 / 0.05  & \best{0.7204} & 0.6075 & 0.6585 & registrado (nuevo corpus) \\
+    xgboost-classifier (mejor barrido, 1 semilla)  & 8 / 0.03  & 0.7261 & \best{0.6044} & \best{0.6651} & marcado, confirmar 3 semillas \\
+    catboost-classifier (2º árbol, en banda)       & 6 / 0.05  & 0.7111 & 0.6132 & 0.6560 & $-0.0093$, dentro de banda \\
+    burn-deep-classifier (mlp, mejor ajuste)       & lr 0.0005 / [128,64] & 0.7038 & 0.6221 & 0.6521 & mejor ANN; calib.\ arreglada \\
+    burn-deep-classifier (mlp, ganador Fase 1)     & lr 0.001 / [128,64]  & 0.7001 & 0.6211 & 0.6470 & red densa; calib.\ arreglada \\
+    burn-ae-classifier (trasplante AE, mejor)      & enc[128,64]/clf[128,64] & 0.6972 & 0.6216 & 0.6496 & $-0.0066$ vs burn mlp \\
+    ngboost-classifier                             & ---       & 0.6917 & 0.6293 & 0.6392 & $\sim$2.3 bandas atrás \\
+    pyramid-mlp-classifier (mejor arch-scan)       & [512,256] & 0.6792 & 2.0584 & 0.6326 & red densa; techo calib. \\
+    pyramid-mlp-classifier (bake-off, 300 iter)    & [256,128,64] & 0.6781 & 2.4085 & 0.6326 & red densa; techo calib. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Rotación, régimen de \emph{clasificación}, \textbf{matriz high-vocab
+  completa de 64-d} --- ordenado por AUC (mejor cuanto más alto). Dataset
+  \dsid{ds-20260612-143014-p64-s42} (\num{23529} filas, 497 cols: 64 PCA song-AE
+  $+$ 9 numéricos $+$ 426 one-hots de identidad --- artista 301, género 121,
+  tipo-álbum 4). \textbf{No comparable con las Tablas~\ref{tab:lb-auc}
+  o~\ref{tab:lb-auc-p64}}: comparte el corpus, las filas y la partición 60/40
+  pero eleva la cardinalidad de identidad (tope de artista $60\to300$, género
+  $40\to120$), así que toda familia se re-ejecutó aquí para un ranking fresco
+  dentro del dataset. Los árboles subieron sobre la matriz más ancha (xgboost
+  $0.7204\to\num{0.7299}$, catboost $0.7111\to\num{0.7252}$). El
+  \texttt{burn-deep-classifier} guardado (\texttt{embeddings}) es la primera ANN
+  en alcanzar el nivel de los árboles dentro del dataset y superar la barra de
+  guardado de rotación (Sección~\ref{sec:anns-highvocab}); xgboost es el líder
+  dentro del dataset pero ninguna regla de guardado de árbol disparó esta
+  campaña. Banda de AUC $2\sigma\approx 0.0126$ (estimación del corpus antiguo,
+  aproximada aquí).}
+  \label{tab:lb-auc-highvocab}
+  \begin{tabular}{llcccl}
+    \toprule
+    Modelo & config & AUC & log-loss & exactitud & Nota \\
+    \midrule
+    \best{xgboost-classifier} (líder intra-dataset)   & d6 / lr0.05      & \best{0.7299} & \best{0.6022} & \best{0.6719} & no registrado \\
+    catboost-classifier (2º árbol)                    & defaults         & 0.7252 & 0.6068 & 0.6649 & $-0.0047$, en banda \\
+    burn-deep-classifier (embeddings, mejor Fase 2)   & ed8 / lr0.0005   & 0.7228 & 0.6105 & 0.6645 & nivel árboles; ganancia sub-banda \\
+    burn-deep-classifier (embeddings, \emph{guardado}) & ed16 / lr0.001   & 0.7192 & 0.6087 & 0.6694 & registrado (high-vocab) \\
+    burn-deep-classifier (mlp)                        & lr0.001          & 0.7129 & 0.6166 & 0.6617 & $-0.0063$ vs embeddings \\
+    burn-deep-classifier (wide\_deep)                 & lr0.001          & 0.7061 & 0.6256 & 0.6526 & rezagado, ambos regímenes \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Rotación, régimen de \emph{regresión}, \textbf{corpus DS-META} ---
+  ordenado por MAE sobre la escala $[0,1]$ de P(rotación) (mejor cuanto más
+  bajo). El líder XGBoost solo-metadatos es la rama \texttt{mae\_xgb} reproducida
+  dentro de cada ejecución de blend; nunca se guardó como definición autónoma. La
+  fila SVM-poly se lista por completitud y está \emph{refutada}: su MAE más bajo
+  es el artefacto del tubo-$\epsilon$ de la Sección~\ref{sec:svm}, su \rsq{} es
+  negativo. Banda de ruido de MAE $2\sigma=0.0086$.}
+  \label{tab:lb-mae}
+  \begin{tabular}{lcccl}
+    \toprule
+    Modelo & MAE & RMSE & \rsq{} & Fuente \\
+    \midrule
+    \best{XGBoost solo-metadatos} (latente AE descartado) & \best{0.3879} & \best{0.4475} & \best{0.191} & ae-blend / svm \\
+    xgboost sobre latente+metadatos combinados            & 0.3965 & --- & 0.166 & giro rotación \\
+    xgboost sobre solo-latente AE (64 cols)               & 0.4098 & --- & 0.132 & giro rotación \\
+    svm (poly, artefacto tubo-$\epsilon$ --- REFUTADO)    & 0.3814 & 0.5303 & $-0.137$ & svm \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Campañas}
+
+\subsection{Blend de latente-autoencoder + XGBoost: una modalidad muerta, aislada}
+\label{sec:ae-blend}
+\emph{Motivación.} Esta fue la primera campaña sobre el objetivo de rotación
+girado. La hipótesis era que un latente de song-autoencoder precomputado de 64
+dimensiones (de la colección Qdrant \texttt{spotify\_tracks\_song\_ae}) lleva la
+\emph{identidad} de una pista de una forma que los one-hots de metadatos no, y
+que mezclar un regresor sobre el latente AE con un modelo XGBoost de metadatos
+--- $\hat{y}=w\cdot\hat{y}_{\text{ae}}+(1-w)\cdot\hat{y}_{\text{xgb}}$, con el
+peso $w$ ajustado en un holdout de entrenamiento --- podría superar a
+XGBoost-metadatos solo. Las seis ramas corrieron sobre
+\dsid{ds-20260608-204402-p64-s42} (64 latente AE + 114 metadatos $=$ 178 cols,
+12{,}256 filas, 9{,}805/2{,}451 en semilla 42), variando solo la rama AE (kNN en
+$k\in\{10,25,50,100,200\}$, más una rama ridge-sobre-latente).
+
+\emph{Resultados.} Las seis ejecuciones (\runid{run-20260609-131545-e34e4} y
+hermanas) tuvieron éxito, y todas devolvieron métricas de blend idénticas byte a
+byte --- MAE 0.38789, \rsq{} 0.191, RMSE 0.4475 --- porque el ajustador de peso
+llevó $w\to 0$ en cada rama. El único eje que se movió fue el error autónomo de
+la rama AE $mae_{\text{ae}}$, que creció monótonamente con el tamaño de la
+vecindad, de 0.4259 en $k=10$ a 0.4702 en $k=200$ (la rama ridge aterrizó en
+0.4623, entre $k=100$ y $k=200$). La Figura~\ref{fig:ae-knn} muestra la curva
+contra las tres referencias horizontales que importan: incluso la mejor lectura
+AE ($k=10$, 0.4259) nunca alcanza el árbol solo-metadatos (0.3879), ni siquiera
+el \emph{xgboost} de solo-latente-AE registrado (0.4098).
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{ae_latent_knn}
+  \caption{El latente song-AE no lleva ninguna señal de rotación que los one-hots
+  de metadatos no lleven ya mejor. El error autónomo kNN $mae_{\text{ae}}$ sube
+  monótonamente conforme se ensancha la vecindad (la señal del latente es más
+  fuerte en vecindades locales estrechas y se diluye hacia la tasa base), e
+  incluso su mejor punto queda por encima tanto del árbol de solo-latente-AE como
+  del árbol solo-metadatos. El ajustador de peso correctamente lleva el peso del
+  blend a cero, así que el ensamble colapsa a XGBoost solo-metadatos.}
+  \label{fig:ae-knn}
+\end{figure}
+
+\emph{Interpretación.} El colapso a $w=0$ es la respuesta correcta, no un bug a
+arreglar: dada una rama AE estrictamente peor que la rama XGB en el holdout, el
+peso convexo óptimo \emph{es} cero. El único valor real de la arquitectura fue
+que \emph{aisló} el latente en una rama que el ajustador podía descartar,
+recuperando un resultado más limpio que alimentar el latente a un XGBoost
+unificado --- lo que de hecho \emph{diluye} el árbol (MAE 0.3965 con las 64
+columnas de latente presentes frente a 0.3879 con ellas descartadas). El latente
+song-AE se une así a la co-escucha, el texto-contenido y los rasgos acústicos
+como una modalidad densa que pierde ante los one-hots de identidad categórica. La
+única salvedad en su momento era honestidad sobre la significancia: la ventaja de
+$0.3879$ frente a $0.3965$ es de solo $0.0086$ de MAE sobre un objetivo $[0,1]$,
+y la banda de ruido de rotación estaba entonces sin medir --- así que la campaña
+reportó el número pero no afirmó victoria significativa y no promovió nada.
+\emph{Fuente: \texttt{2026-06-09-ae-xgboost-blend.md}.}
+
+\subsection{SVM de kernel sobre rotación: una refutación, y la trampa del MAE binario}
+\label{sec:svm}
+\emph{Motivación.} Descartado el latente, esta campaña probó si algún kernel SVM
+(rbf / lineal / poly / sigmoide) produce un predictor de rotación competitivo con
+el líder XGBoost solo-metadatos y --- solo si alguno pasaba --- si añadía señal
+ortogonal en un blend ponderado por grilla. La matriz de metadatos se redujo al
+pca floor en un dataset nuevo (\dsid{ds-20260609-141622-p1-s42}, 115 cols), con
+dos hermanas de semilla de partición (semillas 17 y 101) construidas para medir
+la banda de ruido, y el campeón reproducido como control
+(\runid{run-20260609-141717-9a8ba-autoencoder-xgboost}, peso de blend 0). Un
+resultado secundario fue el entregable central de la campaña: la \textbf{primera
+banda de ruido de rotación medida}.
+
+\emph{Resultados.} A través de las tres semillas de partición del control XGBoost
+solo-metadatos (s42 0.387891, s17 0.393072, s101 0.396417) la desviación estándar
+muestral es $\sigma_{\text{split}}=0.00430$, dando una banda de significancia
+$2\sigma$ de \textbf{0.0086 de MAE} sobre la escala $[0,1]$. Esto zanja
+retroactivamente la pregunta abierta de la campaña previa: la ventaja de $0.3879$
+frente a $0.3965$ es $\Delta 0.0086 \approx 1{\cdot}\text{banda}$ (probablemente
+mejor, no confiada), mientras que la brecha de $0.3879$ frente a $0.4098$
+(solo-latente-AE) es $\sim 2.5{\cdot}\text{banda}$ y por tanto real. En cuanto a
+las ramas SVM, rbf, lineal y poly publicaron todas MAE dentro de la banda del
+control (0.381--0.390), \emph{más bajo} que el campeón en el caso poly (0.3814)
+--- pero cada una de ellas es peor-que-la-media en \rsq{} ($-0.13$ a $-0.20$), con
+RMSE 0.53--0.54 contra el 0.4475 del árbol. El SVR sigmoide divergió de plano:
+MAE 0.624, RMSE 1.531, \rsq{} $-8.48$, con predicciones alcanzando 24.7 sobre un
+objetivo $[0,1]$ --- la clásica explosión del SVR-sigmoide no acotado. La
+Figura~\ref{fig:svm} contrasta las dos vistas de métrica directamente.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{svm_mae_vs_r2}
+  \caption{Sobre un objetivo binario, un MAE de SVR bajo es un artefacto, no
+  habilidad. Con $\epsilon=0.1$ sobre un objetivo $\{0,1\}$ el SVR ajusta sus
+  salidas a los bordes del tubo-$\epsilon$ (un escalón duro de dos niveles,
+  $p_{50}\approx 0.10$, $p_{90}\approx 0.90$), así que cada fila queda solo
+  $\sim 0.1$ de su etiqueta y el \emph{MAE} (izquierda) lee competitivo. El
+  \emph{$R^2$} honesto (derecha) lo expone: cada kernel es peor que predecir la
+  media. El sigmoide está fuera de escala en $R^2=-8.48$.}
+  \label{fig:svm}
+\end{figure}
+
+\emph{Interpretación.} El MAE de SVR bajo es una degeneración de la métrica sobre
+un objetivo binario. Con un tubo-$\epsilon$ de ancho $0.1$ sobre etiquetas
+$\{0,1\}$, el SVR colapsa a una función escalón de dos niveles anclada cerca de
+las clases correctas --- cada fila queda a unos $0.1$ de su etiqueta, así que el
+MAE es pequeño, mientras que la calibración y el ranking quedan destruidos
+(\rsq{} negativo). La métrica que importa para el \texttt{fit\_norm} del
+Pathfinder (ranking y calibración, es decir \rsq{}/RMSE/AUC) dice que el SVM
+pierde decisivamente. Peor aún, los dos blends de la etapa 2
+(\runid{run-20260609-143114-528ef-blend} y su gemelo lgbm) ajustaron pesos de
+exactamente $[0.0, 1.0]$ --- la grilla, optimizando el mismo MAE de validación
+degenerado, \emph{seleccionó mal SVM puro} y descartó el árbol, lo opuesto al
+auto-deshabilitado visto en la campaña de blend. La lección es contundente: un
+objetivo de blend por-grilla-por-MAE es en sí inseguro sobre un objetivo binario.
+Nada se registró ni promovió; el SVM de kernel se volvió la quinta familia de
+régimen denso en perder ante la identidad one-hot sobre este corpus.
+\emph{Fuente: \texttt{2026-06-09-svm-kernel-rotation.md}.}
+
+\subsection{El bake-off honesto de AUC y el primer campeón de AUC}
+\label{sec:auc}
+\emph{Motivación.} La campaña SVM expuso que el MAE es la lente equivocada para
+un objetivo binario. Mientras tanto el framework había ganado un modo de
+clasificación (\texttt{domain.toml} \texttt{task = binary}, métrica principal
+AUC, mejor cuanto más alto; el grupo de mejores modelos ordena por AUC y
+auto-promueve la ejecución superior). Esta campaña re-ejecutó la comparación sobre
+ese pie honesto: xgboost-classifier contra logistic y un barrido de cuatro
+kernels SVC, todos sobre DS-META, más una rama de 178 columnas con el latente AE
+re-añadido para zanjar la cuestión de dilución del latente sobre el eje AUC, y
+tres semillas de control para medir la banda de ruido de AUC. La hipótesis --- un
+sexto test del hallazgo convergente --- era que xgboost-classifier gana y toda
+familia densa pierde.
+
+\emph{Resultados.} Las nueve ejecuciones tuvieron éxito. La config campeona
+(\runid{run-20260609-172920-627d6-xgboost-classifier}, hiperparámetros de
+control, semilla 42) alcanzó \textbf{AUC 0.7429} (log-loss 0.5883, exactitud
+0.6846, Brier 0.2017) y se registró como \texttt{xgboost-classifier-rotation} y
+se auto-promovió a mejores-modelos rango 1 --- el primer campeón de rotación del
+proyecto guardado, puntuado por AUC y promovible. La primera banda de ruido de
+\emph{AUC} medida viene de las tres semillas de control (s42 0.742934, s17
+0.730659, s101 0.734469, media 0.736020): $\sigma_{\text{AUC}}=0.00628$,
+$2\sigma=\textbf{0.0126}$ (Figura~\ref{fig:auc-band}). Esta banda es una métrica
+distinta de la banda de 0.0086 de MAE y no la reemplaza. Toda familia densa
+perdió por muchas bandas --- svc-poly 0.6855, logistic 0.6762, svc-rbf 0.6722,
+svc-linear 0.6363, svc-sigmoid 0.6255 --- un rango de 4.6 a 9.3 bandas de ruido
+por debajo del campeón (Figura~\ref{fig:auc-bakeoff}). La rama de 178 columnas
+(latente AE re-añadido) puntuó 0.7350, $-0.0079$ por debajo del campeón
+solo-metadatos --- la misma dirección dilutiva que el resultado de regresión,
+pero dentro de la banda de AUC, así que neutral-tirando-a-dilutivo en una
+semilla única.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{auc_bakeoff}
+  \caption{La métrica de clasificación honesta confirma el hallazgo convergente
+  por sexta vez. xgboost-classifier lee la identidad dispersa de
+  artista/género/álbum de los one-hots sin pérdida; las familias densas de
+  distancia/margen (logistic y los cuatro kernels SVC) difuminan esa identidad en
+  un espacio de rasgos denso y aterrizan de 4.6 a 9.3 bandas de ruido más abajo.
+  La franja sombreada es la banda $2\sigma=0.0126$ bajo el campeón; ningún
+  retador llega a una banda de él.}
+  \label{fig:auc-bakeoff}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.7\textwidth]{auc_noise_band}
+  \caption{La primera banda de ruido de AUC de rotación medida. Tres semillas de
+  partición de datos de la config campeona registrada dan
+  $\sigma_{\text{AUC}}=0.0063$ y una banda de significancia $2\sigma$ de $0.0126$.
+  En términos relativos es de hecho más estrecha que la banda de MAE (0.85\%
+  frente a 1.10\% de coeficiente de variación), como se espera de una métrica de
+  rango sobre 2{,}451 filas de prueba. La banda solo importa para la decisión
+  sub-banda de dilución del latente; campeón y retadores están separados por
+  muchas bandas.}
+  \label{fig:auc-band}
+\end{figure}
+
+\emph{Interpretación.} Reencuadrar la rotación como clasificación hizo dos cosas a
+la vez. Disolvió la ilusión del SVR de la Sección~\ref{sec:svm} --- bajo AUC,
+log-loss \emph{y} Brier, cada kernel SVC es ahora visiblemente peor que los
+árboles, todos en la misma dirección, así que el artefacto del tubo-$\epsilon$
+que hacía parecer competitivo el MAE del SVR simplemente se desvanece. Y confirmó
+que la métrica solo fue siempre un problema para la \emph{justicia de la
+comparación}; la familia densa siempre fue la perdedora. Notablemente svc-sigmoid
+no colapsa al azar bajo clasificación (mantiene AUC 0.6255 en vez de explotar):
+un objetivo de probabilidad propio quita la divergencia no acotada que arruinó la
+ejecución SVR-sigmoide. El hallazgo convergente ahora se sostiene sobre una
+métrica honesta: la señal de ajuste de gusto vive en la \emph{identidad} de
+artista/género/álbum, capturada por one-hots dispersos y explotada por árboles,
+no en modelos densos de distancia o margen. La palanca restante es la
+\emph{resolución} de identidad --- elevar los topes de vocabulario para que la
+cola \texttt{artist=\_\_other\_\_} obtenga columnas reales --- no nuevas
+modalidades ni familias. La próxima campaña planificada es un barrido de
+hiperparámetros del campeón ahora que la familia y la métrica están zanjadas.
+\emph{Fuente: \texttt{2026-06-09-rotation-classification.md}.}
+
+\subsection{Bake-off de cuatro familias sobre el nuevo corpus completo de 64-d, y un barrido xgboost de depth/lr}
+\label{sec:bakeoff-p64}
+\emph{Motivación.} Las tres primeras campañas corrieron sobre el corpus original
+DS-META. Esta campaña re-planteó la pregunta de familia sobre el corpus 2026
+mayor --- ``todo el embedding de 64-d'', la matriz completa de 177 columnas
+(\dsid{ds-20260609-204419-p64-s42}, \num{23529} filas, 64 PCA song-AE $+$ 7
+numéricos $+$ 106 one-hots de identidad) --- poniendo cuatro familias de
+clasificadores cara a cara con defectos de registro, semilla 42:
+\texttt{xgboost-classifier}, \texttt{catboost-classifier},
+\texttt{ngboost-classifier} y un \texttt{pyramid-mlp-classifier} denso. Las tres
+últimas son \emph{familias nuevas en este proyecto}. El ganador luego se ganó un
+barrido de \texttt{max\_depth}$\times$\texttt{learning\_rate}. La única referencia
+intra-corpus válida es una ejecución preexistente sobre este dataset
+(\runid{run-20260609-204726-439d8-xgboost-classifier}, AUC \num{0.7204}); nada
+aquí puede leerse contra el campeón DS-META de \num{0.7429} (distinto corpus y
+conjunto de rasgos).
+
+\emph{Resultados.} Las cuatro ramas del bake-off tuvieron éxito
+(Tabla~\ref{tab:bakeoff-p64}; Figura~\ref{fig:bakeoff-p64}).
+\texttt{xgboost-classifier} (\runid{run-20260612-115909-840c0-xgboost-classifier})
+ganó con AUC \num{0.7204}, reproduciendo la referencia intra-corpus byte a byte
+(\num{0.7204383403}) --- la puerta de determinismo pasó.
+\texttt{catboost-classifier}
+(\runid{run-20260612-115909-c7ef6-catboost-classifier}) siguió en \num{0.7111},
+$-0.0093$ detrás --- \emph{dentro} de la banda $\sim$0.0126, así que co-líder y la
+segunda familia de árboles legítima, no una pérdida.
+\texttt{ngboost-classifier} (\runid{run-20260612-115909-d725b-ngboost-classifier})
+aterrizó en \num{0.6917} ($\sim$2.3 bandas atrás), y el
+\texttt{pyramid-mlp-classifier} denso
+(\runid{run-20260612-115909-ea698-pyramid-mlp-classifier}) fue último en
+\num{0.6781} --- con un log-loss de \num{2.4085} y Brier \num{0.3251} muy por
+encima de los $\sim$0.60--0.63 / $\sim$0.21 de los árboles, el diagnóstico
+diseccionado en la Sección~\ref{sec:anns}.
+
+\begin{table}[ht]
+  \centering
+  \caption{Fase 1 --- el bake-off de cuatro familias sobre el nuevo corpus
+  completo de 64-d (\dsid{ds-20260609-204419-p64-s42}, semilla 42, defectos de
+  registro). Las cuatro tuvieron éxito. AUC mejor cuanto más alto; log-loss y
+  Brier mejor cuanto más bajo. Ganador en negrita; mejor celda por métrica en
+  negrita.}
+  \label{tab:bakeoff-p64}
+  \begin{tabular}{llcccc}
+    \toprule
+    Rama / run id & Predictor & AUC & log-loss & exactitud & Brier \\
+    \midrule
+    \best{C0} (\runid{run-20260612-115909-840c0-xgboost-classifier}) & \best{xgboost-classifier}   & \best{0.7204} & \best{0.6075} & \best{0.6585} & \best{0.2109} \\
+    A1 (\runid{run-20260612-115909-c7ef6-catboost-classifier})       & catboost-classifier         & 0.7111 & 0.6132 & 0.6560 & 0.2132 \\
+    A2 (\runid{run-20260612-115909-d725b-ngboost-classifier})        & ngboost-classifier          & 0.6917 & 0.6293 & 0.6392 & 0.2193 \\
+    A3 (\runid{run-20260612-115909-ea698-pyramid-mlp-classifier})    & pyramid-mlp-classifier      & 0.6781 & 2.4085 & 0.6326 & 0.3251 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{bakeoff_p64}
+  \caption{El orden de familias sobrevive al cambio de corpus. Sobre la matriz
+  completa de 64-d de 2026 mayor las dos familias de árboles de gradient boosting
+  lideran (\texttt{xgboost} ganando, \texttt{catboost} co-líder dentro de la
+  banda $2\sigma$ sombreada bajo el ganador); \texttt{ngboost} queda $\sim$2.3
+  bandas atrás; el \texttt{pyramid-mlp} denso es último, el mismo hallazgo
+  convergente visto sobre DS-META en la Figura~\ref{fig:auc-bakeoff}.}
+  \label{fig:bakeoff-p64}
+\end{figure}
+
+El ganador se ganó un barrido de Fase 2 sobre \texttt{max\_depth}$\in\{4,6,8\}
+\times$ \texttt{learning\_rate}$\in\{0.03,0.05,0.1\}$ (datos en forma de tabla en
+el informe fuente; Figura~\ref{fig:xgb-heatmap}). La profundidad es el eje
+dominante: cada celda de profundidad-4 está en el fondo (0.7074--0.7119), y la
+esquina profundidad-8 / lr-0.03 encabeza la grilla en \num{0.7261}
+(\runid{run-20260612-120207-2dd3d-xgboost-classifier}, log-loss \num{0.6044}). Un
+learning rate alto (0.1) perjudica consistentemente tanto el AUC como la
+calibración. Pero la brecha mejor-vs-defecto (+0.0057) está \emph{dentro} de la
+banda, así que la config por defecto profundidad-6/lr-0.05 se guardó como la
+definición del nuevo corpus y la celda profundidad-8/lr-0.03 se marcó para una
+confirmación de 3 semillas en vez de promoverse.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.62\textwidth]{xgb_depth_lr_heatmap}
+  \caption{El barrido xgboost \texttt{max\_depth}$\times$\texttt{learning\_rate}
+  sobre el nuevo corpus. La profundidad es la palanca (el AUC sube monótonamente
+  por el eje de profundidad a los learning rates lentos), y un learning rate
+  rápido perjudica. La mejor celda (profundidad 8, lr 0.03, recuadrada) alcanza
+  \num{0.7261} pero solo $+0.0057$ sobre el defecto --- dentro de la banda
+  $2\sigma$ --- así que la config por defecto permanece guardada y la mejor celda
+  espera un confirm de 3 semillas.}
+  \label{fig:xgb-heatmap}
+\end{figure}
+
+\emph{Interpretación.} El hallazgo convergente sobrevive intacto al cambio de
+corpus: sobre un corpus distinto y mayor con el latente AE presente, las dos
+familias de árboles vuelven a liderar y la red densa vuelve a ser última.
+\texttt{catboost} se gana su lugar como segunda familia de árboles legítima
+(co-líder en banda) --- un miembro de diversidad-de-árboles / segunda-opinión, no
+una ganancia de AUC sobre xgboost. \texttt{ngboost} paga por su maquinaria
+distribucional: los aprendices base poco profundos (\texttt{base\_max\_depth} 3)
+sub-ajustan la matriz de 177 columnas densa en one-hot. El AUC de último lugar
+del pyramid-MLP \emph{más} su log-loss reventado son la firma de red densa; el
+bake-off leyó el log-loss como un artefacto de sub-entrenamiento de 300
+iteraciones y prescribió más presupuesto --- una hipótesis que la campaña
+siguiente prueba y refuta.
+\emph{Fuente: \texttt{2026-06-12-classifier-bakeoff-p64.md}.}
+
+\subsection{Barrido de arquitectura del Pyramid-MLP: refutando la hipótesis de presupuesto}
+\label{sec:mlp-scan}
+\emph{Motivación.} El bake-off marcó el último lugar del pyramid-MLP (AUC
+\num{0.6781}, log-loss \num{2.4085}) como un artefacto de sub-entrenamiento por
+el tope de 300 iteraciones, prescribiendo ``subir \texttt{max\_iter} para que la
+red converja''. Este seguimiento prueba ese mecanismo directamente: seis
+geometrías de pirámide, todas con \texttt{max\_iter} subido a \textbf{800}, alpha
+\num{1e-4}, learning rate \num{1e-3}, semilla 42, sobre el mismo dataset --- de
+modo que la comparación refleja \emph{arquitectura}, no presupuesto. ¿Alguna
+geometría, dado el presupuesto para converger, eleva la familia densa a un AUC
+competitivo?
+
+\emph{Resultados.} Refutado en todo aspecto (Tabla~\ref{tab:mlp-scan};
+Figuras~\ref{fig:mlp-arch} y~\ref{fig:mlp-calib}). \textbf{Ninguna rama alcanzó el
+tope de 800}: cada geometría se auto-detuvo en \textbf{73--100 iteraciones} vía
+la tolerancia de meseta de pérdida \texttt{n\_iter\_no\_change} de sklearn --- muy
+por debajo incluso del viejo tope de 300, así que el presupuesto nunca fue la
+restricción vinculante. El indicio decisivo: la rama de re-línea-base M0
+([256,128,64], la geometría del bake-off ahora en \texttt{max\_iter} 800)
+reprodujo el AUC de la ejecución sub-entrenada hasta todos los dígitos ---
+\num{0.6780926} frente a \num{0.6780926} --- porque corrió las mismas 73
+iteraciones. Subir el tope de 300 a 800 no cambió nada. La mejor geometría
+convergida fue M1 [512,256] con AUC \num{0.6792}
+(\runid{run-20260612-123155-0ace5}), un empate estadístico con el defecto
+sub-entrenado ($+0.0011 \approx$ cero) y $\sim$3.3 bandas por debajo de xgboost.
+Toda la familia aterriza en una franja de AUC de 0.0080 de ancho
+(0.6712--0.6792), enteramente dentro de una banda de ruido --- el ranking de
+geometría no es resoluble en una semilla única --- con el log-loss (2.06--2.78) y
+Brier (0.32--0.34) reventados al mismo nivel que el defecto sub-entrenado en cada
+rama. Ninguna definición se guardó (por debajo de la barra de guardado 0.683).
+
+\begin{table}[ht]
+  \centering
+  \caption{El barrido de arquitectura de seis geometrías del pyramid-MLP
+  (\dsid{ds-20260609-204419-p64-s42}, \texttt{max\_iter} 800, alpha \num{1e-4},
+  lr \num{1e-3}, semilla 42), ordenado por AUC. Las seis tuvieron éxito;
+  \emph{ninguna} alcanzó el tope de 800 iteraciones --- cada una se auto-detuvo en
+  el conteo de iteraciones listado. Mejor celda por métrica en negrita.}
+  \label{tab:mlp-scan}
+  \begin{tabular}{llcccc}
+    \toprule
+    Rama & Capas ocultas & AUC & log-loss & Brier & Iters (de 800) \\
+    \midrule
+    \best{M1} ancha-poco profunda & [512, 256]            & \best{0.6792} & \best{2.0584} & \best{0.3216} & 75 \\
+    M0 re-línea-base       & [256, 128, 64]        & 0.6781 & 2.4085 & 0.3251 & 73 \\
+    M4 estrechamiento suave & [384, 307, 246]       & 0.6777 & 2.7764 & 0.3292 & 87 \\
+    M2 pirámide profunda    & [256, 128, 64, 32]    & 0.6737 & 2.7631 & 0.3303 & 100 \\
+    M3 estrechamiento fuerte & [512, 169, 56]        & 0.6736 & 2.7031 & 0.3365 & 89 \\
+    M5 ancha-profunda       & [512, 307, 184, 111]  & 0.6712 & 2.6457 & 0.3348 & 84 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{mlp_arch_scan}
+  \caption{Ambas perillas de la familia densa están agotadas. \emph{Izquierda:}
+  las seis geometrías aterrizan dentro de una única banda $2\sigma$ alrededor del
+  defecto sub-entrenado --- la arquitectura no es la restricción vinculante.
+  \emph{Derecha:} cada geometría se auto-detiene en 73--100 iteraciones, muy por
+  debajo incluso del viejo tope de 300 (por no hablar del subido a 800), así que
+  el \emph{presupuesto} de entrenamiento tampoco fue nunca la restricción
+  vinculante. El optimizador alcanza una meseta de pérdida de la que no puede
+  escapar a este learning rate y se detiene. La restricción vinculante es la
+  \emph{representación} de entrada.}
+  \label{fig:mlp-arch}
+\end{figure}
+
+\emph{Interpretación.} La refutación es limpia y doble: ni el presupuesto de
+entrenamiento (cada rama se auto-detiene muy por debajo del tope; M0 reproduce el
+AUC sub-entrenado hasta todos los dígitos) ni la arquitectura (las seis
+geometrías dentro de una banda) mueven la familia densa. El log-loss alto no es
+por tanto una trayectoria de entrenamiento truncada sino un genuino \emph{techo de
+calibración} a estos hiperparámetros --- la meseta elegida por el optimizador. Con
+las propias perillas de la familia densa agotadas, la restricción vinculante debe
+estar en otra parte: en la \emph{representación} de entrada, el tema de la
+Sección~\ref{sec:anns}. La tendencia direccional dentro de familia --- más
+ancho-y-poco-profundo levemente favorecido (M1 arriba), profundidad/capacidad
+levemente dañina (M5 ancha-profunda última) --- es consistente con una red densa
+luchando por encaminar señal a través de 106 one-hots dispersos: capas extra
+añaden capacidad para memorizar y difuminar, no para separar. La familia está
+cerrada para AUC sobre este conjunto de rasgos; no re-escanear geometría ni
+presupuesto.
+\emph{Fuente: \texttt{2026-06-12-pyramid-mlp-arch-scan.md}.}
+
+\section{Por qué las redes neuronales artificiales rinden peor sobre datos de gusto densos en one-hot}
+\label{sec:anns}
+El \texttt{pyramid-mlp} denso es la única red neuronal artificial en las campañas
+de rotación, y a lo largo de dos campañas de jun-12 aterriza última con un patrón
+de fallo distintivo. Esta sección consolida, rigurosamente, \emph{por qué} ---
+anclando cada afirmación en la evidencia de las campañas. La versión corta es el
+\emph{hallazgo convergente} documentado del proyecto: sobre esta matriz de rasgos
+la restricción vinculante es la \emph{representación} de entrada, y una red densa
+es la única clase de modelo estructuralmente desajustada a ella. Construimos el
+argumento en cinco partes y cerramos con el siguiente paso motivado.
+
+\subsection{La matriz de rasgos es mayormente identidad dispersa}
+\label{sec:anns-matrix}
+La matriz completa de 64-d tiene 177 columnas, y su \emph{composición} es toda la
+historia. \textbf{106 de las 177 columnas son one-hots dispersos de identidad}:
+artista ($\times 61$), \texttt{genre\_primary} ($\times 41$) y
+\texttt{album\_type} ($\times 4$). Solo 71 columnas son continuas --- los 64
+latentes PCA song-AE y 7 campos numéricos de metadatos (popularidades, número de
+seguidores, año de lanzamiento, número de artistas acreditados). Para una pista
+dada exactamente una columna de artista, una de género y una de tipo-álbum está
+activa; el resto de las 106 son cero. La matriz está, por construcción, dominada
+por un bloque mayormente-cero de indicadores mutuamente excluyentes.
+
+Un árbol de gradient boosting lee este bloque \emph{sin pérdida y barato}: una
+única partición alineada a ejes sobre la columna \texttt{artist=X} divide los
+datos exactamente sobre esa identidad, sin forzar ninguna interacción entre los
+one-hots y sin costo pagado por las columnas que son cero. Capturar ``las pistas
+del artista $X$ en el género $Y$ rotan'' le cuesta al árbol dos particiones
+anidadas. Una red densa no puede hacer esto. Debe aprender un peso \emph{denso}
+desde cada una de las 106 entradas mayormente-cero hacia cada unidad oculta, y
+luego extraer una combinación no lineal --- gastando capacidad y señal de
+gradiente modelando la estructura de un bloque que el árbol maneja con una
+comparación. Este es precisamente el régimen en el que los árboles dominan
+estructuralmente a las redes densas, y es el \emph{hallazgo convergente} del
+proyecto, ahora observado a través de cuatro modalidades de rasgos y cinco
+familias de modelos: la señal de ajuste de gusto la lleva la identidad de
+artista/género, capturada por one-hots y explotada por árboles, no por atributos
+descriptivos ni modelos de distancia/margen/densos. El pyramid-MLP es simplemente
+el turno de la familia densa de perder ante ella.
+
+\subsection{La estandarización convierte categorías raras en picos atípicos}
+\label{sec:anns-scaler}
+La red densa se alimenta con una matriz escalada con StandardScaler, y la
+estandarización interactúa patológicamente con los one-hots dispersos. Una
+columna one-hot para una categoría presente en una fracción $p$ de filas tiene
+media $p$ y desviación estándar $\sqrt{p(1-p)}$. Estandarizarla mapea las filas
+``encendidas'' a
+\[
+  z_{\text{on}} = \frac{1-p}{\sqrt{p(1-p)}} = +\sqrt{\frac{1-p}{p}},
+  \qquad
+  z_{\text{off}} = \frac{0-p}{\sqrt{p(1-p)}} = -\sqrt{\frac{p}{1-p}}.
+\]
+Para una categoría \emph{rara} --- la cola larga de artistas y géneros, donde $p$
+es pequeño --- el valor ``encendido'' $+\sqrt{(1-p)/p}$ se vuelve un gran pico
+positivo (para $p=0.01$ es $\approx +9.9$), mientras el valor ``apagado'' queda
+en un diminuto negativo $-\sqrt{p/(1-p)}\approx -0.1$. Cada identidad rara llega
+por tanto a la red como un atípico ocasional y enorme sobre su propio eje. Las
+unidades ReLU con Adam a learning rate \num{1e-3} oscilan fuerte sobre estos picos
+--- una única activación de categoría rara produce una gran pre-activación que el
+optimizador persigue --- y la cabeza softmax/sigmoide se satura, emitiendo
+probabilidades cerca de 0 o cerca de 1 sobre evidencia delgada. Los árboles son
+inmunes: un umbral de partición sobre un one-hot es invariante a cualquier
+reescalado monótono, así que el pico del escalador no les hace nada. Este es un
+contribuyente mecanístico directo a la calibración reventada documentada a
+continuación.
+
+\subsection{La firma diagnóstica: ranking genuino, calibración rota}
+\label{sec:anns-signature}
+El fallo de la red densa tiene una firma precisa y reproducible en las métricas
+--- y \emph{no} es el fallo de un modelo débil. El pyramid-MLP publica AUC
+$\approx 0.68$ (0.6781 en el bake-off, 0.6792 el mejor en el barrido de
+arquitectura): señal de ranking genuina, bien por encima de la línea de azar de
+0.5, solo $\sim$3 bandas por debajo de los árboles. Pero \emph{al mismo tiempo} su
+log-loss es $\approx 2.0$--$2.8$ y su Brier $\approx 0.32$--$0.34$, contra el
+log-loss $\approx 0.60$--$0.63$ y el Brier $\approx 0.21$ de los árboles
+(Figura~\ref{fig:mlp-calib}). Un predictor de tasa base constante (siempre
+emitiendo $p\approx 0.445$) puntúa un log-loss de solo $\approx 0.69$.
+\textbf{El log-loss de la red de 2.0--2.8 es así mucho peor que la línea base
+aleatoria, mientras que el 0.61 de xgboost está muy por debajo de ella.}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{mlp_calibration_signature}
+  \caption{El diagnóstico de red densa: la red está confiadamente equivocada, no
+  meramente débil. \emph{Izquierda:} en AUC el pyramid-MLP genuinamente ordena
+  ($\approx 0.68$, bien por encima del azar, $\sim$3 bandas bajo los árboles) ---
+  hay señal real en su ordenamiento. \emph{Derecha:} pero su log-loss ($\approx
+  2.0$--$2.8$) es mucho \emph{peor} que la línea base de tasa base aleatoria
+  ($\approx 0.69$, punteada), mientras los árboles quedan muy por debajo de ella
+  ($\approx 0.61$). Un modelo que ordena aceptablemente pero puntúa un log-loss
+  peor-que-el-azar está emitiendo probabilidades confiadas y mal calibradas.}
+  \label{fig:mlp-calib}
+\end{figure}
+
+Esta combinación --- ranking aceptable, log-loss peor-que-el-azar --- significa
+que la red está \emph{confiadamente equivocada}: empuja muchas predicciones a los
+extremos saturados (cerca de 0 o cerca de 1) del lado equivocado de la etiqueta, y
+el log-loss castiga cada error confiado así severamente. Está mal calibrada, no
+débil: el ordenamiento está ahí, pero las probabilidades adjuntas a ese
+ordenamiento son inutilizables como un \texttt{fit\_norm}. El mecanismo es
+exactamente la saturación por pico del escalador de la
+Sección~\ref{sec:anns-scaler}. Contrasta con los árboles, cuyas salidas de
+frecuencia de hoja están calibradas por construcción: una hoja que reporta
+probabilidad $q$ es la frecuencia empírica de rotación de las filas de
+entrenamiento que caen en ella, así que las probabilidades del árbol son honestas
+por diseño --- la razón por la que gana en log-loss y Brier además de AUC.
+
+\subsection{Optimización frente a representación: la restricción vinculante}
+\label{sec:anns-binding}
+Una objeción natural es que la red está meramente sub-optimizada --- muy pocas
+iteraciones, la geometría equivocada. El barrido de arquitectura
+(Sección~\ref{sec:mlp-scan}) descarta ambas. Sobre el eje de \emph{presupuesto},
+cada una de las seis geometrías se auto-detiene en 73--100 iteraciones, muy por
+debajo incluso del viejo tope de 300 (por no hablar del subido a 800): el
+optimizador alcanza una meseta de pérdida de la que no puede escapar, así que más
+presupuesto no compra nada --- la rama de re-línea-base M0 reprodujo el AUC
+sub-entrenado hasta todos los dígitos porque corrió las mismas 73 iteraciones.
+Sobre el eje de \emph{arquitectura}, las seis geometrías aterrizan dentro de una
+única banda de ruido, y la mejor geometría convergida reproduce el AUC
+sub-entrenado a cuatro dígitos (0.6792 frente a 0.6781). Ambas perillas internas
+a la familia densa están por tanto agotadas. Por eliminación, la restricción
+vinculante no es ni presupuesto ni arquitectura sino la \emph{representación} de
+entrada --- los one-hots crudos de la Sección~\ref{sec:anns-matrix}, que la red no
+puede consumir como lo hace un árbol. Este es el diagnóstico que apunta a
+topologías conscientes de la representación (embeddings de entidad, wide-and-deep)
+como la única palanca sin probar, ya que están diseñadas precisamente para
+reemplazar one-hots crudos con una representación densa aprendida.
+
+\subsection{PCA ya se ha anticipado al trabajo no lineal de la red}
+\label{sec:anns-pca}
+Hay una segunda razón por la que la red densa tiene poco que hacer. Los 64
+latentes PCA song-AE ya son una compresión \emph{lineal, decorrelacionada} de un
+embedding de 1536 dimensiones: PCA ha extraído la estructura lineal dominante y
+entregado a la red componentes ortogonales con la mayor parte de la varianza
+lineal fácil ya separada. Cualquier interacción no lineal que una capa oculta
+pudiera descubrir en ese bloque ha sido en gran medida anticipada; poca
+estructura no lineal queda para que la profundidad de la red explote. La evidencia
+es directa: una regresión logística simple alcanza AUC 0.676 sobre este corpus y
+el MLP convergido alcanza 0.679 --- un empate técnico. Una red ReLU multicapa no
+compra esencialmente nada sobre una única frontera lineal, que es exactamente lo
+que uno espera cuando el bloque continuo ya está linealmente pre-condicionado y el
+bloque categórico es la parte que lleva señal que la red no puede leer.
+
+\subsection{La pregunta abierta y el siguiente paso motivado}
+\label{sec:anns-next}
+El diagnóstico es ahora agudo: el techo de la red densa lo fija su incapacidad de
+consumir identidad one-hot cruda, no el presupuesto, la arquitectura ni el bloque
+continuo. Eso aísla una única pregunta abierta y comprobable --- \emph{¿puede una
+topología consciente de la representación cerrar la brecha con los árboles?} Los
+dos ingredientes que apuntan al diagnóstico directamente son (i)
+\textbf{embeddings de entidad} para los grupos de identidad (artista, género,
+tipo-álbum), que reemplazan cada bloque one-hot disperso con un vector denso de
+baja dimensión aprendido --- el arreglo estándar para categóricos de alta
+cardinalidad en redes, eliminando tanto el problema de pesos-densos-sobre-ceros de
+la Sección~\ref{sec:anns-matrix} como el problema del pico del escalador de la
+Sección~\ref{sec:anns-scaler}; y (ii) una partición \textbf{wide-and-deep} --- una
+ruta lineal ancha sobre los one-hots (para que la identidad se lea directamente,
+como la lee el árbol) junto a una ruta profunda sobre el bloque continuo. Una
+implementación en Rust/\texttt{burn} de tal red consciente de la representación
+--- el \texttt{burn-deep-classifier} --- se construyó precisamente para responder
+esta pregunta. La Sección~\ref{sec:anns-burn} reporta sus resultados, y resuelven
+el diagnóstico limpiamente: la patología de calibración fue de hecho un artefacto
+de representación y está arreglada, pero la brecha de AUC con los árboles solo se
+\emph{estrecha}, no se cierra.
+
+\emph{Fuentes: \texttt{2026-06-12-classifier-bakeoff-p64.md},
+\texttt{2026-06-12-pyramid-mlp-arch-scan.md}.}
+
+\subsection{Resuelto: el burn-deep-classifier arregla la calibración pero no la brecha de AUC}
+\label{sec:anns-burn}
+\emph{Motivación.} Las subsecciones precedentes dejaron una única pregunta abierta
+aguda: el techo de la red densa lo fija su incapacidad de consumir identidad
+one-hot cruda, así que \emph{¿puede una topología consciente de la representación
+cerrar la brecha con los árboles?} El \texttt{burn-deep-classifier} --- una red
+enteramente en Rust/\texttt{burn} --- se construyó para responderla. Su diseño
+apunta directamente a las dos patologías diagnosticadas: mantiene los one-hots de
+identidad en \emph{crudo} (estandarizando solo el bloque continuo de 64 PCA $+$ 7
+numéricos), de modo que el mecanismo de pico del escalador de la
+Sección~\ref{sec:anns-scaler} nunca dispara, y expone un enum \texttt{topology}
+sobre un \texttt{mlp} denso plano, \texttt{embeddings} de entidad aprendidos, y
+una partición \texttt{wide\_deep}. La Fase 1 comparó las tres topologías (épocas
+250, patience 20, early-stop sobre log-loss de validación, hidden $[128,64]$,
+embed\_dim 8, lr \num{1e-3}, batch 256); la Fase 2 ajustó al ganador. Las nueve
+ejecuciones corrieron sobre el mismo dataset completo de 64-d
+(\dsid{ds-20260609-204419-p64-s42}) y tuvieron éxito limpiamente.
+
+\emph{Resultados.} El titular es la recuperación de calibración
+(Figura~\ref{fig:burn-topology}). Cada topología aterriza en log-loss
+\num{0.621}--\num{0.628} y Brier \num{0.217}--\num{0.220} --- de lleno en el
+régimen $\sim$0.60--0.63 / $\sim$0.21 de los árboles --- contra el log-loss
+\num{2.0}--\num{2.4} y Brier \num{0.33} de la pirámide sklearn. \textbf{La
+patología de calibración está arreglada por completo.} Sobre el eje de topología
+(Tabla~\ref{tab:burn-topo}), el \texttt{mlp} plano gana con AUC \num{0.7001}, con
+\texttt{embeddings} (\num{0.6934}) y \texttt{wide\_deep} (\num{0.6918}) ambos
+dentro de la banda $2\sigma=0.0126$ de él y entre sí --- \texttt{embeddings} roza
+a \texttt{wide\_deep} por un sub-banda $+0.0016$. El ajuste \texttt{mlp} de la
+Fase 2 (Tabla~\ref{tab:burn-tune}) tope en AUC \num{0.7038} (lr \num{5e-4},
+$[128,64]$): la grilla de 6 celdas completa es una franja de \num{0.0081} de ancho
+(\num{0.6957}--\num{0.7038}), cada celda $[128,64]$ supera a cada celda
+$[256,128]$, y la mejor config es solo $+0.0037$ (dentro de banda) sobre el
+ganador de la Fase 1, así que la config \texttt{mlp} de la Fase 1 se mantiene. En
+\num{0.7038} la red queda $-0.0073$ bajo \texttt{catboost} ($\sim$0.6 banda) y
+$-0.0166$ bajo \texttt{xgboost} ($\sim$1.3 bandas); por debajo de la barra de
+guardado $\sim$0.71, así que ninguna definición se persistió.
+
+\begin{table}[ht]
+  \centering
+  \caption{Fase 1 --- el bake-off de topología del \texttt{burn-deep-classifier}
+  (\dsid{ds-20260609-204419-p64-s42}, params fijos: épocas 250, patience 20,
+  hidden $[128,64]$, embed\_dim 8, dropout 0.1, lr \num{1e-3}, batch 256, relu; el
+  único eje es \texttt{topology}). Las tres tuvieron éxito. AUC mejor cuanto más
+  alto; log-loss y Brier mejor cuanto más bajo. Ganador en negrita; mejor celda
+  por métrica en negrita.}
+  \label{tab:burn-topo}
+  \begin{tabular}{llcccc}
+    \toprule
+    Rama / run id & Topología & AUC & log-loss & exactitud & Brier \\
+    \midrule
+    \best{T-mlp} (\runid{run-20260612-140116-41fc9-burn-deep-classifier}) & \best{mlp}        & \best{0.7001} & \best{0.6211} & \best{0.6470} & \best{0.2169} \\
+    T-emb (\runid{run-20260612-140116-0eda4-burn-deep-classifier})        & embeddings        & 0.6934 & 0.6251 & 0.6436 & 0.2187 \\
+    T-wd (\runid{run-20260612-140116-e85be-burn-deep-classifier})         & wide\_deep        & 0.6918 & 0.6281 & 0.6407 & 0.2198 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Fase 2 --- ajuste de la topología \texttt{mlp} ganadora, una grilla
+  \texttt{lr}$\times$\texttt{hidden} (otros params fijos). Las seis tuvieron
+  éxito, ordenadas por AUC; ganador en negrita, mejor celda por métrica en
+  negrita. Toda la grilla está dentro de una banda de ruido, cada celda
+  $[128,64]$ supera a cada celda $[256,128]$, y la mejor ganancia sobre el ganador
+  de la Fase 1 ($+0.0037$) es sub-banda --- así que la config de la Fase 1 es la
+  config de registro.}
+  \label{tab:burn-tune}
+  \begin{tabular}{lllcccc}
+    \toprule
+    Run id & lr & hidden & AUC & log-loss & exactitud & Brier \\
+    \midrule
+    \best{\runid{run-20260612-140211-6575a-burn-deep-classifier}} & \best{0.0005} & \best{[128,64]}  & \best{0.7038} & 0.6221 & 0.6521 & 0.2172 \\
+    \runid{run-20260612-140211-21ad5-burn-deep-classifier}        & 0.002         & [128,64]         & 0.6997 & 0.6227 & \best{0.6532} & 0.2174 \\
+    \runid{run-20260612-140211-18c9e-burn-deep-classifier}        & 0.001         & [128,64]         & 0.6996 & \best{0.6213} & 0.6447 & \best{0.2170} \\
+    \runid{run-20260612-140211-fecb0-burn-deep-classifier}        & 0.0005        & [256,128]        & 0.6966 & 0.6232 & 0.6424 & 0.2179 \\
+    \runid{run-20260612-140211-4c359-burn-deep-classifier}        & 0.002         & [256,128]        & 0.6963 & 0.6245 & 0.6460 & 0.2181 \\
+    \runid{run-20260612-140211-0f4e1-burn-deep-classifier}        & 0.001         & [256,128]        & 0.6957 & 0.6252 & 0.6424 & 0.2187 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{burn_topology}
+  \caption{La red consciente de la representación resuelve la pregunta abierta de
+  la Sección~\ref{sec:anns-next}. \emph{Izquierda:} las tres topologías están
+  dentro de una banda $2\sigma$ entre sí; el \texttt{mlp} plano gana y los
+  \texttt{embeddings} de entidad apenas rozan a \texttt{wide\_deep}, porque a
+  estas cardinalidades de identidad (artista 61, género 41, tipo-álbum 4) los
+  embeddings aprendidos están famélicos --- rinden a cientos-o-miles de
+  categorías, no docenas (una hipótesis que la Sección~\ref{sec:anns-highvocab}
+  confirma elevando los topes). \emph{Derecha:} el titular. Mantener los one-hots
+  en \emph{crudo} baja el log-loss del $\approx 2.0$ de la pirámide sklearn
+  (confiadamente mal calibrada, peor que la línea base aleatoria) a $\approx
+  0.62$, al régimen de los árboles --- una confirmación limpia de que la patología
+  de calibración fue un artefacto de representación, no una propiedad intrínseca
+  de las redes sobre estos datos.}
+  \label{fig:burn-topology}
+\end{figure}
+
+\emph{Interpretación.} El resultado resuelve la pregunta abierta de la
+Sección~\ref{sec:anns-next} en dos partes, y las dos respuestas apuntan en
+direcciones opuestas. Primero, el veredicto de \emph{calibración} se revierte: el
+log-loss peor-que-el-azar del pyramid-MLP de la Sección~\ref{sec:anns-signature}
+fue un artefacto de \emph{representación} --- one-hots crudos aplastados en el
+estandarizador --- no una propiedad intrínseca de las redes densas sobre datos de
+gusto, y una red que mantiene los one-hots crudos está calibrada en el régimen de
+los árboles. La lectura anterior de ``calibración rota es un techo fijo'' se
+sostiene solo para la representación pirámide-sklearn. El AUC también se recuperó:
+el \num{0.7038} de la red burn es $+0.025$ sobre la mejor pirámide convergida
+(\num{0.6792}), $\sim$2 bandas de ganancia genuina de poder de ranking, así que la
+conclusión previa de que ``la familia MLP está cerrada para AUC en $\approx
+0.68$'' se revisa --- una red Rust de one-hots crudos alcanza $\sim$0.70. Segundo,
+y en contra de la lectura optimista, el arreglo de representación \emph{no} alcanza
+el nivel de los árboles: en \num{0.7038} la red aún queda $\sim$1 banda bajo
+\texttt{catboost} y $\sim$1.3 bajo \texttt{xgboost}. La brecha se estrechó
+dramáticamente (de las $\sim$3.3 bandas de la pirámide a $\sim$1) pero no se
+cerró, así que el hallazgo convergente sobrevive intacto --- los árboles aún leen
+los one-hots dispersos de identidad un pelo más efectivamente que incluso una red
+de one-hots crudos. La comparación de topología lo afila: que el \texttt{mlp}
+plano supere tanto a la variante de embedding como a la wide-deep es la
+\emph{misma} lección de ``la identidad ya está en los one-hots'' que enseñaron las
+campañas de árboles, ahora reproducida dentro de la familia ANN --- los embeddings
+aprendidos por grupo tienen poco que añadir sobre 61 one-hots de artista y 41 de
+género, y la palanca vigente para la red (como para los árboles) es la
+\emph{resolución} de identidad: elevar los topes de vocabulario y la topología de
+embeddings debería por fin empezar a rendir --- una predicción que la
+re-ejecución high-vocab de la Sección~\ref{sec:anns-highvocab} luego confirma,
+volcando \texttt{embeddings} por encima de \texttt{mlp} y elevando la red al nivel
+de los árboles. Ninguna definición se guardó aquí (por debajo de la barra
+$\sim$0.71); la red es una línea base densa fuerte, ahora honesta, y un miembro de
+ensamble natural por su sesgo inductivo decorrelacionado, no un campeón.
+\emph{Fuente: \texttt{2026-06-12-burn-deep-topology.md}.}
+
+\subsection{Confirmado: elevar la cardinalidad de identidad eleva la red de embeddings al nivel de los árboles}
+\label{sec:anns-highvocab}
+\emph{Motivación.} La Sección~\ref{sec:anns-burn} cerró con una predicción aguda y
+comprobable: la topología de \texttt{embeddings} de entidad perdió ante el
+\texttt{mlp} plano \emph{solo} porque las cardinalidades de identidad (artista 61,
+género 41) eran demasiado bajas para alimentar un embedding aprendido, así que
+elevar los topes de vocabulario debería voltear el ranking. Esta campaña es la
+re-ejecución pareada que lo prueba directamente. Se construyó una matriz nueva
+(\dsid{ds-20260612-143014-p64-s42}) \emph{idéntica} al dataset 60/40 completo de
+64-d de la Sección~\ref{sec:anns-burn} --- mismas \num{23529} filas, misma semilla
+de partición 42, PCA64 idéntico byte a byte --- difiriendo en \emph{un} eje solo:
+la cardinalidad de identidad, con el tope de artista elevado $60\to300$
+(\SI{50.4}{\percent} de cobertura) y \texttt{genre\_primary} $40\to120$
+(\SI{78.8}{\percent}). Es una \emph{tercera} matriz no comparable (497 columnas:
+64 PCA $+$ 9 numéricos $+$ 426 one-hots --- artista 301, género 121, tipo-álbum 4
+--- frente a las 177 de la matriz 60/40), así que todas las métricas aquí son
+referencias frescas dentro del dataset y nunca deben leerse contra las tablas
+60/40 o DS-META. La pregunta titular: con la cardinalidad $5\times$ (artista) y
+$3\times$ (género) mayor, ¿ahora \texttt{embeddings} supera a \texttt{mlp}? La
+Fase 0 re-ejecutó los dos árboles para un nivel de árboles dentro del dataset; la
+Fase 1 re-ejecutó el bake-off de topología (la rama embeddings ahora en embed\_dim
+16, ya que la mayor cardinalidad justifica una tabla más ancha); la Fase 2 ajustó
+la topología ganadora sobre embed\_dim $\times$ lr.
+
+\emph{Resultados.} El ranking \textbf{se volteó} (Tabla~\ref{tab:highvocab-topo};
+Figura~\ref{fig:burn-highvocab}). \texttt{embeddings}
+(\runid{run-20260612-143411-e8db6-burn-deep-classifier}) gana con AUC
+\num{0.7192}, con \texttt{mlp} en \num{0.7129} ($+0.0063$) y \texttt{wide\_deep}
+último en \num{0.7061} ($+0.0131$). Sobre la matriz 60/40 \texttt{mlp} había
+superado a \texttt{embeddings} por $+0.0067$; aquí \texttt{embeddings} supera a
+\texttt{mlp} por $+0.0063$ --- un \textbf{vuelco de $+0.0130$} a favor del
+embedding, cruzando la banda, la reversión cualitativa que la hipótesis de
+inanición predijo. La Fase 0 muestra que ambos árboles también subieron sobre la
+matriz más ancha: xgboost $0.7204\to\num{0.7299}$ ($+0.0095$,
+\runid{run-20260612-143411-02fda-xgboost-classifier}, log-loss \num{0.6022}) y
+catboost $0.7111\to\num{0.7252}$ ($+0.0141$,
+\runid{run-20260612-143411-8f15e-catboost-classifier}), así que el vocabulario
+alto es señal genuina para \emph{toda} familia --- no le entrega al embedding una
+ventaja única, \emph{desbloquea} una topología que antes estaba famélica. El
+ajuste de la Fase 2 sobre embed\_dim$\times$lr (mejor embed\_dim 8 / lr \num{5e-4},
+AUC \num{0.7228}, \runid{run-20260612-143508-3310f-burn-deep-classifier}) muestra
+que la victoria vino de \emph{habilitar} embeddings más un learning rate más
+lento, no de una tabla más ancha: el AUC es monótono-decreciente en embed\_dim al
+lr lento (ed8 \num{0.7228} $>$ ed16 \num{0.7210} $>$ ed32 \num{0.7200}, un rango
+sub-banda de $\sim$\num{0.0028}), así que embed\_dim ya está saturado en 8. La
+mejor celda ajustada supera al ganador de la Fase 1 por solo $+0.0036$
+(sub-banda), así que la regla de decisión guardó la config de la \emph{Fase 1}
+(embeddings, embed\_dim 16, lr \num{1e-3}) como
+\texttt{burn-deep-embeddings-highvocab}. Un gemelo de determinismo reprodujo la
+ejecución de la Fase 1 a cuatro dígitos ($0.71923$ frente a $0.71923$). En
+\num{0.7192} la red guardada queda $-0.0060$ bajo catboost ($<$ 1 banda) y
+$-0.0107$ bajo xgboost, dentro de la banda de la segunda familia de árboles --- la
+primera ANN en alcanzar el nivel de los árboles dentro del dataset y superar la
+barra de guardado de rotación.
+
+\begin{table}[ht]
+  \centering
+  \caption{Fase 1 --- el bake-off de topología del \texttt{burn-deep-classifier}
+  sobre la matriz \textbf{high-vocab} (\dsid{ds-20260612-143014-p64-s42}, params
+  fijos: épocas 250, patience 20, hidden $[128,64]$, embed\_dim 16, dropout 0.1,
+  lr \num{1e-3}, batch 256, relu; el único eje es \texttt{topology}). Las tres
+  tuvieron éxito. El ranking \emph{revierte} el resultado 60/40 de la
+  Tabla~\ref{tab:burn-topo}: \texttt{embeddings} ahora gana. AUC mejor cuanto más
+  alto; log-loss y Brier mejor cuanto más bajo. Ganador en negrita; mejor celda
+  por métrica en negrita.}
+  \label{tab:highvocab-topo}
+  \begin{tabular}{llcccc}
+    \toprule
+    Topología / run id & Topología & AUC & log-loss & exactitud & Brier \\
+    \midrule
+    \best{T-emb} (\runid{run-20260612-143411-e8db6-burn-deep-classifier}) & \best{embeddings} & \best{0.7192} & \best{0.6087} & \best{0.6694} & \best{0.2110} \\
+    T-mlp (\runid{run-20260612-143411-01d7b-burn-deep-classifier})        & mlp               & 0.7129 & 0.6166 & 0.6617 & 0.2143 \\
+    T-wd (\runid{run-20260612-143411-7d117-burn-deep-classifier})         & wide\_deep        & 0.7061 & 0.6256 & 0.6526 & 0.2183 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Fase 2 --- ajuste de la topología \texttt{embeddings} ganadora, una
+  grilla embed\_dim$\times$\texttt{lr} (hidden $[128,64]$, otros params fijos),
+  ordenada por AUC; ganador en negrita, mejor celda por métrica en negrita. El AUC
+  es monótono-decreciente en embed\_dim a lr \num{5e-4} (la tabla ya está saturada
+  en ancho 8), y lr \num{5e-4} supera a lr \num{1e-3} en todo ancho. La mejor
+  ganancia sobre el ganador de la Fase 1 ($+0.0036$) es sub-banda, así que la
+  config de la Fase 1 es la config de registro.}
+  \label{tab:highvocab-tune}
+  \begin{tabular}{llcccc}
+    \toprule
+    embed\_dim & lr & AUC & log-loss & exactitud & Brier \\
+    \midrule
+    \best{8}  & \best{0.0005} & \best{0.7228} & 0.6105 & 0.6645 & 0.2114 \\
+    16        & 0.0005        & 0.7210 & \best{0.6088} & \best{0.6711} & \best{0.2108} \\
+    32        & 0.0005        & 0.7200 & 0.6100 & 0.6657 & 0.2114 \\
+    8         & 0.001         & 0.7193 & 0.6092 & 0.6643 & 0.2112 \\
+    16        & 0.001         & 0.7192 & 0.6087 & 0.6666 & 0.2110 \\
+    32        & 0.001         & 0.7183 & 0.6097 & 0.6668 & 0.2114 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{burn_highvocab}
+  \caption{La resolución de identidad cierra el hilo de trampas-ANN.
+  \emph{Izquierda:} la comparación pareada \texttt{embeddings}-frente-a-\texttt{mlp}
+  a través de las dos cardinalidades. Sobre la matriz 60/40 \texttt{mlp} gana por
+  $+0.0067$; sobre la matriz high-vocab \texttt{embeddings} gana por $+0.0063$ ---
+  un vuelco de $+0.0130$ que revierte el ranking y confirma el diagnóstico de
+  inanición: con la cardinalidad de artista $5\times$ y la de género $3\times$
+  mayor la tabla de embeddings por fin tiene suficientes identidades distintas
+  para aprender una geometría de bajo rango útil en vez de colapsar casi
+  constante. \emph{Derecha:} el ranking de AUC de cinco familias dentro del
+  dataset sobre la matriz high-vocab. La red \texttt{embeddings} guardada
+  (\num{0.7192}) alcanza el fondo del nivel de los árboles (sombreado: desde una
+  banda bajo \texttt{catboost} hasta \texttt{xgboost}) --- la primera ANN en
+  hacerlo --- mientras \texttt{xgboost} (\num{0.7299}) sigue siendo el líder dentro
+  del dataset.}
+  \label{fig:burn-highvocab}
+\end{figure}
+
+\emph{Interpretación.} Esto resuelve la pregunta abierta de la
+Sección~\ref{sec:anns-burn} \emph{confirmada}: la pérdida anterior de la topología
+de embedding fue un artefacto de inanición por baja cardinalidad, no un límite
+intrínseco, y elevar los topes voltea el ranking exactamente como se predijo. Dos
+salvedades honestas mantienen la afirmación calibrada. Primera, el margen
+single-split emb-vs-mlp ($+0.0063$) es en sí sub-banda, así que la \emph{magnitud}
+de la reversión necesita un confirm de 3 particiones; lo decisivo es la
+\emph{dirección} --- todo el ranking se reordenó, con la rama de embedding pasando
+del fondo del ranking 60/40 a la cima de este. Segunda, el vocabulario alto ayuda
+a \emph{todos}: los árboles ganaron tanto como (catboost) o más que la rama de
+embedding, así que la lectura correcta es ``mayor resolución es mejor señal para
+toda familia, y específicamente desbloquea la topología de embedding'', no
+``embeddings ahora ganan de plano'' --- \texttt{xgboost} en \num{0.7299} sigue
+siendo el líder dentro del dataset, $\sim$\num{0.0107} ($\sim$1 banda) sobre la
+red guardada. Pero el arco cualitativo que recorrió la Sección~\ref{sec:anns} ahora
+cierra limpiamente: una red densa que consume one-hots crudos está calibrada en el
+régimen de los árboles (Sección~\ref{sec:anns-burn}), y dada \emph{suficiente}
+resolución de identidad su topología de embedding alcanza el nivel de los árboles
+--- la palanca vigente de ``la resolución de identidad es la palanca'',
+demostrada. El log-loss ($\sim$0.61) y el Brier ($\sim$0.21) se mantienen en el
+régimen calibrado de los árboles todo el tiempo, así que no hay penalización de
+calibración por la victoria. Una nota de higiene de datos: el reporte de
+redundancia del manifiesto high-vocab marca 21 colinealidades one-hot casi
+perfectas género$\leftrightarrow$artista (p.ej.\ \texttt{genre\_primary=australian
+psych} $\equiv$ \texttt{artist=Tame Impala}, correlación \num{1.000}; 19 más
+$\ge\num{0.957}$), un artefacto de admitir géneros raros llevados por un único
+artista recién admitido; los árboles y los regularizadores de la red lo absorben
+sin patología de ejecución observada, pero conviene saberlo antes de leer
+importancias de one-hots individuales sobre esta matriz. El
+\texttt{burn-deep-embeddings-highvocab} guardado se marca para el
+best-model-selector como la primera ANN de nivel de árboles y un candidato natural
+de diversidad de familia.
+\emph{Fuente: \texttt{2026-06-12-high-vocab-topology.md}.}
+
+\subsection{Una segunda red consciente de la representación: el trasplante AE confirma el techo}
+\label{sec:anns-ae}
+\emph{Motivación.} La Sección~\ref{sec:anns-burn} estableció que una red que
+mantiene los one-hots de identidad en \emph{crudo} está calibrada en el régimen de
+los árboles pero aún tope $\sim$1 banda bajo los árboles. Una pregunta natural
+siguiente es si una \emph{representación no supervisada aprendida} de las mismas
+entradas --- en vez de las entradas crudas mismas --- eleva la red más. El
+\texttt{burn-ae-classifier} lo prueba: la Fase 1 pre-entrena un autoencoder para
+reconstruir el vector de rasgos ensamblado completo (bloque continuo estandarizado
+junto a los one-hots crudos, $D{=}177$) por MSE, la Fase 2 trasplanta el encoder a
+un clasificador softmax y afina. Esta campaña es la primera caracterización de la
+familia --- un barrido de 13 configs sobre la matriz 60/40 completa de 64-d
+(\dsid{ds-20260609-204419-p64-s42}, semilla 42) sobre tamaño de latente,
+profundidad/ancho de cabeza, activación y la bandera \texttt{freeze\_encoder},
+leído contra el campeón xgboost intra-corpus (\num{0.7204}) y el \texttt{mlp}
+\texttt{burn-deep} comparable (\num{0.7038}).
+
+\emph{Resultados.} \textbf{La capacidad no importa para esta familia sobre
+rotación} (Tabla~\ref{tab:burn-ae}; Figura~\ref{fig:burn-ae}). Las 12 configs
+afinadas abarcan una única franja de \num{0.0054} de ancho
+(\num{0.69175}--\num{0.69719}), enteramente dentro de la banda $2\sigma=0.0126$ ---
+un empate plano a través de un rango de latente de $4\times$ (32 a 128), a través
+de profundidad y ancho de cabeza, y a través de activación. La mejor nominal
+(cfg3, enc$[128,64]$/clf$[128,64]$, AUC \num{0.69719}) supera la línea base
+\num{0.69225} por solo $+0.00494$ (sub-banda), e incluso la sonda lineal pura
+(cfg2, clf$[]$, \num{0.69175}) está solo $-0.00544$ por debajo de ella: una única
+capa lineal sobre el latente afinado ya captura esencialmente toda la habilidad de
+la familia. El único efecto fuera de banda es una \emph{trampa}: congelar el
+encoder pre-entrenado por MSE es seguro bajo una cabeza poco profunda (cfg11,
+\num{0.69530}, en banda) pero \emph{colapsa} bajo una cabeza profunda (cfg10,
+\num{0.68210}, $-0.0151$ $\approx$ 1.2 bandas, la peor fila). relu roza a gelu y
+silu por un margen sub-banda. La calibración es sana en todo momento (log-loss
+$\sim$0.62, Brier $\sim$0.22 --- el régimen de los árboles), así que es un miembro
+denso calibrado legítimo, solo que no un contendiente de AUC: la mejor config
+queda $\sim$1.8 bandas bajo \texttt{xgboost} y es \emph{estadísticamente igual} al
+\texttt{mlp} \texttt{burn-deep} plano ($-0.0066$, sub-banda). Ninguna definición se
+guardó.
+
+\begin{table}[ht]
+  \centering
+  \caption{El barrido de capacidad + arquitectura-de-cabeza del
+  \texttt{burn-ae-classifier} (\dsid{ds-20260609-204419-p64-s42}, semilla 42;
+  fijos: ae\_epochs 80, ae\_lr \num{1e-3}, épocas 200, lr \num{1e-3}, dropout 0.1,
+  patience 25). Las 13 ejecuciones tuvieron éxito. AUC y exactitud mejor cuanto más
+  alto; log-loss mejor cuanto más bajo. Ganador (cfg3) y mejor celda por métrica en
+  negrita; el colapso de cabeza-profunda-congelada (cfg10) es la única fila fuera
+  de banda. Ordenado por AUC.}
+  \label{tab:burn-ae}
+  {\small\begin{tabular}{@{}p{3.3cm}p{5.0cm}ccc@{}}
+    \toprule
+    Run id & enc / clf / freeze / act & AUC & log-loss & exact. \\
+    \midrule
+    \best{\runid{run-20260615-152359-21f11-burn-ae-classifier}} & \best{[128,64] / [128,64] / ft / relu} & \best{0.69719} & \best{0.6216} & \best{0.6496} \\
+    \runid{run-20260615-152359-05bce-burn-ae-classifier} & [256,128] / [128] / ft / relu   & 0.69712 & 0.6254 & 0.6485 \\
+    \runid{run-20260615-152359-e5a75-burn-ae-classifier} & [128,32] / [64] / ft / relu     & 0.69657 & 0.6246 & 0.6451 \\
+    \runid{run-20260615-152359-94f8f-burn-ae-classifier} & [128,64] / [64] / ft / relu (re-ejec.\ línea base) & 0.69645 & 0.6264 & 0.6496 \\
+    \runid{run-20260615-152359-7a459-burn-ae-classifier} & [128,64] / [256,128] / ft / relu & 0.69561 & 0.6235 & 0.6434 \\
+    \runid{run-20260615-152359-cb93b-burn-ae-classifier} & [384,192] / [192,96] / ft / relu & 0.69541 & 0.6224 & 0.6426 \\
+    \runid{run-20260615-160112-aa1db-burn-ae-classifier} & [256,128] / [128] / \emph{congelado} / relu & 0.69530 & 0.6242 & 0.6409 \\
+    \runid{run-20260615-160112-4a764-burn-ae-classifier} & [128,64] / [128,64] / ft / gelu & 0.69340 & 0.6256 & 0.6411 \\
+    \runid{run-20260615-152359-3b006-burn-ae-classifier} & [256,128,64] / [64] / ft / relu & 0.69302 & 0.6279 & 0.6481 \\
+    \runid{run-20260615-160113-7567b-burn-ae-classifier} & [128,64] / [128,64] / ft / silu & 0.69242 & 0.6230 & 0.6436 \\
+    \runid{run-20260615-152359-86fd5-burn-ae-classifier} & [256,128] / [256,128] / ft / relu & 0.69240 & 0.6275 & 0.6392 \\
+    \runid{run-20260615-152359-dbb6a-burn-ae-classifier} & [128,64] / [] (sonda lineal) / ft / relu & 0.69175 & 0.6282 & 0.6405 \\
+    \runid{run-20260615-160112-17da7-burn-ae-classifier} & [128,64] / [128,64] / \emph{congelado} / relu (colapso) & 0.68210 & 0.6378 & 0.6373 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{burn_ae_capacity}
+  \caption{La red de trasplante AE confirma el techo de la red densa sobre dos
+  ejes. \emph{Izquierda:} las 12 configs afinadas colapsan sobre una única franja
+  de \num{0.0054} de ancho dentro de la banda de ruido, muy por debajo del
+  \texttt{mlp} \texttt{burn-deep} comparable (discontinua, \num{0.7038}) y el
+  campeón xgboost (verde, \num{0.7204}) --- tamaño de latente, profundidad/ancho de
+  cabeza y activación son todas palancas agotadas; la capacidad está saturada en la
+  config más pequeña probada. \emph{Derecha:} el único efecto real. Congelar el
+  encoder pre-entrenado por MSE es seguro bajo una cabeza (casi-)lineal (cfg11, en
+  banda) pero \emph{colapsa} el modelo bajo una cabeza profunda (cfg10, $-0.0151
+  \approx 1.2$ bandas): una cabeza profunda apilada sobre una representación
+  congelada y agnóstica a la tarea simplemente sub-ajusta la etiqueta, porque los
+  gradientes que habrían re-formado el encoder hacia el objetivo están bloqueados.
+  El afinado de extremo a extremo (el defecto de registro) evita la trampa.}
+  \label{fig:burn-ae}
+\end{figure}
+
+\emph{Interpretación.} El pre-entrenamiento AE compra un init rápido y estable
+pero \emph{ningún AUC} sobre una red de one-hots crudos desde cero: como el
+objetivo de reconstrucción es puramente descriptivo (MSE sobre el vector
+ensamblado), el latente que entrega al clasificador es agnóstico a la tarea, y
+ninguna cantidad de capacidad de encoder/latente/cabeza lo convierte en poder de
+ranking de nivel de árboles. Esta es la misma lección de ``una representación
+aprendida aguas abajo de los one-hots de identidad no añade nada que los árboles no
+tengan ya'' --- la dilución del latente AE de la Sección~\ref{sec:ae-blend} y la
+inanición de embeddings de entidad de la Sección~\ref{sec:anns-burn} --- ahora
+reproducida en una tercera familia densa. El colapso-por-congelar es una trampa
+citable: un extractor de rasgos óptimo para MSE no es óptimo para la etiqueta, así
+que una cabeza profunda sobre un encoder congelado apila capacidad inútil y
+sub-ajusta. Si la familia se revisita alguna vez, la palanca es el \emph{objetivo}
+de pre-entrenamiento (supervisado o contrastivo), no su tamaño. La familia está
+cerrada para AUC sobre rotación tal como está configurada.
+\emph{Fuente: \texttt{2026-06-15-burn-ae-classifier-capacity-scan.md}.}
+
+\subsection{Refutado: una cabeza de embedding de hojas GBDT no puede recuperar el árbol que generó sus rasgos}
+\label{sec:leaf-head}
+\emph{Motivación.} El hilo ANN de arriba cerró con una lección limpia --- una
+representación aprendida alimentada aguas abajo de los one-hots de identidad no
+compra poder de ranking que los árboles no tengan ya (la dilución del latente AE
+de la Sección~\ref{sec:ae-blend}; los embeddings de entidad famélicos salvo alta
+cardinalidad, Sección~\ref{sec:anns-burn}). Esta campaña somete esa lección a
+estrés en su punto más duro con el clásico truco de Facebook GBDT$\to$LR,
+generalizado a GBDT$\to$MLP. El árbol campeón congelado --- la config registrada
+\texttt{xgboost-classifier-rotation-p64}, \emph{duramente congelada}, no un
+ajustable --- emite, para cada fila, el índice de la hoja en la que cae en cada
+uno de sus 500 árboles boosteados; esos índices se codifican one-hot en la propia
+partición axial aprendida del árbol ($\sim$10k columnas de pertenencia a hoja), y
+una cabeza fresca (una cabeza lineal logística $\ell_2$, o un MLP poco profundo)
+se entrena encima. La entrada a la cabeza es así la \emph{propia} partición del
+árbol; la hipótesis --- un séptimo test del hallazgo convergente --- era que ni
+siquiera esto \emph{superaría} al árbol puro, siendo la refutación esperada el
+hallazgo citable. Todas las ramas corrieron sobre la matriz 60/40 completa de 64-d
+(\dsid{ds-20260609-204419-p64-s42}, semilla 42); la única referencia válida es el
+campeón intra-dataset \num{0.7204}, nunca los números DS-META \num{0.7429} o
+high-vocab \num{0.7299} (matrices distintas).
+
+\emph{Resultados.} Refutado exactamente como se predijo (Tabla~\ref{tab:leaf-head};
+Figura~\ref{fig:leaf-head}). El control C0
+(\runid{run-20260615-151551-f2911-xgboost-classifier}) reprodujo el campeón hasta
+los 16 dígitos (\num{0.7204383403100314}), así que la puerta de determinismo pasó
+y los tratamientos son interpretables. Cada cabeza luego tope \emph{por debajo}
+del árbol puro por más de una banda de ruido: GBDT$\to$lineal con AUC \num{0.6978}
+($-0.0227$, $\sim$1.8 bandas), GBDT$\to$MLP$[256,128]$ con \num{0.6921}
+($\sim$2.2 bandas), GBDT$\to$MLP$[128]$ con \num{0.6897} ($\sim$2.4 bandas) --- la
+mejor de ellas está ella misma \num{0.0100} por debajo del umbral de refutación
+(campeón $-$ banda $=$ \num{0.7078}). La rama de empate-en-banda (que habría
+disparado un spot-check de 3 semillas) y la rama de victoria ($>\num{0.7330}$)
+nunca se dispararon; ninguna definición se guardó. La cabeza lineal --- la receta
+literal de Facebook --- es la mejor de las tres, y añadir capacidad MLP sobre los
+one-hots de hoja no recupera el árbol, consistente con el encuadre original de la
+receta como un truco \emph{lineal} barato. Peor que el déficit de AUC, \emph{cada
+cabeza está muy mal calibrada}: log-loss \num{0.8162}--\num{1.3119} y Brier
+\num{0.2603}--\num{0.2951} contra el \num{0.6075} / \num{0.2109} del árbol. La
+cabeza logística $\ell_2$ al inverso-$C{=}1$ por defecto está sub-regularizada
+sobre $\sim$10k indicadores de hoja dispersos --- lleva un puñado de pesos de hoja
+a magnitudes grandes y emite probabilidades sobre-confiadas, la misma firma de
+sobre-confianza pirámide-sklearn (log-loss muy por encima del de los árboles
+mientras el AUC solo queda modestamente detrás) vista en la
+Sección~\ref{sec:anns-signature}, y una bandera roja de calibración para el
+best-model-selector en caso de que alguna de estas ejecuciones se considere alguna
+vez para el grupo.
+
+\begin{table}[ht]
+  \centering
+  \caption{La sonda de techo de cabeza-de-hojas GBDT
+  (\dsid{ds-20260609-204419-p64-s42}, semilla 42; el GBDT emisor de hojas es la
+  config campeona congelada en cada tratamiento, solo varía la cabeza). Las cuatro
+  ejecuciones tuvieron éxito. AUC mejor cuanto más alto; log-loss y Brier mejor
+  cuanto más bajo. Control (ganador) en negrita; mejor celda por métrica en
+  negrita; filas de tratamiento ordenadas por AUC. Umbral de refutación (campeón
+  $-2\sigma$) $=\num{0.7078}$: cada cabeza está por debajo de él.}
+  \label{tab:leaf-head}
+  \begin{tabular}{llcccc}
+    \toprule
+    Rama / run id & Cabeza & AUC & log-loss & exactitud & Brier \\
+    \midrule
+    \best{C0} (\runid{run-20260615-151551-f2911-xgboost-classifier}) & \best{árbol puro (campeón)} & \best{0.7204} & \best{0.6075} & \best{0.6585} & \best{0.2109} \\
+    T1 (\runid{run-20260615-151551-b4db5-gbdt-leaf-head-classifier}) & lineal ($\ell_2$ logística, l2 1.0) & 0.6978 & 1.3119 & 0.6441 & 0.2944 \\
+    T3 (\runid{run-20260615-151551-44b1d-gbdt-leaf-head-classifier}) & mlp $[256,128]$, head\_lr \num{1e-3} & 0.6921 & 1.1813 & 0.6396 & 0.2951 \\
+    T2 (\runid{run-20260615-151551-9d655-gbdt-leaf-head-classifier}) & mlp $[128]$, head\_lr \num{1e-3} & 0.6897 & 0.8162 & 0.6356 & 0.2603 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{leaf_head_ceiling}
+  \caption{La pila de embedding de hojas queda refutada sobre ambos ejes.
+  \emph{Izquierda:} cada rama GBDT$\to$cabeza tope por debajo del árbol campeón
+  puro en AUC --- la mejor (GBDT$\to$lineal, \num{0.6978}) está ella misma una
+  banda completa por debajo del umbral de refutación (la línea discontinua en
+  campeón $-2\sigma=\num{0.7078}$; la franja sombreada es la banda).
+  \emph{Derecha:} y cada cabeza está mal calibrada, con log-loss
+  \num{0.82}--\num{1.31} muy por encima del régimen de los árboles (\num{0.61},
+  punteada) y pasado la línea base de tasa base aleatoria (\num{0.69}, discontinua)
+  para las dos peores. Aprender una cabeza sobre los propios índices de hoja
+  one-hot del árbol es estrictamente más lossy que leer directamente las sumas de
+  valores de hoja del árbol.}
+  \label{fig:leaf-head}
+\end{figure}
+
+\emph{Interpretación.} La refutación es decisiva y mecanística. El scoring aditivo
+de valores de hoja del árbol ya pondera cada hoja \emph{conjuntamente} a través de
+500 rondas de boosting con shrinkage; re-codificar esas hojas como indicadores de
+pertenencia one-hot y ajustar una cabeza \emph{post-hoc} descarta la estructura de
+boosting y la re-estima peor. Los one-hots de hoja son una vista estrictamente más
+lossy de un árbol que ya puntúa mejor directamente --- la cabeza densa ni siquiera
+puede recuperar el árbol que generó sus propios rasgos. Esta es la misma familia
+que la dilución del latente AE (Sección~\ref{sec:ae-blend}) y el techo de
+cabeza-densa (Sección~\ref{sec:anns}), llevada a su límite: aquí la \emph{entrada}
+de la cabeza es la partición óptima del árbol, y aún tope $\sim$2 bandas por
+debajo. Re-ajustar la regularización de la cabeza podría domar la sobre-confianza
+pero no puede cerrar un déficit de AUC de $\sim$1.8 bandas, así que la familia de
+cabeza-de-hojas está cerrada para rotación. Esta es la séptima confirmación
+convergente de que la palanca durable es la \emph{resolución} de identidad
+(elevar topes de vocabulario, que ya elevó xgboost a \num{0.7299} sobre la matriz
+high-vocab), no nuevas cabezas ni representaciones apiladas sobre el árbol.
+\emph{Fuente: \texttt{2026-06-15-gbdt-leaf-head-ceiling-probe.md}.}
+
+\subsection{El barrido de tope de vocabulario de resolución de identidad: una palanca en gran medida agotada}
+\label{sec:vocab-cap}
+\emph{Motivación.} Cada campaña de arriba cierra sobre la misma palanca vigente
+--- la \emph{resolución} de identidad: elevar los topes de vocabulario de
+artista/género para que la cola \texttt{\_\_other\_\_} obtenga columnas one-hot
+reales, lo que ya elevó xgboost de \num{0.7204} (60/40) a \num{0.7299} (300/120,
+Sección~\ref{sec:anns-highvocab}) y volteó la red de embedding al nivel de los
+árboles. Pero solo existían \emph{dos} puntos sobre esa curva tope$\to$AUC, y el
+extremo alto era el récord de linaje. Esta campaña mapea dónde deja de rendir la
+palanca. Mantiene la config registrada
+\texttt{xgboost-classifier-rotation-p64} \emph{congelada} (\texttt{catboost}
+defaults como rama secundaria), mantiene \emph{todo lo demás} fijo --- mismo
+corpus de \num{23529} filas, misma semilla de partición 42 (\num{18823}
+entrenamiento / \num{4706} prueba), mismo PCA64, mismo bloque de campos --- y mueve
+el \emph{único} eje \texttt{vocab\_top\_n}, añadiendo tres puntos de tope más alto:
+500/200 (777 cols), 1000/300 (1377 cols) y el vocabulario completo, 5594/962 (6633
+cols). La hipótesis a discriminar: \emph{saturación} (ganancia por paso $<$ una
+banda) frente a \emph{reversión} (el AUC baja conforme las columnas de artista
+singleton inyectan varianza memorizable).
+
+\emph{Resultados.} Las ocho ejecuciones lanzadas tuvieron éxito; los controles
+reprodujeron ambas anclas a cuatro dígitos (xgboost 60/40 \num{0.72044} frente a la
+referencia \num{0.7204}, $\Delta+0.00004$; xgboost 300/120 \num{0.72988} frente a
+\num{0.7299}, $\Delta-0.00002$), así que toda la curva se sitúa bajo una medición
+consistente (Tabla~\ref{tab:vocab-cap}; Figura~\ref{fig:vocab-cap}). xgboost subió
+a un nuevo mejor de linaje single-split de \textbf{\num{0.73490}} en 1000/300
+(\runid{run-20260615-163803-e75be-xgboost-classifier}), pero la estructura de
+pasos cuenta la historia real: el salto $60\to300$ fue $+0.00944$ ($+0.75$ banda),
+luego $300\to500$ fue \emph{plano} ($-0.00022$, dentro del ruido) y $500\to1000$
+fue $+0.00524$ ($+0.42$ banda). El mejor punto está solo $+0.00502$ ($\sim$0.40
+banda) sobre el ancla 0.7299 --- una mejora \emph{sub-banda}, muy corta de los
+$+0.0126$ que requeriría una superación confiada. \texttt{catboost} sigue a
+xgboost cualitativamente en cada tope
+(\num{0.71105}$\to$\num{0.72516}$\to$\num{0.72372}$\to$\num{0.72633}), quedando
+$\sim$0.005--0.009 por debajo de él en todo momento y subiendo igual de suave
+después de 300/120 --- su manejo categórico nativo \emph{no} escala mejor en alta
+cardinalidad. El punto de vocabulario completo (6633 cols) en el tope de la curva
+\textbf{no pudo construirse}: dos intentos POST cada uno devolvió un id de build
+pero murió a mitad de materialización contra el techo de memoria del host
+($\sim$2.3 GB libres de 15 GB bajo carga concurrente), dejando ningún dataset y
+ningún artefacto. Ese es un techo de infraestructura, \emph{no} un resultado de
+modelado, y el extremo superior de la curva se registra como no medido.
+
+\begin{table}[ht]
+  \centering
+  \caption{El barrido de tope de vocabulario sobre el GBDT puro (config xgboost
+  campeona congelada; \texttt{catboost} defaults; el único eje es
+  \texttt{vocab\_top\_n}, todo lo demás idéntico byte a byte al ancla 300/120:
+  mismas \num{23529} filas, semilla de partición 42, PCA64, bloque de campos).
+  Ordenado por tope de artista/género. AUC mejor cuanto más alto; log-loss y Brier
+  mejor cuanto más bajo. La nueva mejor ejecución de linaje single-split en negrita;
+  mejor celda por métrica en negrita. La fila de vocabulario completo es el build
+  fallido (techo de memoria del host, dos intentos), registrada como un fallo de
+  infraestructura, no un resultado. Banda de AUC $2\sigma\approx 0.0126$.}
+  \label{tab:vocab-cap}
+  \begin{tabular}{lllccccl}
+    \toprule
+    Run id & tope & cols & modelo & AUC & log-loss & Brier & Nota \\
+    \midrule
+    \runid{run-20260615-163751-de9a4-xgboost-classifier} & 60/40    & 177  & xgb & 0.72044 & 0.60754 & 0.21087 & control \\
+    \runid{run-20260615-163803-3391f-catboost-classifier} & 60/40   & 177  & cat & 0.71105 & 0.61324 & 0.21316 & control \\
+    \runid{run-20260615-163803-536d5-xgboost-classifier} & 300/120  & 497  & xgb & 0.72988 & 0.60223 & 0.20803 & ancla \\
+    \runid{run-20260615-163803-6f170-catboost-classifier} & 300/120 & 497  & cat & 0.72516 & 0.60681 & 0.20994 & ancla \\
+    \runid{run-20260615-163803-1a0ba-xgboost-classifier} & 500/200  & 777  & xgb & 0.72966 & 0.60392 & 0.20856 & plano ($-0.00022$) \\
+    \runid{run-20260615-163803-1fae3-catboost-classifier} & 500/200 & 777  & cat & 0.72372 & 0.60894 & 0.21068 & baja bajo su propio 300/120 \\
+    \best{\runid{run-20260615-163803-e75be-xgboost-classifier}} & \best{1000/300} & \best{1377} & \best{xgb} & \best{0.73490} & \best{0.60070} & \best{0.20700} & \best{nuevo mejor de linaje (sub-banda)} \\
+    \runid{run-20260615-163803-9ed65-catboost-classifier} & 1000/300 & 1377 & cat & 0.72633 & 0.60931 & 0.21068 & mejor catboost en su curva \\
+    (build fallido) & todo 5594/962 & 6633 & --- & --- & --- & --- & NO construido (techo memoria) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{vocab_cap_scan}
+  \caption{La palanca de resolución de identidad está en gran medida agotada.
+  Manteniendo la config campeona congelada y moviendo solo el tope de one-hots de
+  artista/género, la curva tope$\to$AUC sube abruptamente en el primer salto
+  ($60/40\to300/120$, $+0.75$ banda) y luego \emph{se estanca}: $300\to500$ es
+  plano ($-0.00022$, dentro del ruido) y $500\to1000$ recupera solo $+0.42$ banda,
+  así que la nueva mejor de linaje single-split (\num{0.73490} en 1000/300) supera
+  el ancla 300/120 por solo $+0.00502$ ($\sim$0.40 banda, dentro del sobre
+  sombreado $+2\sigma$ y por tanto una mejora \emph{sub-banda}). \texttt{catboost}
+  (discontinua) sigue a xgboost en cada tope, $\sim$0.005--0.009 por debajo --- el
+  manejo categórico nativo no compra ventaja de alta cardinalidad. El punto de
+  vocabulario completo (6633 cols, $\times$ rojo) está \emph{no medido}: su build
+  chocó con un techo de memoria del host en ambos intentos, un fallo de
+  infraestructura más que un resultado de modelado.}
+  \label{fig:vocab-cap}
+\end{figure}
+
+\emph{Interpretación.} El veredicto es un limpio ``no saturada, no revertida, pero
+disminuyendo''. Ningún punto interior cayó una banda completa bajo el ancla (el más
+bajo, 500/200, es $-0.00022$), así que la hipótesis de reversión no dispara --- las
+columnas de artista singleton en alta cardinalidad \emph{no} dañan el árbol,
+consistente con el prior de no-explosión del proyecto de que las particiones
+alineadas a ejes toleran one-hots colineales y mayormente-cero simplemente no
+partiendo sobre los inútiles. Pero las ganancias pasado el primer salto son todas
+sub-banda y oscilan arriba y abajo dentro del sobre $2\sigma=0.0126$: la curva
+pasado 300/120 se lee mejor como una meseta plana con jitter single-split que como
+una subida monótona, que es exactamente por qué la regla de decisión guarda un
+save detrás de una superación de $\ge$1 banda más un confirm de 3 semillas. El
+$+0.00502$ del mejor punto está en la ventana de ``probablemente mejor, necesita
+confirmación'', así que \textbf{el confirm de 3 semillas no disparó y ninguna
+definición se guardó}; el campeón DS-META cross-matrix (\num{0.7429}) mantiene el
+rango 1 sin cambios, y el punto 1000/300 se auto-promovió a mejores-modelos rango 3
+sin desplazar a ningún modelo registrado. La lectura honesta para trabajo futuro:
+la \emph{altura} cruda del tope de vocabulario es una palanca en gran medida
+agotada sobre este corpus --- el gran pago fue el primer salto, ya registrado. El
+acuerdo de catboost lo sella: dos familias de árboles independientes dicen que las
+columnas marginales pasado 300/120 llevan poca señal independiente. La señal de
+rotación residual es la parte conductual/contextual que ninguna cardinalidad de
+metadatos de canción puede capturar, así que el trabajo de identidad debería girar
+de topes más grandes a resolución \emph{de calidad} --- interacciones de
+seguidores-de-artista / popularidad, jerarquía de género --- y la guía vigente de
+``la resolución de identidad es la palanca'' debería leerse ahora ``débil y
+estancándose pasado 300/120, con el extremo superior aún no medido pendiente de un
+build ancho sobre un host quiescente''.
+\emph{Fuente: \texttt{2026-06-15-vocab-cap-scan-gbdt.md}.}
+
+\subsection{Leyendo las redes: autoencoders dispersos por modelo}
+\label{sec:anns-sae}
+\emph{Motivación.} Todo resultado hasta ahora se ha leído de la tabla de
+clasificación --- AUC, log-loss, Brier. Pero dos redes pueden publicar AUC
+idéntico mientras tallan la entrada en representaciones internas muy distintas,
+una distinción que la tabla no puede ver. Esta campaña abre esa caja. Primero
+porta un \emph{autoencoder disperso por modelo} (\texttt{POST
+/api/interp/model-sae}) a la familia \texttt{burn-deep-classifier} (la cabeza SAE
+existía antes solo para un regresor), de modo que la promoción ahora auto-encola
+una lectura de interpretabilidad: un SAE $2\times$-sobrecompleto (l1 \num{0.0015},
+40 épocas) se ajusta sobre las activaciones de cada capa oculta, sus átomos se
+sondean por \emph{conceptos} interpretables, y la \emph{decodabilidad} lineal de
+la rotación se mide capa por capa. El primer uso compara dos geometrías con AUC
+fijo sobre la matriz canónica completa de 64-d (\dsid{ds-20260609-204419-p64-s42},
+semilla 42): una \texttt{pyramid} que se estrecha $[256,128,64]$ contra una
+\texttt{rect} uniforme $[128,128,128]$, difiriendo \emph{solo} en la forma oculta.
+
+\emph{Resultados.} Las dos redes están \textbf{estadísticamente empatadas} en AUC
+(pyramid \num{0.69857}, rect \num{0.69937}; $\Delta\num{0.0008}\ll$ banda) ---
+ambas en el nivel del \texttt{mlp} \texttt{burn-deep} registrado y $\sim$1.7 bandas
+bajo el campeón xgboost. También capturan la \emph{misma cantidad} de señal
+decodable: la decodabilidad lineal de la rotación apenas se eleva sobre la entrada
+cruda ($\sim$0.111 $\to\sim$0.12) para ambas. La diferencia es puramente en
+\emph{disposición} (Figura~\ref{fig:sae-pyramid-rect}). Los conceptos
+interpretables de la pirámide hacen pico en su capa media de 128-d (72) y luego
+comprimen $\sim$40\% en el cuello de botella de 64-d (42); la red uniforme los
+reparte más uniformemente y \emph{retiene} más hasta el final ($17\to66\to54$),
+porque tiene el ancho para hacerlo. Ninguna red está famélica --- ambas utilizan
+plenamente cada átomo SAE (0 muertos / 0 raros), dan esencialmente a cada segmento
+de identidad ($\sim$103--105/105) un átomo separador dedicado, y reconstruyen
+$>96\%$ de la varianza de activación --- así que la brecha de conteo-de-conceptos
+es asignación genuina, no capacidad. Un control sin early-stop confirmó una trampa
+registrada: corridas a las 100 épocas completas con patience 0, ambas redes de
+3 capas sobreajustan (AUC $-\num{0.015}$, log-loss revienta a \num{0.96}--\num{1.22});
+el régimen calibrado $\sim$0.699 / 0.625 se recupera solo \emph{porque} las
+ejecuciones de producción hacen early-stop. \textbf{Las redes \texttt{burn-deep}
+más profundas necesitan patience.}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.72\textwidth]{sae_pyramid_rect}
+  \caption{Con AUC igual, dos geometrías disponen la misma señal de forma distinta
+  --- una diferencia representacional invisible a la tabla. La \texttt{pyramid} que
+  se estrecha $[256,128,64]$ (azul) hace pico de sus conceptos interpretables-por-SAE
+  en la capa media de 128-d (72) y exprime $\sim$40\% de ellos en el cuello de 64-d
+  (42); la \texttt{rect} uniforme $[128,128,128]$ (gris) reparte sus conceptos y
+  retiene más hasta la capa de salida ($17\to66\to54$). Ambas redes utilizan
+  plenamente cada átomo y decodan la rotación al mismo techo $\sim$0.12, así que la
+  pirámide \emph{consolida} su estructura interpretable en un cuello de botella
+  comprimido mientras la red uniforme mantiene un conjunto de conceptos más amplio
+  --- mismo AUC, distinta asignación.}
+  \label{fig:sae-pyramid-rect}
+\end{figure}
+
+\emph{Interpretación.} Con igual poder de ranking la pirámide consolida su
+estructura interpretable en un cuello de botella que se estrecha mientras la red
+uniforme la distribuye, y ambas meramente re-expresan la decodabilidad $\sim$0.11
+de la entrada cruda en vez de fabricar nueva señal de gusto. El SAE confirma así,
+mecanísticamente, lo que la tabla solo implica: las redes densas no están
+encontrando estructura que los árboles pierdan; están re-empaquetando la misma
+señal de identidad en una representación que el AUC no puede distinguir. Este
+patrón de ``misma señal, distinta asignación'' recurre a través de familias en
+vocabulario más alto (Sección~\ref{sec:anns-capacity}). \emph{Fuente:
+\texttt{2026-07-12-pyramid-vs-rect-sae.md}.}
+
+\subsection{La capacidad es una palanca agotada en vocabulario alto, y qué ve el SAE}
+\label{sec:anns-capacity}
+\emph{Motivación.} La matriz high-vocab (Sección~\ref{sec:anns-highvocab}) fue
+donde la red de embedding alcanzó primero el nivel de los árboles, pero nunca se
+ajustó en profundidad/ancho. Esta campaña plantea la pregunta directa: ¿la
+\emph{capacidad} --- ancho o profundidad --- eleva la familia ANN a través de la
+brecha restante de $\sim$0.2--0.6 banda con los árboles sobre esa matriz
+(\dsid{ds-20260612-143014-p64-s42}, 497 cols)? Dos escaleras de geometría de un
+eje, lr fijo en el mejor registrado de cada topología: una escalera
+\texttt{embeddings} (ed8, lr \num{5e-4}) y una escalera \texttt{mlp} (lr
+\num{1e-3}), cada una escalonando $[128,64]$ (control) $\to[256,128]$ (más ancha)
+$\to[256,128,64]$ (más profunda). Cada rama promovida también obtiene el SAE por
+modelo de la Sección~\ref{sec:anns-sae}, para una lectura de representación
+cross-familia en vocabulario alto.
+
+\emph{Resultados.} \textbf{TECHO --- la capacidad está saturada para ambas
+topologías} (Tabla~\ref{tab:highvocab-capacity}; Figura~\ref{fig:highvocab-capacity}).
+Ni ensanchar ni profundizar supera su propio control $[128,64]$ por más de una
+banda; la mejor config sigue siendo la \texttt{embeddings} registrada
+ed8/lr\num{5e-4}/$[128,64]$ (reproducida aquí en \num{0.72274}, $\Delta$
+$-\num{0.0001}$). Profundizar \texttt{embeddings} a tres capas activamente
+\emph{perjudica} ($-\num{0.0152}\approx$ 1.2 bandas, el único movimiento fuera de
+banda); profundizar \texttt{mlp} ayuda un toque sub-banda ($+\num{0.0057}$).
+Crucialmente, el mejor \texttt{mlp} (B6, \num{0.71800}) cierra a menos de
+$+\num{0.0047}$ del mejor \texttt{embeddings} (B1, \num{0.72274}): en sus mejores
+geometrías las dos topologías empatan dentro de una banda, así que \textbf{la
+capacidad, no el mecanismo de embeddings, fue la palanca} --- la lectura anterior
+de ``embeddings gana en vocabulario alto'' es un empate en banda, y la familia ANN
+sigue $\sim$0.2--0.6 banda bajo el nivel de los árboles (catboost \num{0.7252},
+xgboost \num{0.7299}). La definición guardada
+\texttt{burn-deep-embeddings-highvocab} y el campeón están ambos sin cambios; la
+mejor rama se promovió para el registro como \texttt{emb-128-64-ed8-highvocab}.
+
+\begin{table}[ht]
+  \centering
+  \caption{El barrido de capacidad del \texttt{burn-deep-classifier} sobre la
+  matriz high-vocab (\dsid{ds-20260612-143014-p64-s42}, 497 cols;
+  \texttt{activation=relu}, dropout 0.1, épocas 250, patience 20; solo varía la
+  geometría oculta dentro de una topología). Las seis tuvieron éxito. AUC y
+  exactitud mejor cuanto más alto; log-loss y Brier mejor cuanto más bajo. Ganador
+  (B1) y mejor celda por métrica en negrita; ordenado por AUC. La rama
+  \texttt{embeddings} profunda (B3) es el único movimiento fuera de banda.}
+  \label{tab:highvocab-capacity}
+  {\small\begin{tabular}{@{}p{3.3cm}p{2.9cm}cccc@{}}
+    \toprule
+    Run id & topología / hidden & AUC & log-loss & exact. & Brier \\
+    \midrule
+    \best{\runid{run-20260712-171008-065bd-burn-deep-classifier}} & \best{embeddings / [128,64]} & \best{0.72274} & \best{0.61043} & 0.66426 & \best{0.21140} \\
+    \runid{run-20260712-171008-7c302-burn-deep-classifier} & mlp / [256,128,64]  & 0.71800 & 0.61266 & 0.66065 & 0.21276 \\
+    \runid{run-20260712-171008-cf746-burn-deep-classifier} & embeddings / [256,128] & 0.71798 & 0.61323 & 0.66511 & 0.21246 \\
+    \runid{run-20260712-171008-fc3e0-burn-deep-classifier} & mlp / [256,128]     & 0.71576 & 0.61220 & \best{0.66638} & 0.21249 \\
+    \runid{run-20260712-171008-c093f-burn-deep-classifier} & mlp / [128,64]      & 0.71229 & 0.61694 & 0.65852 & 0.21447 \\
+    \runid{run-20260712-171008-786b4-burn-deep-classifier} & embeddings / [256,128,64] & 0.70750 & 0.61671 & 0.66001 & 0.21444 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{highvocab_capacity}
+  \caption{La capacidad es una palanca agotada para la red densa en vocabulario
+  alto. Manteniendo lr en el mejor de cada topología y escalonando la geometría
+  oculta $[128,64]\to[256,128]\to[256,128,64]$, ni la escalera \texttt{embeddings}
+  (azul) ni la \texttt{mlp} (gris) supera su propio control por una banda; una
+  tercera capa \texttt{embeddings} \emph{perjudica} por \num{0.0152} ($\sim$1.2
+  bandas, el único movimiento fuera de banda), porque la profundidad extra diluye
+  una entrada de embedding de entidad aprendida ya peor condicionada. El mejor
+  \texttt{mlp} cierra a menos de $+\num{0.0047}$ del mejor \texttt{embeddings}, así
+  que las dos familias empatan dentro de una banda --- la capacidad, no el mecanismo
+  de embeddings, fue la palanca --- y todo el nivel ANN se mantiene $\sim$0.2--0.6
+  banda bajo el nivel de los árboles dentro del dataset (sombreado, catboost
+  \num{0.7252} hasta xgboost \num{0.7299}).}
+  \label{fig:highvocab-capacity}
+\end{figure}
+
+\emph{Interpretación.} El SAE por modelo explica \emph{por qué} ambos movimientos
+fallan. El par cross-familia empatado en AUC --- \texttt{embeddings} $[128,64]$
+(\num{0.72274}) y \texttt{mlp} $[256,128,64]$ (\num{0.71800}) --- se estanca en el
+\emph{mismo} techo de decodabilidad (capa de pico test $R^2_{\text{target}}$
+\num{0.149} frente a \num{0.141}) y ambos dan a los 245 segmentos de identidad un
+átomo separador dedicado; la diferencia es solo de disposición. El ganador alcanza
+el techo con pocos conceptos construidos monótonamente ($33\to75$, $\Sigma108$),
+mientras que el \texttt{mlp} más profundo/ancho forma casi $2\times$ los conceptos
+($55\to113\to32$, $\Sigma200$) que hacen pico en su capa media y \emph{colapsan} a
+través de su cuello --- el mismo patrón de consolidación-frente-a-proliferación de
+la Sección~\ref{sec:anns-sae}, ahora reproducido a través de familias e invisible
+al AUC. Y la penalización de $-\num{0.0152}$ de embeddings-profundos es dilución,
+no inanición: esa rama tiene 0 átomos muertos y utilización plena pero una
+\emph{entrada} de embedding de entidad aprendida más débil ($R^2_{\text{target}}$
+\num{0.123} frente al \num{0.133} del ganador), y su profundidad extra nunca la
+recupera (la decodabilidad baja a mitad de tronco). Esta es la cara mecanística del
+techo de capacidad: una tercera capa sobre una tabla de embedding aprendida diluye
+el ranking en vez de afilarlo. Tanto este barrido como el barrido de tope de
+vocabulario GBDT (Sección~\ref{sec:vocab-cap}) apuntan igual --- la \emph{calidad}
+de resolución de identidad, no la capacidad cruda del modelo o del vocabulario, es
+la palanca restante. \emph{Fuente:
+\texttt{2026-07-12-high-vocab-capacity-scan.md}.}
+
+\section{Deriva de gusto: la tabla de clasificación es una cota superior de la predicción hacia adelante}
+\label{sec:drift}
+\emph{Motivación.} Todo AUC en este documento se mide sobre una partición
+train/test \emph{aleatoria}, que deja que una pista descubierta en un período dado
+aterrice a ambos lados de la partición. Eso responde ``¿puede el modelo ordenar
+pistas de la misma era que sus datos de entrenamiento?'' --- pero la pregunta
+desplegada mira hacia adelante: \emph{¿reproduciré una canción que descubra a
+continuación?} Esta campaña la plantea honestamente añadiendo una capacidad de
+partición cronológica de primera clase al constructor (\texttt{split\_order\_field}
+en la petición de build): las filas se ordenan por un campo de payload (aquí
+\texttt{first\_played}), las más tempranas van a entrenamiento y las más tardías a
+prueba, y PCA, vocabulario e imputación se ajustan todos solo sobre las filas de
+entrenamiento tempranas, así que la partición es libre de fugas. Se construyeron
+cuatro datasets desde la colección activa \texttt{spotify\_tracks\_song\_ae} ---
+completo e intrínseco, cada uno aleatorio y cronológico --- y el campeón más un
+barrido de modelos se evaluaron sobre la partición nativa de cada dataset. Si el
+AUC colapsa bajo la partición cronológica, el gusto deriva y la tabla sobreestima
+la habilidad real hacia adelante.
+
+\emph{Resultados.} \textbf{El gusto no es estacionario} (Tabla~\ref{tab:drift};
+Figura~\ref{fig:taste-drift}). El build completo-aleatorio reproduce el campeón
+registrado a cinco dígitos (\num{0.73490}), validando los builds frescos; el build
+cronológico de los \emph{mismos} rasgos lo baja a \num{0.61894} --- un colapso de
+$+\num{0.116}$ ($\approx$9 bandas de ruido). La caída es de \num{0.109}--\num{0.116}
+para \emph{cada} familia de modelos (\texttt{catboost} \num{0.72889}$\to$%
+\num{0.61294}, \texttt{logistic} \num{0.72141}$\to$\num{0.61234}), así que es el
+dato/gusto, no una peculiaridad de modelo. Los one-hots de identidad apenas ayudan
+hacia adelante: \emph{descartarlos} (el build intrínseco) cuesta solo $\sim$0.02
+cronológico (\num{0.61894}$\to$\num{0.59858}) frente a $\sim$0.025 aleatorio ---
+mayormente memorizan artistas de la misma era. Un \texttt{xgboost} ponderado por
+recencia (sobre-ponderando descubrimientos recientes) recupera solo $+\num{0.003}$
+(sub-banda), así que la deriva no es un simple efecto de recencia. Y la lectura
+walk-forward --- entrenar sobre \texttt{first\_played}~$<Y$, probar sobre el año
+$Y$ --- aterriza en \num{0.59}--\num{0.67} para cada año individual de 2019 a 2026,
+\emph{nunca} cerca de la línea base aleatoria \num{0.735}, y más historia de
+entrenamiento no cierra la brecha. Un re-particionado fuera-del-framework de los
+rasgos preexistentes construidos aleatoriamente concuerda a $\sim$0.007 de AUC
+(\num{0.626}), y controlar por censura-a-la-derecha (restringiendo la prueba
+cronológica a pistas con $\ge$180 días de oportunidad de reproducción) apenas lo
+mueve (\num{0.62579}$\to$\num{0.62319}) --- así que la penalización es
+no-estacionariedad genuina, no el corrimiento de tasa base de pistas recientes
+mecánicamente-menos-rotadas.
+
+\begin{table}[ht]
+  \centering
+  \caption{La brecha de AUC aleatorio-frente-a-cronológico, builds definitivos del
+  framework (todos \texttt{spotify\_tracks\_song\_ae}, \num{23529} filas, semilla
+  42; cada modelo sobre la partición nativa de su dataset). ``completo'' lleva los
+  one-hots de identidad, ``intrínseco'' los descarta (64 PCA $+$ 7 numéricos solo).
+  La fila del campeón en negrita; la columna de deriva es la caída
+  aleatorio$-$cronológico sobre la matriz completa. Completo-aleatorio reproduce el
+  campeón registrado (\num{0.73490}), validando los builds. Datasets:
+  completo-aleatorio \dsid{ds-20260712-183615}, completo-crono
+  \dsid{ds-20260712-183629}, intrínseco-aleatorio \dsid{ds-20260712-183630},
+  intrínseco-crono \dsid{ds-20260712-183631}. Banda de AUC $2\sigma\approx 0.0126$.}
+  \label{tab:drift}
+  \begin{tabular}{lccccc}
+    \toprule
+    Modelo & compl.\ $\cdot$ aleat. & compl.\ $\cdot$ crono & deriva & intr.\ $\cdot$ aleat. & intr.\ $\cdot$ crono \\
+    \midrule
+    \best{xgboost} (campeón) & \best{0.73490} & \best{0.61894} & \best{$+0.116$} & 0.71020 & 0.59858 \\
+    catboost                  & 0.72889 & 0.61294 & $+0.116$ & 0.70172 & 0.59556 \\
+    logistic                  & 0.72141 & 0.61234 & $+0.109$ & 0.64836 & 0.59016 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.9\textwidth]{taste_drift}
+  \caption{El AUC de la tabla de clasificación es una cota superior de la
+  predicción hacia adelante. \emph{Izquierda:} pasar de una partición aleatoria a
+  una cronológica (entrenar-antes / probar-después) baja el AUC en $\sim$0.11 para
+  \emph{cada} familia de modelos --- la penalización es el dato, no un modelo.
+  \emph{Derecha:} la lectura walk-forward (entrenar sobre \texttt{first\_played}~$<Y$,
+  probar sobre el año $Y$) aterriza en \num{0.59}--\num{0.67} cada año y nunca se
+  acerca a la línea base aleatoria \num{0.735} (verde), siguiendo el nivel
+  cronológico $\sim$\num{0.619} (rojo discontinuo) en su lugar; más historia
+  acumulada no cierra la brecha. La habilidad hacia adelante de ``¿reproduciré una
+  canción que descubra a continuación?'' sobre este corpus es $\sim$0.62--0.63,
+  $\sim$0.11 por debajo de la tabla de partición aleatoria.}
+  \label{fig:taste-drift}
+\end{figure}
+
+\emph{Interpretación.} El mecanismo es la rotación de identidad, y ata todo el
+documento. La rotación la conduce la \emph{identidad} de artista/género en
+one-hots (el hallazgo convergente de cada campaña de arriba); en una partición
+cronológica el período de prueba está lleno de artistas recién descubiertos que
+eran no vistos en entrenamiento y caen en \texttt{\_\_other\_\_}, así que el modelo
+debe recaer en la señal acústica/metadatos intrínseca más débil --- que tope cerca
+de \num{0.60}. Eso es exactamente por qué elevar topes de vocabulario
+(Sección~\ref{sec:vocab-cap}) y añadir capacidad de red (Sección~\ref{sec:anns-capacity})
+son palancas agotadas para la habilidad hacia adelante: solo afilan la
+\emph{memorización} de la misma era, que no transfiere. Es también la historia de
+misma-señal que cuentan los SAEs por modelo --- decodabilidad lineal $\sim$0.14 sin
+átomo de gusto monosemántico limpio (Secciones~\ref{sec:anns-sae},
+\ref{sec:anns-capacity}): quita la memorización de identidad y queda poca señal de
+gusto generalizable. La lectura práctica: todo AUC registrado es una cota superior
+del ranking de misma era, no de la habilidad hacia adelante; un modelo desplegado
+necesita re-entrenamiento periódico porque el gusto deriva; y la única palanca que
+movería el AUC \emph{hacia adelante} es señal intrínseca generalizable más rica
+(mejor acústica, estructura cross-artista), ya que la resolución de identidad y la
+capacidad de modelo están ambas agotadas y son solo-de-la-misma-era. Esto no
+revierte ningún número de la tabla --- los AUC de partición aleatoria son
+mediciones válidas del ranking de misma era --- pero reencuadra lo que significan.
+\emph{Fuente: \texttt{2026-07-12-taste-drift-temporal-split.md}.}
+
+\section{Recomendación de pista siguiente: la tarea, la barra de Markov y el campeón de fusión}
+\label{sec:nexttrack}
+Toda campaña de arriba apunta a la señal binaria de \emph{rotación}. Las secciones
+restantes incorporan una línea de trabajo \emph{separada} --- recomendación de
+\emph{pista siguiente} (next-track) --- cuya tarea, métricas y campeón no tienen
+relación con las tablas de rotación y nunca deben leerse contra ellas. Esta
+sección consolida las cuatro campañas que establecieron la tarea, su barra base y
+su campeón de fusión; las dos secciones que siguen
+(Secciones~\ref{sec:nexttrack-compression} y~\ref{sec:nexttrack-phase2})
+desarrollan los ejes de representación de ítems y familia de modelos y coronan la
+fila «mejor registrada» actual.
+
+\paragraph{Tarea y partición.} La tarea es \emph{recuperación} (retrieval) del
+siguiente ítem: dada una \emph{sesión} de escucha (una secuencia ordenada de
+pistas), ordenar el catálogo y recuperar la siguiente pista distinta que el
+usuario reprodujo realmente. Se evalúa sobre una única partición cronológica sin
+fugas \emph{next-distinct} del artefacto de secuencias \dsid{seq-20260713-014226}
+(\num{7154} sesiones / \num{19402} ítems; \num{5723} entrenamiento / \num{1431}
+prueba en el corte 2024-08-24). La \textbf{tasa de ítems fríos es 0.55} --- más de
+la mitad de las pistas objetivo de las sesiones de prueba nunca aparecen en
+ninguna sesión de entrenamiento --- así que el recall absoluto es modesto \emph{por
+construcción} y cada resultado se lee contra la barra base incumbente, no una barra
+absoluta.
+
+\paragraph{Métricas.} La métrica principal es \textbf{recall@10} (R@10, la
+fracción de sesiones de prueba cuya siguiente pista retenida aparece entre las
+diez recuperadas), reportada junto al rango recíproco medio (MRR) y, desde
+2026-07-14, los diagnósticos de \emph{relevancia graduada} de primera clase:
+\emph{artist@10} / \emph{genre@10} (un candidato del top-diez comparte el artista
+/ género primario de la verdad) y \emph{artist\_mrr}. Todos los intervalos de
+confianza aquí son IC bootstrap al 95\% sobre \num{2000} remuestreos de las
+\num{1431} sesiones de prueba, y el estadístico decisivo es el $\Delta$
+\emph{pareado} por sesión contra una referencia nombrada (la barra de Markov, un
+ancla GRU del mismo espacio, o el campeón). Las métricas graduadas son el marcador
+honesto: el campeón acierta el \emph{artista} correcto en el top diez $\sim$32\% de
+las veces y el \emph{género} correcto $\sim$40\%, mucho más útil que el número de
+recall exacto de $\sim$17\% que impone la tasa de ítems fríos.
+
+\paragraph{La barra de Markov.} La referencia contra la que se mide cada rama es el
+modelo de co-ocurrencia de \emph{Markov} de primer orden (\texttt{B2}: un
+\texttt{track\_bigram} solo de entrenamiento con back-off por artista/género, el
+término de transición que la app hermana ya despacha) con R@10 \num{0.1069}, MRR
+\num{0.0694}. Los pisos de popularidad (\texttt{B0}) y recencia (\texttt{B1})
+quedan cerca de cero (R@10 \num{0.0007}). Una \emph{victoria} de tabla requiere
+superar la referencia en \emph{ambos} R@10 y MRR más allá de los tests de
+paired-$\Delta$ / IC marginal, seguido de un confirm por reproducción.
+
+La Tabla~\ref{tab:nexttrack-lb} es la tabla vigente de «mejor registrada» de
+pista siguiente. El campeón \emph{row} actual --- el z-blend de fusión de rankings
+\emph{R+M+C} sobre el espacio de ítems PCA-192 --- se corona en la
+Sección~\ref{sec:nexttrack-phase2}; el campeón previo, el z-blend \emph{R+M} sobre
+el espacio AE-64, coronado en la Sección~\ref{sec:nexttrack-blend} de abajo, sigue
+siendo el ancla de productización (el blend de dos ramas que mapea sobre la ranura
+de transición de la app hasta que el blend de tres ramas se registre como
+predictor). \textbf{Ninguno de estos predictores de ranking es promovible al grupo
+de mejores modelos}: son solo de entrenamiento (sin subcomando \texttt{predict}), y
+el campeón R+M+C es un driver de fusión fuera del servidor, así que una victoria
+confirmada es una fila «mejor registrada», no un modelo promovido.
+
+\begin{table}[ht]
+  \centering
+  \caption{Tabla de «mejor registrada» de pista siguiente (régimen de RANKING),
+  sobre la partición next-distinct sin fugas (\num{1431} sesiones de prueba; IC
+  bootstrap al 95\% sobre \num{2000} remuestreos). R@10, MRR, artist@10, genre@10
+  mejor cuanto más alto; la barra de Markov es la referencia incumbente. Fila
+  campeona y campeón previo en negrita; mejor celda por métrica en negrita.
+  \textbf{No comparable con ninguna tabla de rotación de arriba.} Espacios de
+  ítems: AE-64 (\dsid{spotify\_tracks\_song\_ae}); PCA-$k$
+  (\dsid{spotify\_tracks\_song\_pca$k$}), todos ajustados desde la fuente leak-safe
+  \dsid{spotify\_tracks\_content}.}
+  \label{tab:nexttrack-lb}
+  {\footnotesize\setlength{\tabcolsep}{4.5pt}\begin{tabular}{lccccl}
+    \toprule
+    Modelo & R@10 [IC 95\%] & MRR & art@10 & gen@10 & Nota \\
+    \midrule
+    \best{R+M+C, PCA-192} (fila campeona) & \best{0.1859 [0.166, 0.207]} & \best{0.1025} & 0.331 & 0.394 & mejor registrada \\
+    R+M+C, PCA-128                        & 0.1824 [0.162, 0.203] & 0.0993 & 0.332 & 0.396 & contenido aditivo \\
+    \best{R+M, AE-64} (campeón previo)    & 0.1726 [0.154, 0.192] & 0.0963 & 0.322 & 0.397 & ancla prod.; 3 semillas \\
+    R+M+C, AE-64 (graded-preferred)       & 0.1740 [0.154, 0.194] & 0.1014 & \best{0.330} & 0.400 & contenido solo empata \\
+    R+M, PCA-192                          & 0.1712 [0.151, 0.192] & 0.0952 & 0.329 & 0.398 & $\approx$ campeón previo \\
+    R+M, PCA-128                          & 0.1670 [0.148, 0.187] & 0.0920 & 0.329 & 0.398 & ganancia GRU no traslada \\
+    R+A+M, AE-64                          & 0.1684 & 0.0943 & --- & --- & rama ANN redundante \\
+    LSTM single, PCA-128                  & 0.1272 [0.110, 0.145] & 0.0495 & 0.335 & \best{0.458} & mejor único; $\ll$ blend \\
+    GRU single, PCA-192                   & 0.1230 [0.106, 0.140] & 0.0534 & \best{0.338} & 0.450 & óptimo puntual de dim \\
+    GRU single, PCA-128 (base)            & 0.1146 [0.099, 0.132] & 0.0489 & 0.333 & 0.452 & espacio base confirmado \\
+    B2 Markov de primer orden (barra)     & 0.1069 [0.092, 0.124] & 0.0694 & 0.298 & 0.389 & incumbente de la app \\
+    ANN pooled-MLP single, PCA-128        & 0.0901 [0.076, 0.105] & 0.0394 & 0.299 & 0.435 & pierde ante la GRU \\
+    XGB stacker (M+G / M+G+A)             & 0.080--0.087 & 0.042--0.049 & 0.31 & 0.38 & el combinador rinde peor \\
+    content-kNN (song-AE cosine)          & 0.0636 [0.050, 0.077] & 0.0321 & 0.272 & 0.405 & la rama C aditiva \\
+    item2vec (SGNS solo entren.)          & 0.0517 & 0.0214 & 0.166 & 0.312 & arrastra el blend \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\subsection{El barrido de secuencias: una GRU-infonce empata con la barra de Markov}
+\label{sec:nexttrack-sweep}
+\emph{Motivación.} La campaña inaugural de la instancia planteó la pregunta
+fundacional: ¿un modelo de secuencias con contexto de sesión --- una GRU/LSTM sobre
+el prefijo ordenado, prediciendo el latente song-AE de 64 dimensiones de la
+siguiente pista y recuperando por coseno --- supera al modelo de transición de
+Markov de primer orden que la app hermana ya despacha, \emph{hacia adelante}, sobre
+la partición de sesiones sin fugas? Cuatro ramas cruzaron la celda recurrente
+(GRU, LSTM), la capacidad (\texttt{hidden} 128, 256) y, decisivamente, la función
+de pérdida (regresión coseno frente a \texttt{InfoNCE} contrastiva), todas sobre
+\dsid{seq-20260713-014226} a 60 épocas.
+
+\emph{Resultados.} Ninguna rama superó la barra. La regla de decisión requería
+superar a \texttt{B2} en \emph{ambos} R@10 y MRR más allá de IC no solapados; la
+mejor rama (M3, GRU \texttt{hidden}128 \texttt{InfoNCE}) alcanzó un \emph{empate}
+estadístico con la barra de Markov en R@10 (\num{0.0894}, el IC del paired-$\Delta$
+incluye cero) pero \emph{perdió} en MRR (\num{0.0388} frente a \num{0.0694}) y
+recall@20. La palanca dominante fue la función de pérdida: \texttt{InfoNCE} fue
+$\approx 2.3\times$ el coseno en R@10 (\num{0.0894} frente a \num{0.0391}),
+mientras que la capacidad (\texttt{h256}) y la celda LSTM apenas movieron las ramas
+coseno (todas $\sim$0.038--0.041).
+
+\emph{Interpretación.} Un latente-más-un-solo-salto-coseno es una ruta más difícil
+a la \emph{pista} siguiente \emph{exacta} que un bigrama de co-escucha: el bigrama
+memoriza directamente ``qué sigue a qué'', mientras que la GRU debe aterrizar cerca
+del punto correcto en un espacio de contenido de 64-d y luego recuperar, perdiendo
+en el ranking preciso (MRR). El hallazgo es consistente con el resultado de deriva
+de gusto del laboratorio padre --- \num{0.55} de ítems fríos, comportamiento guiado
+por identidad/adyacencia --- y fijó la agenda: \texttt{InfoNCE} es la pérdida base,
+y la rama natural siguiente es un \emph{blend} de las puntuaciones de candidatos de
+la GRU con el bigrama de Markov.
+\emph{Fuente: \texttt{2026-07-13-nexttrack-sequence-sweep.md}.}
+
+\subsection{Barrido de topología: profundidad, anchura y dirección son una palanca agotada}
+\label{sec:nexttrack-topology}
+\emph{Motivación.} Con la pérdida fijada en \texttt{InfoNCE}, este barrido aisló la
+\emph{topología} de red: ¿la profundidad (capas apiladas), la anchura
+(\texttt{hidden} 256), una pila residual entre capas o la bidireccionalidad elevan
+el modelo de secuencias por encima de la barra de Markov? Como una RNN
+bidireccional bajo teacher forcing por paso filtraría ítems futuros, la rama
+bidireccional usó un objetivo leak-free de último ítem (codificar el prefijo
+completo, predecir solo el siguiente ítem retenido).
+
+\emph{Resultados.} Refutado. Ninguna rama superó la barra en ambas métricas. La
+mejor rama (anchura \texttt{h256}, R@10 \num{0.0957}) es un \emph{empate} en R@10 y
+pierde en MRR (\num{0.0411} frente a \num{0.0694}). La profundidad es plana de
+1$\to$2 capas (\num{0.0894}$\to$\num{0.0922}, dentro de banda) y \emph{perjudica}
+con 3 capas (\num{0.0825}, fuera de banda por debajo de la barra); la pila residual
+sobre profundidad-2/h256 no añadió nada. La rama bidireccional colapsó
+(\num{0.0482}), pero esto es un artefacto del \emph{objetivo}, no un veredicto
+sobre la direccionalidad: el objetivo leak-free de último ítem aporta $\sim$1
+objetivo de entrenamiento por sesión frente a los $\sim$13 pares de siguiente-paso
+del teacher forcing, así que entrenó con $\sim$13$\times$ menos señal.
+
+\emph{Interpretación.} La arquitectura no es la palanca para pista siguiente en
+este corpus. La señal transferible de recuperación por latente se estanca en R@10
+$\sim$0.09--0.10 a través de profundidad, anchura, residual y dirección, por debajo
+del bigrama de co-escucha --- consistente con todo el arco: la función de pérdida
+movió la aguja y la capacidad/topología no. La única palanca inexplorada restante
+era el encuadre de candidatos / la fusión, que la campaña siguiente accionó
+decisivamente.
+\emph{Fuente: \texttt{2026-07-13-nexttrack-topology-scan.md}.}
+
+\subsection{El campeón de fusión GRU$\times$Markov, y por qué más ensamblado falla}
+\label{sec:nexttrack-blend}
+\emph{Motivación.} El barrido y el escaneo de topología coincidieron en que la
+mejor GRU individual solo \emph{empata} con la barra de Markov en R@10 mientras
+pierde en MRR. Esta campaña preguntó si \emph{combinar} modelos supera la barra, y
+hasta dónde llega el ensamblado. Se definieron tres ramas, cada una emitiendo
+puntuaciones de candidatos sobre todo el vocabulario: \textbf{M} = el bigrama de
+Markov solo de entrenamiento (la barra), \textbf{R} = la recurrencia
+GRU-infonce-h256, y \textbf{A} = un MLP ANN de bolsa-de-prefijo (un gemelo
+feed-forward de R). Se combinaron con un z-blend ponderado y, como alternativa
+aprendida, un stacker XGB (un meta-aprendiz GBDT sobre rasgos por candidato).
+
+\emph{Resultados.} El \textbf{z-blend R+M} ($\alpha{=}0.5$) \emph{supera la barra
+de forma decisiva}: R@10 \num{0.1726} $[0.154, 0.192]$, MRR \num{0.0963}, un
+$\Delta$ pareado sobre Markov de $+\num{0.0657}$ $[+0.049, +0.083]$ (IC enteramente
+por encima de cero) --- $\sim$$+61\%$ de R@10, $+39\%$ de MRR --- en una meseta
+robusta a lo largo de $\alpha \in [0.25, 0.75]$ y reproducido a través de tres
+semillas (\num{0.1705} / \num{0.1726} / \num{0.1726}). Se registró como el
+predictor \texttt{seq-blend} y la definición \texttt{blend-gru-markov}, el primer
+campeón de pista siguiente. Más ensamblado luego \emph{no logró} mejorarlo
+(Tabla~\ref{tab:nexttrack-blend}): R+A+M (\num{0.1684}) es levemente peor, R+A
+($\approx$ GRU sola, \num{0.0894}) es mucho peor, y ambas variantes del stacker XGB
+(M+R \num{0.1020}; M+R+A \num{0.0887}) apenas superan a Markov sola.
+
+\begin{table}[ht]
+  \centering
+  \caption{La campaña de fusión: el z-blend R+M supera la barra de Markov de forma
+  decisiva, y ningún ensamble más rico lo mejora. R@10 y MRR mejor cuanto más alto;
+  campeón en negrita. \emph{No comparable con ninguna tabla de rotación.}}
+  \label{tab:nexttrack-blend}
+  {\small\setlength{\tabcolsep}{5pt}\begin{tabular}{lccl}
+    \toprule
+    Modelo & R@10 [IC 95\%] & MRR & Nota \\
+    \midrule
+    \best{z-blend R+M $\alpha{=}0.5$} (campeón) & \best{0.1726 [0.154, 0.192]} & \best{0.0963} & $\Delta$ vs Markov $+0.066$ [$+0.05,+0.08$] \\
+    z-blend R+A+M                                & 0.1684 & 0.0943 & rama ANN redundante con GRU \\
+    B2 barra de Markov (M)                       & 0.1069 [0.092, 0.123] & 0.0694 & la referencia \\
+    XGB stacker M+R                              & 0.1020 & 0.0561 & combinador aprendido $\ll$ z-blend \\
+    GRU sola (R)                                 & 0.0957 & 0.0411 & empata la barra solo en R@10 \\
+    z-blend R+A                                  & 0.0894 & 0.0377 & $\approx$ GRU sola \\
+    XGB stacker M+R+A                            & 0.0887 & 0.0572 & apenas supera a Markov \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{Interpretación.} La victoria es sobre \emph{diversidad} de señal, no número
+de modelos. La GRU (similitud de latente) y Markov (conteos de co-ocurrencia)
+ordenan pistas correctas \emph{distintas}, así que fusionarlas aproximadamente
+duplica la tasa de acierto; amontonar más del \emph{mismo} tipo de señal --- otro
+predictor neuronal de latente (A), redundante con R --- no añade nada. El stacker
+XGB aprendido \emph{rinde por debajo} del z-blend simple, en contra de la intuición
+habitual de que ``apilar supera a mezclar'': su entrenamiento puntual
+binario-con-negativos no optimiza el objetivo de ranking tan bien como fusionar
+directamente puntuaciones normalizadas. El margen restante está acotado por la tasa
+de ítems fríos de \num{0.55} y requiere \emph{señal genuinamente nueva}, no más
+fusión de modelos --- la hipótesis que la campaña de relevancia graduada prueba a
+continuación.
+\emph{Fuente: \texttt{2026-07-14-nexttrack-blend-and-ensemble.md}.}
+
+\subsection{Métricas de relevancia graduada y nuevos aprendices base: el contenido es la única señal aditiva}
+\label{sec:nexttrack-graded}
+\emph{Motivación.} Dos hilos en una campaña. (A) Hacer que la evaluación acredite
+aterrizar la \emph{banda/ambiente} correcto aunque la pista exacta esté mal --- la
+observación de que ``la primera elección normalmente no es la pista exacta, pero el
+artista normalmente es correcto'' --- promoviendo \emph{artist@k}, \emph{genre@k} y
+\emph{artist\_mrr} a métricas de primera clase cableadas de extremo a extremo
+(\texttt{seq\_common.eval\_from\_scores} $\to$ \texttt{Metrics} /
+\texttt{MetricsSpec} de Rust $\to$ \texttt{domain.toml} $\to$ UI). (B) Probar
+aprendices base leak-free genuinamente nuevos --- \textbf{C} = content-kNN (coseno
+del latente song-AE de cada candidato al prefijo, sin entrenamiento), \textbf{M2} =
+un trigrama de Markov de segundo orden con back-off, e \textbf{I} = un item2vec
+SGNS solo de entrenamiento --- evaluados tanto en las métricas exactas como en las
+nuevas graduadas.
+
+\emph{Resultados.} La ruta de la métrica exacta fue idéntica byte a byte (claves
+puramente aditivas); el campeón reprodujo R@10 \num{0.1726} / MRR \num{0.0963}
+exactamente. Ningún aprendiz base nuevo superó la barra en solitario (M2
+\num{0.1076} $\approx$ M \num{0.1069}; el trigrama cae al bigrama --- las sesiones
+son demasiado cortas para disparar; item2vec \num{0.0517} es la rama más débil).
+Mezclado en el campeón, \textbf{el contenido es la única señal aditiva}:
+\textbf{R+M+C} (añadiendo la rama de contenido) es el mejor blend en MRR
+(\num{0.0963}$\to$\num{0.1014}), artist@10 (\num{0.3215}$\to$\num{0.3298}) y
+artist\_mrr, y empata al campeón en R@10 exacto ($\Delta$ pareado $+\num{0.0014}$,
+IC cruza cero). item2vec \emph{arrastra} el blend (R+M+I \num{0.1349}); el trigrama
+es neutral.
+
+\emph{Interpretación.} content-kNN ordena pistas cuasi-correctas \emph{distintas}
+(similitud de ambiente por latente) frente a la GRU (recurrencia de sesión) y
+Markov (co-ocurrencia), justo la diversidad que la campaña de fusión predijo que
+necesitaría la señal nueva. Sobre el espacio AE-64 la rama de contenido solo
+\emph{empató} al campeón en recall exacto mientras elevaba las métricas graduadas
+--- así que se llevó adelante como la tercera rama graded-preferred, no como un
+nuevo campeón exacto. Ese ``empate'' se vuelve una \emph{victoria} cuando el
+espacio de ítems es más rico (Sección~\ref{sec:nexttrack-phase2}): sobre PCA-192 la
+misma construcción R+M+C es la más fuerte registrada. El item2vec de co-escucha y
+el trigrama de Markov no añadieron nada en estos datos.
+\emph{Fuente: \texttt{2026-07-14-nexttrack-graded-relevance-and-new-legs.md}.}
+
+\section{Recomendación de pista siguiente: el bake-off de compresión de la representación de ítems}
+\label{sec:nexttrack-compression}
+Toda campaña de arriba apunta a la señal binaria de \emph{rotación}. Esta sección
+incorpora el primer informe de una línea de trabajo \emph{separada} ---
+recomendación de \emph{pista siguiente} (next-track) --- cuya tarea, métricas y
+campeón no tienen relación con las tablas de rotación y nunca deben leerse contra
+ellas. La tarea es recuperación: dada una \emph{sesión} de escucha (una secuencia
+ordenada de pistas), ordenar el catálogo y recuperar la siguiente pista distinta
+que el usuario reprodujo realmente. Se evalúa sobre una partición cronológica
+\emph{next-distinct} sin fugas (\num{7154} sesiones / \num{19402} ítems;
+\num{5723} entrenamiento / \num{1431} prueba en el corte 2024-08-24; tasa de
+ítems fríos 0.55), y su métrica principal es \textbf{recall@10} (R@10, la fracción
+de sesiones de prueba cuya siguiente pista retenida aparece entre las diez
+recuperadas), reportada junto al rango recíproco medio (MRR) y los diagnósticos de
+acierto de categoría artist@10 / genre@10 / artist\_mrr. Todos los intervalos de
+confianza aquí son IC bootstrap al 95\% sobre \num{2000} remuestreos de las
+\num{1431} sesiones de prueba. El campeón vigente de esta línea --- la referencia
+contra la que se lee esta campaña --- es un \emph{z-blend R+M} de fusión de
+rankings (\texttt{blend-gru-markov}, $\alpha{=}0.5$) de una GRU de secuencias con
+un modelo de co-ocurrencia de Markov de primer orden sobre el espacio multimodal
+song-autoencoder de 64-dim (\texttt{spotify\_tracks\_song\_ae}, ``AE-64''), con
+R@10 \num{0.173} $[0.154, 0.192]$, MRR \num{0.096}, confirmado con tres semillas.
+\emph{Motivación.} El espacio de ítems del campeón --- un latente AE de 64-dim ---
+fue una elección temprana arbitraria, y la GRU de secuencias predice \emph{hacia} y
+recupera \emph{sobre} cualquier geometría que ese espacio imponga. Esta campaña
+pregunta qué \emph{compresión} es el mejor espacio para la GRU: PCA lineal frente al
+autoencoder no lineal, cada uno a dimensión latente 32 / 64 / 128. Se hornearon
+cinco espacios alternativos desde la \emph{misma} fuente de contenido leak-safe de
+384-dim (\texttt{spotify\_tracks\_content}), cada uno ajustado sin supervisión
+sobre los \num{23529} ítems usando solo campos intrínsecos de
+contenido/acústica/catálogo (texto-384 $+$ numéricos z-scored $+$ acústicas
+\texttt{af\_*} $+$ multi-hot de género/tipo-álbum), nunca un campo conductual o de
+objetivo. Cada espacio se evaluó luego bajo un readout GRU \emph{congelado}
+(\texttt{gru-infonce-h256}: \texttt{arch=gru}, \texttt{loss=infonce},
+\texttt{hidden=256}, una capa, dropout 0.1, 40 épocas, lr \num{1e-3}, batch 128,
+$k{=}10$), de modo que el espacio latente de ítems es el único eje que se mueve. La
+apuesta del diseño era que la pérdida de reconstrucción de peso igual por bloque del
+AE \emph{preservaría} los pequeños bloques de acústica/catálogo que la varianza
+global dominada por texto de PCA muriera de hambre; la hipótesis nula era que la
+dimensión, no el compresor, fija el techo. Cada artefacto pasó una puerta de
+paridad idéntica (mismas \num{7154} sesiones / \num{19402} ítems / partición /
+corte), así que la comparación es de igual a igual, y el paired-$\Delta$ es la
+diferencia de R@10 por sesión contra el control AE-64 del mismo lote.
+
+\emph{Resultados.} La puerta de paridad pasó: el control AE-64 reprodujo su R@10
+registrado \num{0.0957} $\in [0.081, 0.112]$, así que el ranking es válido. Los seis
+espacios entrenaron limpiamente (Tabla~\ref{tab:nexttrack-compression};
+Figura~\ref{fig:nexttrack-compression}). \textbf{PCA-128}
+(\dsid{spotify\_tracks\_song\_pca128}, artefacto \texttt{seq-20260715-030509};
+ejecución \runid{run-20260715-042100-a1d9d}) es el ganador GRU-individual con R@10
+\num{0.1146}, un paired-$\Delta$ de $+\num{0.0189}$ $[+0.0042, +0.0335]$ sobre el
+control AE-64 --- un IC \emph{enteramente por encima de cero}, la única rama que
+supera el control significativamente --- y también encabeza MRR (\num{0.0489}),
+artist@10 (\num{0.3326}) y artist\_mrr (\num{0.2644}). PCA-64 es el segundo
+(\num{0.1041}, paired-$\Delta$ cruzando cero: un empate). Los dos espacios de 32-dim
+(AE-32 \num{0.0545}, PCA-32 \num{0.0412}) quedan muy por debajo del control de
+64-dim, ambos con IC de paired-$\Delta$ enteramente por debajo de cero. La sonda
+content-kNN sin entrenamiento (una recuperación coseno pura en cada espacio, última
+columna del informe) es plana en $\sim$0.06 a través de los seis espacios y \emph{no}
+sigue el ranking de la GRU: el R@10 de sonda de PCA-128 (\num{0.0636}) empata
+exactamente el control AE-64 (\num{0.0636}), y AE-32 encabeza la sonda (\num{0.0720})
+pese a quedar casi-último bajo la GRU.
+
+\begin{table}[ht]
+  \centering
+  \caption{El bake-off de compresión de la representación de ítems: seis espacios
+  de ítems (PCA lineal frente al AE no lineal $\times$ dimensión latente
+  32 / 64 / 128), cada uno evaluado bajo el \emph{mismo} readout congelado
+  \texttt{gru-infonce-h256} sobre la partición next-distinct (\num{1431} sesiones
+  de prueba; IC bootstrap al 95\% sobre \num{2000} remuestreos; paired-$\Delta$ vs
+  el control AE-64 del mismo lote). Las seis tuvieron éxito. R@10, MRR, artist@10 y
+  genre@10 mejor cuanto más alto. Ganador (PCA-128) en negrita; mejor celda por
+  métrica en negrita. \emph{No comparable con ninguna tabla de rotación.}}
+  \label{tab:nexttrack-compression}
+  {\small\begin{tabular}{llccccc}
+    \toprule
+    Espacio & Run id & R@10 [IC 95\%] & paired-$\Delta$ vs AE-64 & MRR & artist@10 & genre@10 \\
+    \midrule
+    \best{PCA-128} (ganador) & \best{\runid{run-20260715-042100-a1d9d}} & \best{0.1146 [0.099, 0.132]} & \best{$+0.0189$ [$+0.004$, $+0.034$]} & \best{0.0489} & \best{0.3326} & 0.4521 \\
+    PCA-64 (segundo)        & \runid{run-20260715-042100-8851d} & 0.1041 [0.088, 0.121] & $+0.0084$ [$-0.005$, $+0.022$] (empate) & 0.0416 & 0.3117 & 0.4598 \\
+    AE-64 (control)         & \runid{run-20260715-042059-dd261} & 0.0957 [0.081, 0.111] & --- (control) & 0.0411 & 0.2942 & 0.4500 \\
+    AE-128                  & \runid{run-20260715-042059-e96ae} & 0.0929 [0.078, 0.108] & $-0.0028$ [$-0.015$, $+0.009$] (empate) & 0.0398 & 0.3026 & \best{0.4640} \\
+    AE-32                   & \runid{run-20260715-042059-d3f9e} & 0.0545 [0.043, 0.066] & $-0.0412$ [$-0.055$, $-0.027$] & 0.0274 & 0.2376 & 0.3955 \\
+    PCA-32                  & \runid{run-20260715-042059-b1242} & 0.0412 [0.031, 0.052] & $-0.0545$ [$-0.069$, $-0.041$] & 0.0224 & 0.2187 & 0.3816 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_compression}
+  \caption{La dimensión latente, no el compresor, es la palanca. Ambas series suben
+  abruptamente de dim 32 a 64; PCA (azul) luego sigue subiendo hasta 128 y
+  \emph{sobrepasa} al AE, mientras que el AE (gris) se estanca --- su punto de
+  128-dim (\num{0.0929}) de hecho cae por debajo de su propio control de 64-dim
+  (\num{0.0957}). En dim 32 el AE roza a PCA, un cruce de baja capacidad que se
+  revierte una vez que la dim es generosa. El control AE-64 (anillo rojo) es el
+  espacio de ítems del campeón; el ganador PCA-128 (estrella verde) es la única rama
+  cuyo IC del paired-$\Delta$ supera cero. Las barras de error son IC bootstrap al
+  95\%; los IC vecinos se solapan, así que la victoria descansa en el test
+  \emph{pareado}, no en los intervalos marginales.}
+  \label{fig:nexttrack-compression}
+\end{figure}
+
+La victoria GRU-individual, sin embargo, \textbf{no} sobrevive al blend de
+producción. Re-fusionar la rama GRU PCA-128 ganadora con la rama de Markov
+(\texttt{seq-blend}, $\alpha{=}0.5$, semilla 1337; ejecución
+\runid{run-20260715-044920-36dce}) puntúa R@10 \num{0.1670} $[0.148, 0.187]$, MRR
+\num{0.0923} --- \emph{por debajo} del blend campeón AE-64 (\num{0.173}, MRR
+\num{0.096}) en ambas métricas, con IC solapados. Por la regla de decisión esto no
+es un evento de tabla: nada se promovió, el blend campeón AE-64 se mantiene, y
+PCA-128 se lleva adelante solo como el espacio base sancionado de la Fase 2.
+
+\emph{Interpretación.} Cuatro cosas se siguen. Primera, \textbf{la dimensionalidad
+latente es la palanca dominante y el compresor es secundario}: para PCA la tendencia
+es monótona (\num{0.041} $\to$ \num{0.104} $\to$ \num{0.115} a través de dim
+32/64/128), y 32 dims mueren de hambre el espacio sin importar el método. Segunda,
+la \textbf{hipótesis de preservación acústica del diseño queda refutada}: en dim
+generosa el PCA lineal supera al AE no lineal (PCA-128 $>$ AE-128, PCA-64 $\ge$
+AE-64), y aunque AE-32 preserva los bloques numérico/acústico casi a la perfección
+queda cerca del fondo --- así que la preservación acústica es irrelevante para la
+recuperación de pista siguiente. Lo que ayuda es una geometría objetivo
+\emph{ordenada por varianza y decorrelacionada} (PCA-128 captura EVR acumulado
+\num{0.982}) que la GRU encuentra más fácil de regresar que los latentes de peso
+igual enredados del AE; el ordenamiento por varianza global de PCA es una ventaja
+aquí, no la desventaja que la hipótesis asumía. Tercera, la ventaja del AE es un
+fenómeno puramente de \emph{baja capacidad} (AE-32 $>$ PCA-32): el cuello de botella
+no lineal empaca más estructura utilizable en 32 dims, pero la ventaja se evapora y
+se revierte una vez que la dim es generosa. Cuarta, la sonda content-kNN plana que
+no sigue el ranking de la GRU es una \emph{divergencia señalada}: la riqueza de
+recuperación intrínseca de estos espacios es similar, así que la ganancia de PCA-128
+viene de la \emph{aprendibilidad} de su geometría objetivo para la GRU entrenada, no
+de un espacio demostrablemente más rico en lo absoluto --- que es exactamente por
+qué la regla de decisión lo señaló en vez de auto-promoverlo. La salvedad de peso
+para el trabajo aguas abajo es el resultado del blend: una rama GRU claramente más
+fuerte (\num{0.1146} vs \num{0.096}) no compró \emph{nada} en el blend, porque la
+rama de Markov es independiente de la representación y las pistas extra que la mejor
+GRU recupera evidentemente se solapan con lo que Markov ya aporta. \textbf{Las
+ganancias de representación medidas sobre la GRU individual no se trasladan
+automáticamente al blend de producción}, así que el eje de compresión es progreso
+genuino para el modelo individual pero esencialmente agotado para el blend.
+\emph{Fuente:
+\texttt{2026-07-15-nexttrack-compression-representation-bakeoff.md}.}
+
+\section{Pista siguiente Fase 1b/2: el techo de dimensión, el barrido de familia de modelos y el campeón R+M+C}
+\label{sec:nexttrack-phase2}
+El bake-off de compresión (Sección~\ref{sec:nexttrack-compression}) halló que la
+\emph{dimensión} latente es la palanca dominante y dejó a PCA aún subiendo en 128.
+Dos campañas de seguimiento localizaron el techo de dimensión, luego barrieron la
+familia de modelos sobre los espacios elegidos --- y, en el proceso, coronaron una
+nueva fila «mejor registrada».
+
+\subsection{El techo de dimensión de compresión: PCA hace pico en 192}
+\label{sec:nexttrack-dim}
+\emph{Motivación.} Con la dimensión establecida como la palanca, este tramo extendió
+el barrido de PCA hacia arriba (PCA-192, PCA-256) para localizar el óptimo real
+antes de que la Fase 2 comprometiera un espacio base, y añadió AE-192 para probar si
+PCA $\ge$ AE se sostiene a mayor dimensión. El protocolo fue idéntico: todas las
+reps ajustadas desde la fuente leak-safe \dsid{spotify\_tracks\_content}, evaluadas
+bajo el \emph{mismo} readout congelado \texttt{gru-infonce-h256}, cada nuevo
+artefacto de secuencias pasando la puerta de paridad exacta; la referencia es
+PCA-128 (\runid{run-20260715-042100-a1d9d}), el ganador de la Fase 1, y el
+$\Delta$ pareado por sesión se mide contra ella.
+
+\emph{Resultados.} La curva de R@10 frente a dimensión de PCA \textbf{hace pico en
+$\sim$192} (R@10 \num{0.1230}) y \emph{se revierte} hacia 256 (\num{0.1167}); no
+seguía subiendo. La tendencia completa es $32\!\to\!\num{0.041}$,
+$64\!\to\!\num{0.104}$, $128\!\to\!\num{0.115}$, $\mathbf{192\!\to\!\num{0.123}}$,
+$256\!\to\!\num{0.117}$ (Figura~\ref{fig:nexttrack-dim}). PCA-192 es el óptimo
+puntual, pero su $\Delta$ pareado frente a PCA-128 es $+\num{0.0084}$ $[-0.0007,
++0.0189]$ --- falla la barra de ``IC enteramente por encima de cero'' por
+\num{0.0007}, un pelo --- así que por la regla mecánica \textbf{PCA-128 se mantiene
+como la base de la Fase 2}, con PCA-192 marcado como el candidato a
+confirmar-y-promover. PCA $\ge$ AE se sostiene con fuerza y la brecha es máxima en
+192 (PCA-192 \num{0.123} frente a AE-192 \num{0.098}); el AE se estanca plano en
+$\sim$0.09--0.10 desde dim 64 hacia arriba.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_dim_curve}
+  \caption{Se encuentra el techo de dimensión. Extendiendo el barrido de compresión
+  de la Figura~\ref{fig:nexttrack-compression} a PCA-192/256 y AE-192, la curva PCA
+  (azul) hace pico en $\sim$192 (R@10 \num{0.123}) y se revierte hacia 256, mientras
+  que el AE (gris) se estanca plano en $\sim$0.09--0.10 y nunca lo alcanza --- la
+  brecha PCA$\,\ge\,$AE es máxima en 192. PCA-192 es el óptimo puntual (estrella
+  verde) pero su $\Delta$ pareado sobre PCA-128 roza cero, así que PCA-128 (la base
+  marcada) se mantiene como la base individual de la Fase 2. Las barras de error son
+  IC bootstrap al 95\% sobre las \num{1431} sesiones de prueba.}
+  \label{fig:nexttrack-dim}
+\end{figure}
+
+\emph{Interpretación.} La varianza extra más allá de $\sim$192 (PCA-256 captura EVR
+acumulado \num{0.997}) son dimensiones de baja señal / ruido que la GRU no puede
+explotar y que diluyen levemente la geometría objetivo. La meseta plana del AE
+reconfirma la hipótesis de preservación acústica refutada del bake-off a mayor
+dimensión: su objetivo de reconstrucción de peso igual sigue gastando capacidad en
+los pequeños bloques numérico/acústico (reconstrucción $R^2 \approx 0.999$ en 192)
+en lugar de la estructura de texto/catálogo de alta varianza que la GRU necesita.
+Como antes, la sonda content-kNN sin entrenamiento sigue plana
+($\sim$0.064--0.070) y no reproduce el pico de la GRU, así que el óptimo de
+dimensión es sobre la \emph{aprendibilidad} del objetivo, no la riqueza intrínseca
+de recuperación.
+\emph{Fuente: \texttt{2026-07-15b-nexttrack-compression-dim-extension.md}.}
+
+\subsection{El barrido de familia de modelos y el nuevo campeón, R+M+C sobre PCA-192}
+\label{sec:nexttrack-modelsweep}
+\emph{Motivación.} Con el eje de compresión zanjado (base PCA-128, candidato
+PCA-192), esta campaña barrió la \emph{familia} de modelos sobre los espacios
+elegidos: ¿una celda recurrente distinta (LSTM), un MLP agregado no recurrente
+(ANN) o un stacker XGB \emph{aprendido} superan al z-blend fijo GRU$\times$Markov ---
+y añadir la tercera rama content-kNN (R+M+C) sobre el espacio PCA \emph{rico}
+finalmente supera al campeón? Una configuración fija corrió a través de todas las
+ramas; solo variaron la familia de modelos y la representación, y el servidor se
+serializó (\texttt{-{}-max-runs 1}) para evitar la trampa de sobresuscripción de
+hilos.
+
+\emph{Resultados.} Una \textbf{nueva fila «mejor registrada»}: el \textbf{z-blend
+R+M+C sobre PCA-192} (GRU $\times$ Markov solo de entrenamiento $\times$ content-kNN,
+tercios iguales) alcanza R@10 \num{0.1859} $[0.166, 0.207]$, MRR \num{0.1025}, un
+$\Delta$ pareado sobre el campeón previo de $+\num{0.0133}$ $[+0.0007, +0.0259]$ ---
+enteramente por encima de cero, sin regresión de MRR
+(Tabla~\ref{tab:nexttrack-phase2}; Figura~\ref{fig:nexttrack-phase2}). La rama de
+contenido es genuinamente aditiva sobre el espacio rico, superando al R+M del mismo
+espacio en $+\num{0.0154}$ (PCA-128) / $+\num{0.0147}$ (PCA-192), ambos IC por
+encima de cero --- \emph{más fuerte} que el R+M+C de AE-64 que solo empató
+(Sección~\ref{sec:nexttrack-graded}), porque el espacio más rico y de mayor EVR hace
+que la rama de contenido rinda. El \textbf{stacker XGB aprendido rinde muy por
+debajo} del z-blend fijo (\num{0.080}--\num{0.087}, perdiendo incluso ante su propia
+rama base GRU individual), reconfirmando la campaña de fusión; la \textbf{LSTM es el
+mejor modelo individual} (PCA-128 \num{0.1272}, $\Delta$ pareado sobre la GRU
+$+\num{0.0126}$, IC por encima de cero) pero muy por debajo de los blends; y la base
+individual de la Fase 2 \textbf{se mantiene en PCA-128} (la ventaja de la GRU-192
+aún roza cero).
+
+\begin{table}[ht]
+  \centering
+  \caption{Barrido de familia de modelos de la Fase 2 sobre los espacios PCA ricos,
+  ordenado por R@10 (mejor cuanto más alto). El z-blend fijo es el combinador de
+  referencia; el stacker XGB aprendido rinde muy por debajo. Fila campeona y campeón
+  previo en negrita; mejor celda por métrica en negrita. El $\Delta$ pareado es por
+  sesión contra la referencia nombrada. \emph{No comparable con ninguna tabla de
+  rotación.}}
+  \label{tab:nexttrack-phase2}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{lp{2.4cm}ccp{2.9cm}}
+    \toprule
+    Modelo & Run id / fuente & R@10 [IC 95\%] & MRR & $\Delta$ pareado \\
+    \midrule
+    \best{R+M+C, PCA-192} (fila camp.) & \runid{analyze\_rmc} (A4) & \best{0.1859 [0.166, 0.207]} & \best{0.1025} & vs camp. $+0.0133$ [$+0.001,+0.026$] \\
+    R+M+C, PCA-128                       & \runid{analyze\_rmc} (A2) & 0.1824 [0.162, 0.203] & 0.0993 & vs camp. $+0.0098$ (empate) \\
+    \best{R+M, AE-64} (campeón previo)   & \runid{run-20260714-170928-645ae} & 0.1726 [0.154, 0.192] & 0.0963 & --- (referencia) \\
+    R+M, PCA-192                         & \runid{run-20260715-142440-96f53} & 0.1712 [0.151, 0.192] & 0.0952 & vs camp. $-0.0014$ (empate) \\
+    R+M, PCA-128                         & \runid{run-20260715-044920-36dce} & 0.1670 [0.148, 0.187] & 0.0920 & vs camp. $-0.0056$ (empate) \\
+    LSTM single, PCA-128                 & \runid{run-20260715-142440-546d0} & 0.1272 [0.110, 0.145] & 0.0495 & vs GRU-128 $+0.0126$ ($>0$) \\
+    GRU single, PCA-192                  & \runid{run-20260715-142440-89d6a} & 0.1230 [0.106, 0.140] & 0.0534 & vs GRU-128 $+0.0084$ (empate) \\
+    ANN pooled-MLP, PCA-128              & \runid{run-20260715-142440-7e528} & 0.0901 [0.076, 0.105] & 0.0394 & vs GRU-128 $-0.0245$ \\
+    XGB stacker M+G, PCA-128             & \runid{run-20260715-142440-371b1} & 0.0867 [0.073, 0.101] & 0.0493 & vs GRU-128 $-0.0280$ \\
+    XGB stacker M+G+A, PCA-192           & \runid{run-20260715-142440-f111d} & 0.0853 [0.071, 0.099] & 0.0490 & vs GRU-192 $-0.0377$ \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.85\textwidth]{nexttrack_phase2_families}
+  \caption{El barrido de familia de modelos de la Fase 2. El z-blend fijo es el
+  combinador de referencia: R+M+C sobre PCA-192 (verde) es la nueva fila campeona,
+  la rama de contenido es genuinamente aditiva sobre el espacio rico, y el stacker
+  XGB aprendido (rojo) rinde muy por debajo --- pierde incluso ante su propia rama
+  base GRU individual. LSTM roza a GRU como el mejor modelo individual (gris) pero
+  queda muy por debajo de los blends. La barra de Markov de primer orden
+  (\num{0.107}) es la referencia incumbente; la fila campeona está en \num{0.186}.}
+  \label{fig:nexttrack-phase2}
+\end{figure}
+
+\emph{La coronación, y sus dos salvedades honestas.} El candidato a evento de tabla
+se confirmó reproduciendo la rama GRU-192 cinco veces (la original más cuatro
+re-ejecuciones) y recalculando R+M+C cada vez; el $\Delta$ pareado sobre el campeón
+previo fue $+\num{0.0133}$ $[+0.0007, +0.0259]$ en \emph{cada} re-ejecución, con la
+ventaja de MRR intacta, así que R+M+C sobre PCA-192 se registró como la nueva fila
+campeona. Dos salvedades viajan con la coronación y no deben omitirse. Primera,
+\textbf{la dispersión de reproducción fue exactamente cero} porque el entrenamiento
+de \texttt{seq-nexttrack} es determinista en esta CPU --- los cinco checkpoints
+GRU-192 fueron idénticos byte a byte --- así que la confirmación verificó
+\emph{determinismo, no robustez a la semilla}; la única incertidumbre cuantificada
+es el bootstrap de partición única. Segunda, \textbf{el límite inferior del $\Delta$
+pareado es $+\num{0.0007}$}: la coronación supera cero por un pelo en una única
+partición. La coronación es real según el criterio pre-acordado, pero el margen
+sobre el campeón previo es delgado, y endurecerla requiere una segunda partición de
+prueba sin fugas (o ramas con semillas variadas una vez que el blend se generalice
+a tres ramas).
+
+\emph{Interpretación.} El hilo de compresión-más-familia-de-modelos queda por lo
+demás cerrado: PCA-128 es la base individual, la LSTM es el mejor modelo individual,
+el stacker aprendido está muerto como combinador, y el z-blend fijo es el
+combinador de referencia. El resultado de peso es que \emph{el contenido es la única
+rama que añade señal de ranking genuinamente nueva, y rinde más sobre el espacio PCA
+de mayor EVR} --- la excepción a la regla vigente de que las ganancias de modelo
+individual / representación no se trasladan al blend (el par R+M sobre los espacios
+PCA ricos solo empata al campeón AE-64). La brecha de productización persiste: el
+campeón es solo de entrenamiento y fuera del servidor, así que el campeón previo R+M
+sobre AE-64 sigue siendo el ancla desplegable hasta que el blend de tres ramas se
+registre con un subcomando \texttt{predict}.
+\emph{Fuente: \texttt{2026-07-15c-nexttrack-phase2-model-sweep.md}.}
+
+\section{Conclusiones}
+\label{sec:conclusions}
+Trece campañas (jun--jul 2026) sobre el objetivo de rotación girado convergen en
+una única historia, con una salvedad de última hora (punto 12). (1) A través de dos
+campañas de rasgos y tres barridos de familia de modelos (dos corpus), toda
+modalidad densa y toda familia densa de distancia/margen/red-densa pierde ante los
+one-hots de identidad categórica leídos por árboles de gradient boosting --- el
+latente song-AE diluye (Sección~\ref{sec:ae-blend}), el SVM de kernel es
+peor-que-la-media (Sección~\ref{sec:svm}), y sobre el nuevo corpus completo de 64-d
+las dos familias de árboles lideran mientras el pyramid-MLP denso es último
+(Sección~\ref{sec:bakeoff-p64}). (2) La elección de métrica es de peso sobre un
+objetivo binario: el MAE es degenerado (un predictor de tubo-$\epsilon$ de dos
+niveles publica un MAE engañosamente bajo siendo peor que la media), y un blend
+por-grilla-por-MAE incluso selecciona mal tal predictor; las métricas de
+clasificación honestas (AUC, log-loss, Brier) restauran una comparación justa
+(Sección~\ref{sec:auc}). (3) Las campañas entregaron dos bandas de ruido medidas ---
+$2\sigma=0.0086$ MAE y $2\sigma=0.0126$ AUC --- y el primer campeón de rotación
+registrado y promovible del proyecto, \texttt{xgboost-classifier-rotation} con AUC
+0.7429 sobre DS-META, más una definición xgboost guardada del nuevo corpus con AUC
+0.7204. (4) La red neuronal densa se diagnosticó por completo
+(Sección~\ref{sec:anns}): un barrido de arquitectura refutó la hipótesis de
+presupuesto (cada geometría se auto-detiene en 73--100 iteraciones y la red
+convergida reproduce el AUC sub-entrenado hasta todos los dígitos), así que la
+restricción vinculante es la \emph{representación} de one-hots crudos, no la
+optimización --- y el log-loss peor-que-el-azar de la red junto a un AUC genuino la
+marca como confiadamente mal calibrada, no meramente débil. (5) Ese diagnóstico se
+probó luego directamente: el \texttt{burn-deep-classifier} en Rust/\texttt{burn},
+que alimenta los one-hots de identidad en \emph{crudo}, reparó la calibración por
+completo (log-loss $2.0\to\sim 0.62$, al régimen de los árboles) y elevó el AUC
+$\sim$2 bandas a \num{0.7038} (Sección~\ref{sec:anns-burn}) --- confirmando que la
+patología fue un artefacto de representación, no una propiedad intrínseca de las
+redes. Pero la brecha con los árboles solo se \emph{estrechó} (de $\sim$3.3 bandas a
+$\sim$1), no se cerró: la red aún queda bajo \texttt{catboost} y \texttt{xgboost},
+el \texttt{mlp} plano superó tanto a las topologías de embedding como wide-deep (los
+embeddings de entidad están famélicos a la baja cardinalidad de identidad del
+corpus), y nada superó la barra de guardado $\sim$0.71. (6) Esa palanca vigente se
+accionó luego. Una re-ejecución pareada sobre una matriz \emph{high-vocab} ---
+idéntica al dataset 60/40 pero con el tope de artista elevado $60\to300$ y género
+$40\to120$ --- \emph{volteó} el ranking de topología (Sección~\ref{sec:anns-highvocab}):
+\texttt{embeddings}, famélica y última sobre la matriz 60/40, ahora \emph{supera} a
+\texttt{mlp} (un vuelco de $+0.0130$ que revierte el resultado previo y confirma la
+hipótesis de inanición direccionalmente), y la red guardada alcanza el nivel de los
+árboles dentro del dataset con AUC \num{0.7192} (dentro de $\sim$1 banda de
+\texttt{catboost}) --- la primera ANN en superar la barra de guardado de rotación,
+guardada como \texttt{burn-deep-embeddings-highvocab}. El hallazgo convergente aún
+se mantiene arriba (\texttt{xgboost} lidera toda matriz, y mayor resolución eleva a
+\emph{toda} familia, no solo al embedding), pero el hilo de trampas-ANN queda ahora
+cerrado: una red consciente de la representación que consume one-hots crudos está
+calibrada en el régimen de los árboles, y dada suficiente resolución de identidad su
+topología de embedding alcanza el nivel de los árboles --- la resolución de
+identidad era la palanca todo el tiempo.
+(7) Una sonda final probó luego el inverso de la palanca --- si una representación
+aprendida \emph{derivada del} árbol, en vez de alimentada junto a él, podía superar
+al árbol puro --- y la refutó: el truco de Facebook GBDT$\to$LR generalizado a
+GBDT$\to$MLP, con una cabeza fresca entrenada sobre los índices de hoja one-hot del
+campeón congelado, tope \num{1.8}--\num{2.4} bandas bajo el campeón xgboost puro
+(mejor AUC de cabeza \num{0.6978}) y está mal calibrada en cada cabeza, porque los
+one-hots de hoja son una vista estrictamente más lossy de un árbol cuyo scoring
+aditivo de valores de hoja ya pondera las hojas óptimamente
+(Sección~\ref{sec:leaf-head}). La cabeza densa ni siquiera puede recuperar el árbol
+que generó sus rasgos --- la séptima confirmación convergente de que la resolución
+de identidad, no nuevas cabezas o representaciones apiladas sobre los árboles, es la
+palanca durable.
+(8) Finalmente, la palanca de resolución de identidad vigente se mapeó hasta su
+borde: un barrido de tope de vocabulario sobre el GBDT puro --- config campeona
+congelada, solo \texttt{vocab\_top\_n} movido --- muestra que la palanca está
+\emph{en gran medida agotada} (Sección~\ref{sec:vocab-cap}). El primer salto de
+cardinalidad ($60/40\to300/120$) lleva la ganancia; pasado 300/120 cada paso es
+sub-banda, la curva se estanca dentro del sobre de ruido, xgboost alcanza solo
+\num{0.7349} en 1000/300 ($+0.005$, $\sim$0.4 banda sobre el ancla, así que ningún
+save disparó), y \texttt{catboost} lo sigue --- dos familias de árboles coincidiendo
+en que las columnas marginales de alta cardinalidad llevan poca señal independiente.
+No saturada y no revertida, pero disminuyendo: la altura cruda del tope ya no es la
+palanca durable, y el trabajo futuro de identidad debería apuntar a la
+\emph{calidad} de resolución (interacciones de seguidores/popularidad, jerarquía de
+género) en vez de topes más grandes --- con el punto de vocabulario completo (6633
+cols) aún no medido contra un techo de memoria del host.
+
+(9) Una décima campaña caracterizó una \emph{segunda} red consciente de la
+representación y alcanzó el mismo techo: el \texttt{burn-ae-classifier} de dos fases,
+que pre-entrena un autoencoder sobre el vector de rasgos ensamblado y trasplanta el
+encoder a un clasificador, es plano a través de 13 configs de capacidad/cabeza (una
+franja de \num{0.0054} de ancho dentro de la banda), empata con el \texttt{mlp}
+\texttt{burn-deep} plano, y se mantiene $\sim$1.8 bandas bajo el campeón de árboles;
+congelar el encoder pre-entrenado por MSE bajo una cabeza profunda es un modo de
+colapso documentado (Sección~\ref{sec:anns-ae}). El latente de reconstrucción no
+supervisado es agnóstico a la tarea --- una tercera confirmación de que una
+representación aprendida aguas abajo de los one-hots de identidad no compra poder de
+ranking que los árboles no tengan.
+(10) Dos campañas de interpretabilidad abrieron las redes con un autoencoder disperso
+por modelo (Secciones~\ref{sec:anns-sae}, \ref{sec:anns-capacity}): con AUC igual,
+una pirámide que se estrecha \emph{consolida} sus conceptos interpretables en un
+cuello de botella comprimido mientras una red uniforme mantiene un conjunto más
+amplio, y en vocabulario alto un par embeddings/mlp empatado en AUC captura la
+\emph{misma} señal decodable $\sim$0.14 con distinta asignación de conceptos ---
+``misma señal, distinta disposición'', invisible a la tabla.
+(11) Un barrido de capacidad sobre la matriz high-vocab confirmó que la red densa
+está en su techo allí: ni ensanchar ni profundizar supera al control $[128,64]$ por
+una banda, una tercera capa de embedding \emph{perjudica} ($-\num{0.0152}$, dilución
+no inanición), y el mejor \texttt{mlp} empata con el mejor \texttt{embeddings} --- la
+capacidad, no el mecanismo de embeddings, fue la palanca, y está agotada
+(Sección~\ref{sec:anns-capacity}).
+(12) Finalmente, se planteó la pregunta honesta hacia adelante --- y reencuadra toda
+la tabla. Una partición cronológica de primera clase (entrenar-antes /
+probar-después) baja el campeón de AUC \num{0.735} a \num{0.619}, un colapso de
+$\sim$0.11 que es \emph{universal} a través de xgboost, catboost y logistic y es
+no-estacionariedad de gusto genuina, no censura-a-la-derecha; una lectura
+walk-forward aterriza en \num{0.59}--\num{0.67} cada año, nunca cerca de la línea
+base aleatoria (Sección~\ref{sec:drift}). Todo AUC registrado es por tanto una cota
+superior del ranking de misma era; la habilidad real hacia adelante de ``¿reproduciré
+una canción que descubra a continuación?'' es $\sim$0.62--0.63. El mecanismo es la
+rotación de identidad --- artistas futuros no vistos caen en \texttt{\_\_other\_\_} y
+el modelo debe recaer en el piso intrínseco más débil $\sim$0.60 --- que es
+precisamente por qué topes de vocabulario más altos y redes más grandes, ambas
+palancas de memorización de misma era, no transfieren hacia adelante. Esto no
+revierte ningún número de partición aleatoria; clarifica qué miden y hace de la señal
+intrínseca generalizable más rica la única palanca restante para el rendimiento hacia
+adelante.
+
+(13) Una línea de trabajo paralela --- recomendación de \emph{pista siguiente}
+(next-track), cuya tarea y métricas no tienen relación con las tablas de rotación de
+arriba (Secciones~\ref{sec:nexttrack}--\ref{sec:nexttrack-phase2}) --- se consolidó a
+través de siete campañas. Una GRU de sesión por sí sola solo \emph{empata} con la
+barra de co-escucha de Markov de primer orden y pierde en MRR, y ni el ajuste de
+pérdida ni ninguna topología (profundidad/anchura/residual/dirección) la supera.
+Pero un z-blend R+M de \emph{fusión de rankings} (GRU $\times$ Markov) supera la
+barra de forma decisiva ($+61\%$ de R@10, confirmado con 3 semillas) porque las dos
+ramas ordenan pistas correctas \emph{distintas}; un stacker XGB aprendido rinde por
+debajo del z-blend fijo, y añadir ramas neuronales redundantes no ayuda --- la
+victoria es diversidad de señal, no número de modelos. La única señal nueva
+genuinamente aditiva es el \emph{contenido}: un barrido de representación de ítems
+halló que la \emph{dimensión} latente (no el compresor) es la palanca y hace pico en
+PCA-192, y sobre ese espacio rico un z-blend R+M+C de tres ramas es la fila «mejor
+registrada» actual con R@10 \num{0.1859}, MRR \num{0.1025} ($\Delta$ pareado sobre el
+campeón previo $+\num{0.0133}$, IC$>$0). Dos salvedades acotan la coronación: la
+confirmación por reproducción tuvo dispersión cero porque \texttt{seq-nexttrack} es
+determinista en esta CPU (así que verificó determinismo, no robustez a la semilla), y
+el límite inferior del paired-$\Delta$ supera cero por solo $+\num{0.0007}$ en una
+única partición. Todo predictor de ranking de pista siguiente es solo de
+entrenamiento y fuera del servidor, así que la coronación es una fila «mejor
+registrada», no un modelo promovido, y el campeón previo R+M sobre AE-64 sigue siendo
+el ancla de productización.
+
+\section{Informes fuente}
+Esta síntesis consolida veinte informes de campaña de \texttt{experiments/}:
+\begin{itemize}
+  \item \texttt{2026-06-09-ae-xgboost-blend.md} --- blend de latente-autoencoder +
+    XGBoost sobre rotación (Sección~\ref{sec:ae-blend}).
+  \item \texttt{2026-06-09-svm-kernel-rotation.md} --- barrido de SVM de kernel y
+    blend condicional; primera banda de ruido de MAE medida (Sección~\ref{sec:svm}).
+  \item \texttt{2026-06-09-rotation-classification.md} --- bake-off de AUC, primera
+    banda de ruido de AUC medida, primer campeón de rotación registrado
+    (Sección~\ref{sec:auc}).
+  \item \texttt{2026-06-12-classifier-bakeoff-p64.md} --- bake-off de cuatro
+    familias de clasificadores y barrido xgboost de depth/lr sobre el nuevo corpus
+    completo de 64-d (Secciones~\ref{sec:bakeoff-p64} y~\ref{sec:anns}).
+  \item \texttt{2026-06-12-pyramid-mlp-arch-scan.md} --- barrido de arquitectura de
+    seis geometrías del pyramid-MLP, refutando la hipótesis de presupuesto
+    (Secciones~\ref{sec:mlp-scan} y~\ref{sec:anns}).
+  \item \texttt{2026-06-12-burn-deep-topology.md} --- el bake-off de topología del
+    \texttt{burn-deep-classifier} en Rust/\texttt{burn}; resuelve la cuestión de la
+    red consciente de la representación, arreglando la calibración pero no la brecha
+    de AUC (Sección~\ref{sec:anns-burn}).
+  \item \texttt{2026-06-12-high-vocab-topology.md} --- la re-ejecución pareada de
+    topología sobre una matriz de mayor cardinalidad de identidad; voltea
+    \texttt{embeddings}$>$\texttt{mlp} y eleva la red guardada al nivel de los
+    árboles dentro del dataset, la primera ANN en superar la barra de guardado de
+    rotación (Sección~\ref{sec:anns-highvocab}).
+  \item \texttt{2026-06-15-gbdt-leaf-head-ceiling-probe.md} --- el truco de Facebook
+    GBDT$\to$LR generalizado a GBDT$\to$MLP; cada cabeza de embedding de hojas tope
+    bajo el campeón xgboost puro con calibración rota, la séptima refutación
+    convergente (Sección~\ref{sec:leaf-head}).
+  \item \texttt{2026-06-15-vocab-cap-scan-gbdt.md} --- el barrido de tope de
+    vocabulario de resolución de identidad sobre el GBDT puro; mapea la curva
+    tope$\to$AUC y halla la palanca en gran medida agotada pasado 300/120 (ganancias
+    sub-banda, ningún save disparó), con el punto de todo-vocabulario no medido en el
+    techo de memoria del host (Sección~\ref{sec:vocab-cap}).
+  \item \texttt{2026-06-15-burn-ae-classifier-capacity-scan.md} --- primera
+    caracterización del \texttt{burn-ae-classifier} de dos fases; 13 configs en una
+    franja sub-banda, empata con el \texttt{mlp} \texttt{burn-deep} plano, y un modo
+    de colapso de cabeza-profunda-congelada (Sección~\ref{sec:anns-ae}).
+  \item \texttt{2026-07-12-pyramid-vs-rect-sae.md} --- lectura de representación por
+    SAE por modelo; con AUC igual la pirámide consolida conceptos en su cuello de
+    botella mientras la red uniforme mantiene un conjunto más amplio
+    (Sección~\ref{sec:anns-sae}).
+  \item \texttt{2026-07-12-high-vocab-capacity-scan.md} --- el barrido de capacidad
+    del \texttt{burn-deep-classifier} sobre la matriz high-vocab (TECHO) más una
+    lectura de asignación por SAE cross-familia (Sección~\ref{sec:anns-capacity}).
+  \item \texttt{2026-07-12-taste-drift-temporal-split.md} --- la partición
+    cronológica frente a aleatoria; una caída universal de $\sim$0.11 de AUC que
+    reencuadra la tabla como una cota superior del ranking de misma era
+    (Sección~\ref{sec:drift}).
+  \item \texttt{2026-07-15-nexttrack-compression-representation-bakeoff.md} --- la
+    primera campaña de recomendación de \emph{pista siguiente} incorporada: un
+    bake-off de compresión de la representación de ítems (PCA frente a autoencoder
+    $\times$ dimensión latente 32/64/128) bajo un readout GRU congelado. PCA-128 es
+    el ganador GRU-individual (paired-$\Delta$ $+0.0189$, IC$>$0) pero la victoria no
+    se traslada al blend R+M, así que nada se promovió
+    (Sección~\ref{sec:nexttrack-compression}).
+  \item \texttt{2026-07-13-nexttrack-sequence-sweep.md} --- la campaña fundacional de
+    pista siguiente: un barrido de secuencias GRU/LSTM contra la barra de Markov de
+    primer orden; la mejor GRU-infonce empata en R@10 pero pierde en MRR
+    (Sección~\ref{sec:nexttrack-sweep}).
+  \item \texttt{2026-07-13-nexttrack-topology-scan.md} --- barrido de topología
+    profundidad / anchura / residual / bidireccional; la arquitectura es una palanca
+    agotada, todas las ramas quedan bajo la barra de Markov
+    (Sección~\ref{sec:nexttrack-topology}).
+  \item \texttt{2026-07-14-nexttrack-blend-and-ensemble.md} --- el z-blend R+M
+    GRU$\times$Markov supera la barra en $+61\%$ de R@10 (el primer campeón de pista
+    siguiente); ningún ensamble más rico lo mejora y el stacker XGB aprendido rinde
+    por debajo (Sección~\ref{sec:nexttrack-blend}).
+  \item \texttt{2026-07-14-nexttrack-graded-relevance-and-new-legs.md} --- métricas
+    de relevancia graduada de primera clase (artist@k / genre@k / artist\_mrr) y
+    nuevos aprendices base leak-free; content-kNN es la única señal aditiva,
+    empatando al campeón sobre AE-64 (Sección~\ref{sec:nexttrack-graded}).
+  \item \texttt{2026-07-15b-nexttrack-compression-dim-extension.md} --- el barrido de
+    dimensión PCA/AE extendido a 192/256; la curva hace pico en PCA-192 y se
+    revierte, así que PCA-128 se mantiene como la base de la Fase 2
+    (Sección~\ref{sec:nexttrack-dim}).
+  \item \texttt{2026-07-15c-nexttrack-phase2-model-sweep.md} --- el barrido de
+    familia de modelos sobre los espacios PCA ricos; el z-blend fijo supera al
+    stacker aprendido, LSTM es el mejor modelo individual, y R+M+C sobre PCA-192 se
+    corona como la nueva fila «mejor registrada» (Sección~\ref{sec:nexttrack-modelsweep}).
+\end{itemize}
+
+\end{document}

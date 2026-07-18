@@ -796,6 +796,170 @@ def fig_taste_drift():
     save(fig, "taste_drift.pdf")
 
 
+
+# Fig 17: the next-track item-representation compression bake-off — Recall@10
+# vs latent dim for PCA and the AE, each read by the SAME frozen GRU
+# (gru-infonce-h256). Latent DIM, not the compressor, is the lever: both series
+# climb steeply 32->64; PCA keeps climbing to 128 and OVERTAKES the AE, while
+# the AE plateaus (128 dips below its own 64). At dim 32 the AE edges PCA — a
+# low-capacity crossover that reverses once dim is generous, refuting the "AE
+# preserves acoustic blocks" hypothesis. The AE-64 control (the champion's
+# space) and the PCA-128 winner are marked; error bars are the bootstrap 95% CI
+# over the 1431 test sessions.
+# (2026-07-15-nexttrack-compression-representation-bakeoff.md, Results.)
+def fig_nexttrack_compression():
+    dims = [32, 64, 128]
+    pca = [0.0412, 0.1041, 0.1146]
+    pca_lo = [0.0314, 0.0881, 0.0985]
+    pca_hi = [0.0517, 0.1209, 0.1321]
+    ae = [0.0545, 0.0957, 0.0929]
+    ae_lo = [0.0426, 0.0811, 0.0783]
+    ae_hi = [0.0664, 0.1111, 0.1076]
+    AE_COLOR = "#4b5563"  # dark gray, distinct from PCA's accent blue
+
+    def yerr(v, lo, hi):
+        return [[a - b for a, b in zip(v, lo)], [b - a for a, b in zip(v, hi)]]
+
+    fig, ax = plt.subplots(figsize=(6.2, 3.7))
+    ax.errorbar(dims, pca, yerr=yerr(pca, pca_lo, pca_hi), fmt="o-", color=ACCENT,
+                lw=1.9, capsize=3, label="PCA (linear)")
+    ax.errorbar(dims, ae, yerr=yerr(ae, ae_lo, ae_hi), fmt="s--", color=AE_COLOR,
+                lw=1.6, capsize=3, label="AE (nonlinear)")
+
+    # the AE-64 control: the champion's item space, one arbitrary prior choice
+    ax.scatter([64], [0.0957], s=150, facecolors="none", edgecolors=BAD,
+               linewidths=1.8, zorder=6)
+    ax.annotate("AE-64 control\n(champion's space)", xy=(64, 0.0957),
+                xytext=(64, 0.055), ha="center", fontsize=6.8, color=BAD,
+                arrowprops=dict(arrowstyle="->", color=BAD, lw=0.8))
+    # the PCA-128 winner
+    ax.scatter([128], [0.1146], marker="*", s=180, color=GOOD, zorder=7)
+    ax.annotate("PCA-128 winner\n(paired-$\\Delta$ +0.0189, CI$>$0)", xy=(128, 0.1146),
+                xytext=(96, 0.128), ha="center", fontsize=6.8, color=GOOD,
+                arrowprops=dict(arrowstyle="->", color=GOOD, lw=0.8))
+    # the low-dim crossover: AE edges PCA at 32
+    ax.annotate("at dim 32 the AE\nedges PCA (crossover)", xy=(32, 0.0480),
+                xytext=(38, 0.088), ha="left", fontsize=6.5, color=MUTED,
+                arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.8))
+
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(dims)
+    ax.set_xticklabels([str(d) for d in dims])
+    ax.set_xlim(28, 150)
+    ax.set_ylim(0.02, 0.145)
+    ax.set_xlabel("item-latent dimension")
+    ax.set_ylabel("Recall@10 (next-distinct, frozen GRU)")
+    ax.yaxis.set_major_formatter(afmt)
+    ax.set_title("Latent dimension, not the compressor, is the lever:\nPCA overtakes the AE once dim is generous")
+    ax.legend(loc="lower right", fontsize=7.5)
+    save(fig, "nexttrack_compression.pdf")
+
+# Fig 18: the next-track compression DIM curve, extended to PCA-192/256 and
+# AE-192. The bake-off (Fig 17) stopped at 128 with PCA still climbing; the
+# dim-extension leg locates the ceiling: PCA PEAKS at ~192 (R@10 0.123) and
+# TURNS OVER by 256 (0.117), while the AE plateaus flat at ~0.09-0.10 from dim
+# 64 upward. The PCA>=AE gap is widest at 192 (0.123 vs 0.098). PCA-192 is the
+# point-optimum but its paired-Delta vs PCA-128 grazes 0, so PCA-128 stays the
+# Phase-2 base. Error bars are bootstrap 95% CIs over the 1431 test sessions.
+# (2026-07-15b-nexttrack-compression-dim-extension.md, Findings 1-2.)
+def fig_nexttrack_dim_curve():
+    pca_d = [32, 64, 128, 192, 256]
+    pca = [0.0412, 0.1041, 0.1146, 0.1230, 0.1167]
+    pca_lo = [0.0314, 0.0881, 0.0985, 0.1069, 0.1006]
+    pca_hi = [0.0517, 0.1209, 0.1321, 0.1405, 0.1335]
+    ae_d = [32, 64, 128, 192]
+    ae = [0.0545, 0.0957, 0.0929, 0.0978]
+    ae_lo = [0.0426, 0.0811, 0.0783, 0.0825]
+    ae_hi = [0.0664, 0.1111, 0.1076, 0.1132]
+    AE_COLOR = "#4b5563"  # dark gray, distinct from PCA's accent blue
+
+    def yerr(v, lo, hi):
+        return [[a - b for a, b in zip(v, lo)], [b - a for a, b in zip(v, hi)]]
+
+    fig, ax = plt.subplots(figsize=(6.4, 3.8))
+    ax.errorbar(pca_d, pca, yerr=yerr(pca, pca_lo, pca_hi), fmt="o-", color=ACCENT,
+                lw=1.9, capsize=3, label="PCA (linear)")
+    ax.errorbar(ae_d, ae, yerr=yerr(ae, ae_lo, ae_hi), fmt="s--", color=AE_COLOR,
+                lw=1.6, capsize=3, label="AE (nonlinear)")
+
+    # the PCA peak at 192
+    ax.scatter([192], [0.1230], marker="*", s=200, color=GOOD, zorder=7)
+    ax.annotate("PCA-192 peak\n(point-optimum; $\\Delta$-CI grazes 0)",
+                xy=(192, 0.1230), xytext=(150, 0.137), ha="center", fontsize=6.8,
+                color=GOOD, arrowprops=dict(arrowstyle="->", color=GOOD, lw=0.8))
+    # the turnover at 256
+    ax.annotate("turns over\nby 256", xy=(256, 0.1167), xytext=(256, 0.083),
+                ha="center", fontsize=6.8, color=BAD,
+                arrowprops=dict(arrowstyle="->", color=BAD, lw=0.8))
+    # PCA-128 base
+    ax.annotate("PCA-128\n(Phase-2 base)", xy=(128, 0.1146), xytext=(96, 0.128),
+                ha="center", fontsize=6.5, color=ACCENT,
+                arrowprops=dict(arrowstyle="->", color=ACCENT, lw=0.8))
+    # AE-64 control
+    ax.scatter([64], [0.0957], s=140, facecolors="none", edgecolors="#4b5563",
+               linewidths=1.6, zorder=6)
+    ax.annotate("AE-64 control", xy=(64, 0.0957), xytext=(64, 0.066),
+                ha="center", fontsize=6.5, color=AE_COLOR,
+                arrowprops=dict(arrowstyle="->", color=AE_COLOR, lw=0.8))
+
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(pca_d)
+    ax.set_xticklabels([str(d) for d in pca_d])
+    ax.set_xlim(28, 300)
+    ax.set_ylim(0.02, 0.15)
+    ax.set_xlabel("item-latent dimension")
+    ax.set_ylabel("Recall@10 (next-distinct, frozen GRU)")
+    ax.yaxis.set_major_formatter(afmt)
+    ax.set_title("The dim ceiling is found: PCA peaks at ~192, then turns over;\nthe AE plateaus and never catches it")
+    ax.legend(loc="lower right", fontsize=7.5)
+    save(fig, "nexttrack_dim_curve.pdf")
+
+
+# Fig 19: the Phase-2 model-family sweep on the rich PCA spaces. The FIXED
+# z-blend is the combiner of record: R+M+C on PCA-192 is the new champion ROW
+# (R@10 0.1859), the content leg is genuinely additive on the rich space, and
+# the LEARNED XGB stacker badly UNDERPERFORMS the z-blend (0.08-0.09), losing
+# even to its own single GRU base leg. LSTM edges GRU as the best single model.
+# The first-order Markov bar (0.107) is drawn as the incumbent reference.
+# (2026-07-15c-nexttrack-phase2-model-sweep.md, full sweep.)
+def fig_nexttrack_phase2_families():
+    labels = [
+        "R+M+C z-blend, PCA-192\n(NEW CHAMPION ROW)",
+        "R+M+C z-blend, PCA-128",
+        "R+M z-blend, AE-64\n(prior champion)",
+        "R+M z-blend, PCA-192",
+        "LSTM single, PCA-128\n(best single)",
+        "GRU single, PCA-192",
+        "GRU single, PCA-128",
+        "ANN pooled-MLP, PCA-128",
+        "XGB stacker M+G, PCA-128",
+        "XGB stacker M+G+A, PCA-192",
+    ]
+    r10 = [0.1859, 0.1824, 0.1726, 0.1712, 0.1272, 0.1230, 0.1146, 0.0901, 0.0867, 0.0853]
+    # green = fixed-blend champions; accent = other fixed blends; muted = single
+    # models; red = the learned XGB stacker (the underperformer).
+    colors = [GOOD, GOOD, ACCENT, ACCENT, MUTED, MUTED, MUTED, MUTED, BAD, BAD]
+    markov = 0.107
+
+    fig, ax = plt.subplots(figsize=(6.6, 4.2))
+    y = np.arange(len(labels))[::-1]
+    ax.barh(y, r10, color=colors)
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels, fontsize=7.2)
+    ax.set_xlabel("Recall@10 (next-distinct)")
+    ax.set_xlim(0.0, 0.215)
+    ax.xaxis.set_major_formatter(afmt)
+    # the first-order Markov bar (app incumbent)
+    ax.axvline(markov, color="black", ls="--", lw=1.1, label="first-order Markov bar (0.107)")
+    # the champion line
+    ax.axvline(0.1859, color=GOOD, ls=":", lw=1.2, label="champion row (0.186)")
+    for yi, v in zip(y, r10):
+        ax.text(v + 0.002, yi, f"{v:.3f}", va="center", fontsize=7)
+    ax.set_title("Phase 2: the fixed z-blend is the combiner; the learned XGB\nstacker underperforms even its own GRU base leg")
+    ax.legend(loc="lower right", fontsize=7.2)
+    save(fig, "nexttrack_phase2_families.pdf")
+
+
 if __name__ == "__main__":
     fig_ae_latent_knn()
     fig_svm_mae_vs_r2()
@@ -813,3 +977,6 @@ if __name__ == "__main__":
     fig_sae_pyramid_rect()
     fig_highvocab_capacity()
     fig_taste_drift()
+    fig_nexttrack_compression()
+    fig_nexttrack_dim_curve()
+    fig_nexttrack_phase2_families()

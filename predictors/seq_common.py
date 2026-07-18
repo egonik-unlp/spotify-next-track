@@ -147,6 +147,31 @@ def rank_metrics(ranks: list[int | None], k: int = 10) -> dict:
     }
 
 
+def _relevance_ids(art: SeqArtifact, field: str) -> np.ndarray:
+    """Map each item index → an integer class id for a graded-relevance field
+    (e.g. "artist" or "genre"), reading the label off `art.items` (which is the
+    dataset's items.json verbatim). Missing / unknown labels get a unique
+    negative id so they never spuriously match another item's label.
+
+    Returns an int64 array of length n_items (item index → label id)."""
+    n_items = art.n_items
+    ids = np.full(n_items, -1, dtype=np.int64)
+    vocab: dict[str, int] = {}
+    for key, meta in art.items.items():
+        i = int(key)
+        if not (0 <= i < n_items):
+            continue
+        val = meta.get(field)
+        if val is None:
+            continue
+        cid = vocab.get(val)
+        if cid is None:
+            cid = len(vocab)
+            vocab[val] = cid
+        ids[i] = cid
+    return ids
+
+
 def eval_from_scores(
     art: SeqArtifact,
     score_fn,
@@ -164,10 +189,29 @@ def eval_from_scores(
       * rank = 1-based position of truth in the descending score order
         (None if truth was excluded because it also appears in the prefix).
 
+    In addition to the EXACT next-track metrics (recall_at_k / mrr / hit_rate
+    on the item id), it also computes GRADED-RELEVANCE metrics that credit
+    landing the right band/vibe even when the exact track is wrong:
+      * artist_recall_at_k = fraction of test sessions where SOME top-k
+        candidate shares the truth's artist,
+      * genre_recall_at_k  = likewise on genre,
+      * artist_mrr = mean reciprocal rank of the FIRST same-artist candidate
+        over the full descending ranking.
+    The relevance fields are hardcoded to "artist"/"genre" (the item metadata
+    keys in items.json); domain.toml documents them under
+    [sequence].relevance_fields — this module reads the artifact only, not the
+    domain config, so the two must stay in sync.
+
     Returns (metrics, predictions) where predictions matches the lensing
     predictions.json shape."""
     n_items = art.n_items
+    artist_ids = _relevance_ids(art, "artist")
+    genre_ids = _relevance_ids(art, "genre")
+
     ranks: list[int | None] = []
+    artist_hits: list[float] = []
+    genre_hits: list[float] = []
+    artist_rrs: list[float] = []
     predictions: list[dict] = []
 
     for s in art.test_sessions:
@@ -197,6 +241,26 @@ def eval_from_scores(
             rank = int(np.where(order == truth)[0][0]) + 1
         ranks.append(rank)
 
+        # ---- graded relevance over the SAME ranking (top-k / full order) ----
+        topk_idx = order[:k]
+        a_true = int(artist_ids[truth])
+        g_true = int(genre_ids[truth])
+        artist_hits.append(
+            1.0 if a_true >= 0 and bool((artist_ids[topk_idx] == a_true).any())
+            else 0.0)
+        genre_hits.append(
+            1.0 if g_true >= 0 and bool((genre_ids[topk_idx] == g_true).any())
+            else 0.0)
+        if a_true >= 0:
+            same_artist = artist_ids[order] == a_true  # descending order
+            if same_artist.any():
+                first = int(np.argmax(same_artist))    # first True position
+                artist_rrs.append(1.0 / (first + 1))
+            else:
+                artist_rrs.append(0.0)
+        else:
+            artist_rrs.append(0.0)
+
         predictions.append({
             "row_id": s,                       # session index (u64)
             "actual": float(truth),            # true item index (f64)
@@ -204,7 +268,12 @@ def eval_from_scores(
             "top_k_ids": [int(i) for i in top_k],  # top-10 item indices (u64)
         })
 
-    return rank_metrics(ranks, k=k), predictions
+    metrics = rank_metrics(ranks, k=k)
+    n = len(ranks)
+    metrics["artist_recall_at_k"] = (sum(artist_hits) / n) if n else 0.0
+    metrics["genre_recall_at_k"] = (sum(genre_hits) / n) if n else 0.0
+    metrics["artist_mrr"] = (sum(artist_rrs) / n) if n else 0.0
+    return metrics, predictions
 
 
 def write_outputs(run_dir: Path, metrics: dict, predictions: list[dict]) -> None:

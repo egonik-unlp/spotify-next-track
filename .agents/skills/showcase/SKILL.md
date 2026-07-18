@@ -1,6 +1,6 @@
 ---
 name: showcase
-description: Publish a promoted taste fit-prediction model as a small, standalone, Cloudflare-Worker-compatible demo site — a showcase. This skill helps the implementer decide how to tell a compelling story with the model and data (which model, what framing, which example items, live-input vs. curated gallery, the look), assembles a showcase brief, and spawns the showcase-builder agent to do all the plumbing (ONNX export, featurizer wiring, embeddings, Worker scaffold, build, smoke test, deploy steps). Use when the user wants to demo, showcase, publish, or build a standalone/landing/marketing site or Worker for a model, "put a model on a site", or make an interactive prediction demo.
+description: Publish a promoted next track-prediction model as a small, standalone, Cloudflare-Worker-compatible demo site — a showcase. This skill helps the implementer decide how to tell a compelling story with the model and data (which model, what framing, which example items, live-input vs. curated gallery, the look), assembles a showcase brief, and spawns the showcase-builder agent to do all the plumbing (ONNX export, featurizer wiring, embeddings, Worker scaffold, build, smoke test, deploy steps). Use when the user wants to demo, showcase, publish, or build a standalone/landing/marketing site or Worker for a model, "put a model on a site", or make an interactive prediction demo.
 user-invocable: true
 argument-hint: "[model-name] [extra framing instructions]"
 allowed-tools:
@@ -26,12 +26,12 @@ must be running, default `http://localhost:8096`):
 
 ```sh
 curl -s localhost:8096/api/health
-curl -s localhost:8096/api/best-models   # the server's top-12 by AUC
+curl -s localhost:8096/api/best-models   # the server's top-12 by recall@10
 curl -s localhost:8096/api/models        # all promoted models
 ```
 
 The strongest demo is usually a **best-models** member (it leads on
-AUC; see `experiments/PROJECT-FACTS.md` for the champion and its error band).
+recall@10; see `experiments/PROJECT-FACTS.md` for the champion and its error band).
 Note: not every family is ONNX-exportable — svm-moe, svm-quantile-moe and the
 flux-* families can't be shipped standalone yet; the agent will reject them, so
 steer toward an exportable one (nets, xgboost, lightgbm, random-forest, ridge,
@@ -50,7 +50,7 @@ sensible defaults rather than interrogating:
     instantly, and can show **predicted vs. actual** on the model's test split
     (the most honest, persuasive framing). Best for a public/marketing demo.
   - **live** — visitors type their own track text and get a
-    taste fit prediction, embedded on the fly via OpenAI. More interactive,
+    next track prediction, embedded on the fly via OpenAI. More interactive,
     but the Worker needs an `OPENAI_API_KEY` secret and every visit costs an
     embedding call. Best for an internal or gated demo.
 - **The framing** — title, the one-sentence narrative, and what comparison
@@ -59,7 +59,7 @@ sensible defaults rather than interrogating:
   author — pull it out of them ("what's the one thing a visitor should walk away
   understanding?").
 - **Examples** (curated) — how many and which (default: 5–6 honest test-split
-  items spanning the taste fit range). The user can name specific
+  items spanning the next track range). The user can name specific
   tracks or a segment.
 - **Inference site** — `browser` (fully static, model runs in the visitor's
   tab) or `worker` (runs in the Worker, model bytes stay server-side, clean
@@ -85,7 +85,7 @@ verbatim in the prompt:
 > - inference site: browser | worker
 > - examples: <count + any selection>  *(curated)*
 > - framing: <title> — <one-sentence narrative> — show <comparison>
-> - app name: `<kebab>` (default `spotify-predict-engagement-demo`)
+> - app name: `<kebab>` (default `spotify-next-track-demo`)
 > - host: Cloudflare
 > - look: default | will polish with /impeccable afterward
 

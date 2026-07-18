@@ -47,8 +47,8 @@ mark_seed = "spotify-engagement"
 mark_hue_shift = 265
 
 [corpus]
-# Instance-local Qdrant on 6335 (shared, read-only, with lensing-spotify).
-qdrant_url = "http://localhost:6335"
+# Instance-local Qdrant on 6337 (own container spotify-nexttrack-qdrant).
+qdrant_url = "http://localhost:6337"
 collection = "spotify_tracks"
 manual_collection = "manual-tracks"
 embedding_dim = 200
@@ -91,10 +91,16 @@ gap_minutes = 30
 skip_threshold_ms = 30000
 label = "last_item"
 latent_source = "spotify_tracks_song_ae"
+# Graded-relevance fields: the eval (predictors/seq_common.py) ALSO credits a
+# candidate that shares the truth's artist/genre even when the exact track is
+# wrong (artist@k / genre@k / artist_mrr). These are the items.json metadata
+# keys the eval reads; the module reads the artifact (not this config) so it
+# hardcodes "artist"/"genre" — this line documents that binding, keep in sync.
+relevance_fields = ["artist", "genre"]
 
 [metrics]
 primary = "recall@10"
-columns = ["recall@10", "mrr", "hit@10"]
+columns = ["recall@10", "artist@10", "genre@10", "mrr", "hit@10"]
 percent = []
 value_unit = "P(next-track hit)"
 best_models_size = 12

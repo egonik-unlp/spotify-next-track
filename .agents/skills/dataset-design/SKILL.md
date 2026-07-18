@@ -43,7 +43,7 @@ and the model-definitions experiment workflow.
 | `pca_dims` | 32 | PCA dims of the embedding block (1..=1536) |
 | `test_ratio` | 0.2 | test split fraction (0.05..=0.5) |
 | `seed` | 42 | split shuffle seed |
-| `log_target` | true | train on log1p(rotation) |
+| `log_target` | true | train on log1p(next_track) |
 | `fields` | `{}` | per-field enables, keyed by field or group name (below); when non-empty, authoritative |
 | `vocab_top_n` | `{}` | per-categorical vocabulary-size overrides (field name → top-N) |
 | `area_content_backfill` | false | backfill missing areas from "… m²" mentions in the document text |

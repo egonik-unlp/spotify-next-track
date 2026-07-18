@@ -33,7 +33,7 @@ done
 
 # ---- config (override via env) ------------------------------------------------
 OUT_DIR="${OUT_DIR:-$ROOT/instance-bundle}"
-QDRANT_URL="${QDRANT_URL:-http://localhost:6335}"
+QDRANT_URL="${QDRANT_URL:-http://localhost:6337}"
 # Corpus + manual-track collections, space-separated. Mirrors the pipeline's
 # AE chain: the base corpus (spotify_tracks) → content AE (spotify_tracks_content)
 # → Song-AE (spotify_tracks_song_ae, the canonical dataset source), plus the

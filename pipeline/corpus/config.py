@@ -122,7 +122,7 @@ W2V_PARAMS.update(
 )
 
 # Qdrant — env-overridable; defaults match the instance's shared corpus.
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6335")
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6337")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "spotify_tracks")
 UPSERT_BATCH_SIZE = 256
 

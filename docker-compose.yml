@@ -15,7 +15,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: spotify-engagement-postgres
+    container_name: spotify-nexttrack-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${LENSING_DB_USER:-pg}
@@ -23,8 +23,9 @@ services:
       POSTGRES_DB: ${LENSING_DB_NAME:-lensing}
     ports:
       # 5433/5434/5435 are taken by other lensing instances (incl. the sibling
-      # lensing-spotify on 5435); this instance uses 5436.
-      - "${LENSING_DB_PORT:-5436}:5432"
+      # lensing-spotify on 5435); 5436 is used by the sibling
+      # spotify-predict-engagement, so this instance uses 5437.
+      - "${LENSING_DB_PORT:-5437}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -35,13 +36,14 @@ services:
 
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: spotify-engagement-qdrant
+    container_name: spotify-nexttrack-qdrant
     restart: unless-stopped
     profiles: ["qdrant"]
     ports:
-      # 6333/6334 are taken by agent-realstate's Qdrant on this machine
-      - "6335:6333"
-      - "6336:6334"
+      # 6333/6334 are taken by agent-realstate's Qdrant; 6335/6336 by the
+      # sibling spotify-predict-engagement, so this instance uses 6337/6338.
+      - "6337:6333"
+      - "6338:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
 

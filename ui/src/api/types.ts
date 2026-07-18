@@ -42,6 +42,14 @@ export interface Metrics {
   hit_rate?: number
   /** ranking: normalized discounted cumulative gain, when reported. 0..1. */
   ndcg?: number
+  /** graded ranking: fraction of queries where some top-K candidate shares the
+   *  held-out item's artist (⊇ recall_at_k). 0..1, higher better. */
+  artist_recall_at_k?: number
+  /** graded ranking: same, on genre. 0..1, higher better. */
+  genre_recall_at_k?: number
+  /** graded ranking: mean reciprocal rank of the first same-artist candidate.
+   *  0..1, higher better. */
+  artist_mrr?: number
   n_test: number
 }
 

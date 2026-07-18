@@ -8,7 +8,7 @@ crates/lensing-server/src/pathfinder.rs).
 import os
 from pathlib import Path
 
-QDRANT_URL = os.environ.get("PATHFINDER_QDRANT_URL", "http://localhost:6335")
+QDRANT_URL = os.environ.get("PATHFINDER_QDRANT_URL", "http://localhost:6337")
 # Defaults for standalone runs; the lensing-server injects COLLECTION + API at
 # sidecar spawn (it does NOT inject MODEL, so this default must be a real model).
 QDRANT_COLLECTION = os.environ.get("PATHFINDER_COLLECTION", "spotify_tracks_song_ae")

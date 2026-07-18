@@ -21,7 +21,7 @@ runtime and (optionally) the reference featurizer `@lensing/inference`
 The point of the export is **uniformity**: an MLP, an XGBoost forest, a
 LightGBM, an SVR and a blend ensemble all produce the *same* bundle layout —
 only the bytes inside `model.onnx` differ — so one downstream consumer handles
-every taste fit-prediction model this repo trains.
+every next track-prediction model this repo trains.
 
 ## Ground rules
 

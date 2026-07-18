@@ -28,6 +28,9 @@ export type MetricKey =
   | 'mrr'
   | 'hit_rate'
   | 'ndcg'
+  | 'artist_recall_at_k'
+  | 'genre_recall_at_k'
+  | 'artist_mrr'
 
 /** Display name → Metrics key. Lowercased, with "R²" → "r2"
  *  (e.g. "AUC"→"auc", "logloss"→"logloss", "macro_f1"→"macro_f1"). Ranking
@@ -38,6 +41,10 @@ export function metricKey(displayName: string): MetricKey {
   if (/^recall(@\d+|@k)?$/.test(s)) return 'recall_at_k'
   if (/^hit(_rate|@\d+|@k)?$/.test(s)) return 'hit_rate'
   if (/^ndcg(@\d+|@k)?$/.test(s)) return 'ndcg'
+  // graded-relevance ranking columns (artist@10 / genre@10 / artist_mrr)
+  if (s === 'artist_mrr') return 'artist_mrr'
+  if (/^artist(_recall)?(@\d+|@k)?$/.test(s)) return 'artist_recall_at_k'
+  if (/^genre(_recall)?(@\d+|@k)?$/.test(s)) return 'genre_recall_at_k'
   if (s === 'mrr') return 'mrr'
   return s as MetricKey
 }
@@ -74,6 +81,9 @@ const RATIO: Record<string, true> = {
   mrr: true,
   hit_rate: true,
   ndcg: true,
+  artist_recall_at_k: true,
+  genre_recall_at_k: true,
+  artist_mrr: true,
 }
 
 /** A formatter for a metric, given its display name. Percent when the display

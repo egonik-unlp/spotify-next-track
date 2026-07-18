@@ -1,0 +1,736 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.6cm]{geometry}
+\usepackage[spanish]{babel}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{seqsplit}
+\graphicspath{{figures/}}
+\setlength{\emergencystretch}{3em}
+\newcommand{\runid}[1]{\texttt{\small\seqsplit{#1}}}
+\newcommand{\dsid}[1]{\texttt{\small #1}}
+\newcommand{\best}[1]{\textbf{#1}}
+
+\title{Recomendación de Pista Siguiente en Sesión: Síntesis de Experimentos}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Este documento es la síntesis viva de las campañas de recomendación de
+\emph{pista siguiente} (next-track); los informes markdown de
+\texttt{experiments/} (con \texttt{nexttrack} en el nombre) son el registro
+primario. La tarea es \emph{recuperación} (retrieval) del siguiente ítem: dada
+una \emph{sesión} de escucha (una secuencia ordenada de pistas), ordenar el
+catálogo y recuperar la siguiente pista distinta que el usuario reprodujo
+realmente, evaluada sobre una única partición cronológica sin fugas
+(leak-free) \emph{next-distinct} (\num{7154} sesiones / \num{19402} ítems;
+\num{5723} entrenamiento / \num{1431} prueba; tasa de ítems fríos (cold-item)
+\num{0.55}). La métrica principal es recall@10, reportada junto al rango
+recíproco medio (MRR) y los diagnósticos de relevancia graduada artist@10 /
+genre@10 / artist\_mrr. Se consolidan siete campañas. Una GRU de sesión por sí
+sola solo \emph{empata} con la barra de Markov de co-escucha de primer orden
+(R@10 \num{0.1069}) en recall@10 y pierde en MRR, y ni el ajuste de la función
+de pérdida ni ninguna topología de red (profundidad, anchura, residual,
+dirección) la superan. El avance es la \emph{fusión de rankings}: un z-blend
+R+M (GRU $\times$ Markov) supera la barra en $\sim$$+61\%$ de recall@10
+(\num{0.1726}, confirmado con 3 semillas), porque las dos ramas ordenan pistas
+correctas \emph{distintas}; un stacker XGB aprendido rinde por debajo del
+z-blend fijo y añadir ramas neuronales redundantes no ayuda. La única señal
+genuinamente aditiva es el \emph{contenido}: un barrido de representación de
+ítems halló que la \emph{dimensión} latente (no el compresor) es la palanca,
+con un pico en PCA-192, y sobre ese espacio rico un z-blend R+M+C de tres ramas
+(GRU $\times$ Markov $\times$ content-kNN) es la fila «mejor registrada» actual
+con recall@10 \num{0.1859}, MRR \num{0.1025} (paired $\Delta$ sobre el campeón
+previo $+\num{0.0133}$, IC por encima de cero). Dos salvedades acotan la
+coronación --- la confirmación por reproducción tuvo dispersión cero porque el
+entrenador es determinista (verificó determinismo, no robustez a la semilla), y
+el límite inferior del paired-$\Delta$ supera cero por solo $+\num{0.0007}$ en
+una única partición. Todos los predictores de ranking aquí son solo de
+entrenamiento y fuera del servidor, así que una victoria confirmada es una fila
+«mejor registrada», no un modelo promovido, y el campeón previo R+M sobre AE-64
+sigue siendo el ancla de productización.
+\end{abstract}
+
+\section{Introducción}
+\label{sec:intro}
+Este documento es la síntesis viva de las campañas de recomendación de pista
+siguiente; los informes markdown de \texttt{experiments/} son el registro
+primario. Cada sección transcribe (nunca recalcula) los resultados
+cuantitativos de una campaña, preserva sus identificadores de ejecución y de
+dataset de forma literal para trazabilidad, y añade la motivación y la
+interpretación que los informes escuetos omiten. Esta instancia se clonó de un
+laboratorio hermano de ajuste de gusto / rotación y se reorientó a un objetivo
+de ranking de secuencias; las campañas de rotación son una línea de trabajo
+separada y \emph{no} se cubren aquí.
+
+\paragraph{Tarea y partición.} El laboratorio predice, dentro de una
+\emph{sesión} de escucha, qué pista reproduce el usuario a \emph{continuación}
+--- una tarea de recuperación del siguiente ítem. El modelo consume el prefijo
+ordenado de la sesión y puntúa cada ítem del catálogo; los candidatos se
+ordenan y la siguiente pista \emph{distinta} retenida es el objetivo (una
+evaluación leave-last-out que excluye los ítems del prefijo, siguiendo la
+convención de paridad con Markov). Todo el trabajo corre sobre un único
+artefacto de secuencias, \dsid{seq-20260713-014226} (\num{7154} sesiones /
+\num{19402} ítems), particionado \emph{cronológicamente por inicio de sesión}
+en \num{5723} entrenamiento / \num{1431} prueba en el corte 2024-08-24. La
+propiedad definitoria de esta partición es su \textbf{tasa de ítems fríos de
+\num{0.55}}: más de la mitad de las pistas objetivo de las sesiones de prueba
+nunca aparecen en ninguna sesión de entrenamiento. Esta es la realidad de
+predicción hacia adelante sin fugas, y acota el recall absoluto por
+construcción --- cada resultado se lee contra la barra base incumbente, nunca
+un número absoluto.
+
+\paragraph{Métricas.} La métrica principal es \textbf{recall@10} (R@10, la
+fracción de sesiones de prueba cuya siguiente pista retenida aparece entre las
+diez recuperadas), reportada junto al \textbf{rango recíproco medio} (MRR, el
+inverso medio del rango de la siguiente pista verdadera) y recall@20. Desde
+2026-07-14 la evaluación también emite métricas de \emph{relevancia graduada}
+de primera clase sobre el mismo ranking con prefijo excluido
+(Sección~\ref{sec:graded}): \textbf{artist@$k$} (algún candidato del top-$k$
+comparte el artista de la siguiente pista verdadera), \textbf{genre@$k$}
+(análogamente sobre el género primario) y \textbf{artist\_mrr} (MRR del primer
+candidato del mismo artista). Todos los intervalos de confianza son IC bootstrap
+al 95\% sobre \num{2000} remuestreos de las \num{1431} sesiones de prueba, y el
+estadístico decisivo es el $\Delta$ \emph{pareado} por sesión contra una
+referencia nombrada. Una \emph{victoria} de tabla requiere superar la
+referencia en \emph{ambos} R@10 y MRR más allá de IC marginales no solapados
+(la barra estricta), seguido de una confirmación por reproducción; el test de
+paired-$\Delta$ con IC-enteramente-mayor-que-cero es el estadístico alternativo
+más potente (coronó a ambos campeones) y puede discrepar de la barra estricta.
+Las métricas graduadas son el marcador honesto: el recall exacto es modesto por
+construcción, pero el campeón acierta el \emph{artista} correcto en el top diez
+$\sim$32\% de las veces y el \emph{género} correcto $\sim$40\% --- mucho más
+útil que el número exacto de $\sim$17\% que impone la tasa de ítems fríos.
+
+\paragraph{El campeón vigente y el ancla de productización.} La fila «mejor
+registrada» actual es un blend de fusión de rankings de tres ramas,
+\emph{R+M+C} (una GRU de sesión $\times$ un modelo de co-ocurrencia de Markov de
+primer orden $\times$ una rama content-kNN) sobre un espacio de ítems PCA-192,
+con R@10 \num{0.1859}, MRR \num{0.1025} (Sección~\ref{sec:phase2}). El campeón
+previo, el z-blend de dos ramas \emph{R+M} sobre el espacio del
+song-autoencoder de 64 dimensiones (AE-64), con R@10 \num{0.1726} / MRR
+\num{0.0963} (Sección~\ref{sec:blend}), sigue siendo el \emph{ancla de
+productización}: es el blend de dos ramas que mapea directamente sobre la ranura
+de transición de la app hermana, y sigue siendo el modelo desplegable hasta que
+el blend de tres ramas se registre como predictor. \textbf{Ningún predictor de
+ranking aquí es promovible al grupo de mejores modelos}: son solo de
+entrenamiento (sin subcomando \texttt{predict}), y R+M+C es un driver de fusión
+fuera del servidor, así que una victoria confirmada es una fila «mejor
+registrada», no un modelo promovido.
+
+\section{Trasfondo: la tarea de secuencias, las líneas base y las métricas}
+\label{sec:background}
+Esta sección da la teoría mínima para un lector que conoce machine learning
+pero no este repositorio. Está anclada al archivo vivo de hechos del proyecto y
+crece solo cuando una nueva familia de predictores o métrica entra en los
+informes.
+
+\paragraph{Los modelos y líneas base en juego.}
+\begin{description}
+  \item[GRU / LSTM de sesión (\texttt{seq-nexttrack}).] Una red neuronal
+  recurrente que lee el prefijo ordenado de la sesión un ítem a la vez (cada
+  ítem representado por su vector latente) y emite un latente predicho del
+  siguiente ítem; los candidatos se ordenan por similitud coseno a esa
+  predicción. La GRU (gated recurrent unit) y la LSTM (long short-term memory)
+  son las dos celdas recurrentes probadas. La recurrencia captura el
+  \emph{contexto de sesión} --- la trayectoria de la sesión de escucha --- en
+  lugar de un único ítem previo.
+  \item[Función de pérdida: InfoNCE frente a coseno.] El modelo de secuencias
+  puede entrenarse para regresar el latente del siguiente ítem por pérdida
+  \emph{coseno} (acercar la predicción al latente verdadero) o por
+  \textbf{InfoNCE}, un objetivo contrastivo que acerca la predicción al ítem
+  verdadero y la aleja de un lote de negativos. InfoNCE es la palanca
+  individual más importante de todo el arco: es $\approx 2.3\times$ el coseno en
+  recall@10, porque la recuperación por ranking premia una representación que
+  \emph{separa} el siguiente ítem verdadero de los distractores, lo que una
+  pérdida contrastiva optimiza directamente y una regresión puntual no.
+  \item[Co-ocurrencia de Markov de primer orden (la barra, \texttt{B2}).] Un
+  modelo de transición solo de entrenamiento: un \texttt{track\_bigram} que
+  cuenta ``qué pista sigue a qué'' con back-off por artista/género para pares no
+  vistos (el término de transición que la app hermana ya despacha). Memoriza la
+  adyacencia directamente, que es exactamente lo que premia el ranking exacto de
+  la siguiente pista, y es la barra de referencia contra la que se mide cada
+  rama. También se probó un Markov de segundo orden (trigrama) con back-off y es
+  esencialmente neutral --- las sesiones son demasiado cortas/dispersas para que
+  un trigrama dispare, así que cae al bigrama.
+  \item[item2vec.] Un embedding skip-gram (SGNS) de co-escucha entrenado solo
+  sobre las sesiones de \emph{entrenamiento} (un análogo leak-safe de word2vec,
+  donde las ``palabras'' son pistas y las ``frases'' son sesiones); los
+  candidatos se ordenan por coseno al prefijo agregado por media. Sobre
+  \num{5723} sesiones de entrenamiento es demasiado disperso para localizar y es
+  la rama más débil registrada; los vectores de co-escucha de historia completa
+  \emph{no} se usan deliberadamente porque filtran a través de la partición.
+  \item[content-kNN.] Una rama de recuperación sin entrenamiento: coseno del
+  latente de cada candidato a los latentes del prefijo (agregado por máximo). Es
+  débil por sí sola en recall exacto pero captura similitud de \emph{ambiente}
+  (vibe) que los conteos pierden (su genre@10 ya roza la barra de Markov), y es
+  la única tercera rama genuinamente aditiva para el blend de fusión.
+  \item[z-blend de fusión de rankings frente a stacker aprendido.] Dos formas de
+  combinar ramas. El \textbf{z-blend} normaliza (z-score) las puntuaciones de
+  candidatos de cada rama y toma una suma ponderada ($\alpha\cdot z(\text{rama})
+  +\dots$) --- un fusor fijo, ligero en parámetros. El \textbf{stacker XGB}
+  (apilador) es un meta-aprendiz de gradient boosting sobre rasgos por candidato
+  (puntuaciones de ramas $+$ popularidad $+$ recencia $+$ coincidencia de
+  artista/género), entrenado de forma puntual con negativos muestreados. A lo
+  largo de dos campañas el z-blend fijo \emph{supera} al stacker aprendido de
+  forma decisiva, porque el entrenamiento puntual binario del stacker no
+  optimiza el objetivo de ranking tan bien como fusionar directamente
+  puntuaciones normalizadas.
+\end{description}
+
+\paragraph{Espacios de latentes de ítems: song-AE frente a PCA, y la trampa de
+la colección equivocada.} El modelo de secuencias predice \emph{hacia}, y
+recupera \emph{sobre}, un espacio latente por ítem, así que la elección de ese
+espacio es un eje de primera clase. Aparecen tres familias:
+\begin{description}
+  \item[AE-64 (\dsid{spotify\_tracks\_song\_ae}).] Un latente
+  \emph{song-autoencoder} no lineal de 64 dimensiones, el espacio de ítems
+  campeón original. Un autoencoder comprime cada ítem reconstruyéndolo a través
+  de un cuello de botella; su pérdida de reconstrucción de peso igual por bloque
+  reparte la capacidad de forma uniforme entre los bloques de contenido,
+  acústica y catálogo.
+  \item[PCA-$k$ (\dsid{spotify\_tracks\_song\_pca$k$}).] Una compresión
+  \emph{lineal} por componentes principales a dimensión $k \in
+  \{32,64,128,192,256\}$, que ordena las dimensiones por varianza explicada y
+  las decorrelaciona. Como muestran las
+  Secciones~\ref{sec:compression}--\ref{sec:dim}, esta geometría ordenada por
+  varianza y decorrelacionada es \emph{más fácil} de regresar para la GRU que
+  los latentes de peso igual enredados del AE, así que PCA supera al AE en toda
+  dimensión $\ge 64$.
+  \item[La trampa de la colección equivocada.] Ambos anteriores se ajustan
+  \emph{solo} desde la fuente leak-safe \dsid{spotify\_tracks\_content} (campos
+  intrínsecos de contenido/acústica/catálogo; sin campo conductual ni objetivo).
+  La colección por defecto \dsid{spotify\_tracks} de 200 dimensiones es un
+  embedding \emph{conductual} de co-escucha que filtra suavemente el
+  comportamiento de repetición y \textbf{nunca} debe usarse como espacio de
+  ítems.
+\end{description}
+
+\section{Tabla de clasificación de pista siguiente}
+\label{sec:leaderboard}
+La Tabla~\ref{tab:lb} es la tabla vigente de «mejor registrada». Está sobre la
+única partición next-distinct sin fugas y ordenada por recall@10. \textbf{Todo
+predictor de ranking aquí es solo de entrenamiento y fuera del servidor}, así
+que el ``campeón'' es una fila «mejor registrada», no un modelo promovido y
+exportable a la app; el campeón previo R+M sobre AE-64 sigue siendo el ancla de
+productización (Sección~\ref{sec:intro}). Los espacios de ítems se ajustan todos
+desde la fuente de contenido leak-safe (Sección~\ref{sec:background}).
+
+\begin{table}[ht]
+  \centering
+  \caption{Tabla de «mejor registrada» de pista siguiente, sobre la partición
+  next-distinct sin fugas (\num{1431} sesiones de prueba; IC bootstrap al 95\%
+  sobre \num{2000} remuestreos). R@10, MRR, artist@10, genre@10 mejor cuanto más
+  alto; el modelo de Markov de primer orden es la barra de referencia
+  incumbente. Fila campeona y campeón previo en negrita; mejor celda por métrica
+  en negrita.}
+  \label{tab:lb}
+  {\footnotesize\setlength{\tabcolsep}{3.8pt}\begin{tabular}{lccccl}
+    \toprule
+    Modelo & R@10 [IC 95\%] & MRR & art@10 & gen@10 & Nota \\
+    \midrule
+    \best{R+M+C, PCA-192} (fila campeona) & \best{0.1859 [0.166, 0.207]} & \best{0.1025} & 0.331 & 0.394 & mejor registrada \\
+    R+M+C, PCA-128                        & 0.1824 [0.162, 0.203] & 0.0993 & 0.332 & 0.396 & contenido aditivo \\
+    \best{R+M, AE-64} (campeón previo)    & 0.1726 [0.154, 0.192] & 0.0963 & 0.322 & 0.397 & ancla prod.; 3 semillas \\
+    R+M+C, AE-64 (graded-preferred)       & 0.1740 [0.154, 0.194] & 0.1014 & \best{0.330} & 0.400 & contenido solo empata \\
+    R+M, PCA-192                          & 0.1712 [0.151, 0.192] & 0.0952 & 0.329 & 0.398 & $\approx$ campeón previo \\
+    R+M, PCA-128                          & 0.1670 [0.148, 0.187] & 0.0920 & 0.329 & 0.398 & ganancia GRU no traslada \\
+    R+A+M, AE-64                          & 0.1684 & 0.0943 & --- & --- & rama ANN redundante \\
+    LSTM single, PCA-128                  & 0.1272 [0.110, 0.145] & 0.0495 & 0.335 & \best{0.458} & mejor único; $\ll$ blend \\
+    GRU single, PCA-192                   & 0.1230 [0.106, 0.140] & 0.0534 & \best{0.338} & 0.450 & óptimo puntual de dim \\
+    GRU single, PCA-128 (base)            & 0.1146 [0.099, 0.132] & 0.0489 & 0.333 & 0.452 & espacio base confirmado \\
+    GRU single, PCA-256                   & 0.1167 [0.101, 0.134] & 0.0502 & 0.338 & 0.458 & pasado el pico de dim \\
+    B2 Markov de primer orden (barra)     & 0.1069 [0.092, 0.124] & 0.0694 & 0.298 & 0.389 & incumbente de la app \\
+    GRU single, AE-64 (control)           & 0.0957 [0.081, 0.111] & 0.0411 & 0.294 & 0.450 & control del bake-off \\
+    ANN pooled-MLP, PCA-128               & 0.0901 [0.076, 0.105] & 0.0394 & 0.299 & 0.435 & pierde ante la GRU \\
+    XGB stacker (M+G / M+G+A)             & 0.080--0.087 & 0.042--0.049 & 0.31 & 0.38 & el combinador rinde peor \\
+    content-kNN (song-AE)                 & 0.0636 [0.050, 0.077] & 0.0321 & 0.272 & 0.405 & la rama C aditiva \\
+    item2vec (SGNS solo entren.)          & 0.0517 & 0.0214 & 0.166 & 0.312 & arrastra el blend \\
+    B0 popularidad / B1 recencia          & 0.0007 & --- & --- & --- & pisos \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\section{El barrido de secuencias: una GRU-infonce empata con la barra de Markov}
+\label{sec:sweep}
+\emph{Motivación.} La campaña inaugural de la instancia planteó la pregunta
+fundacional: ¿un modelo de secuencias con contexto de sesión --- una GRU/LSTM
+sobre el prefijo ordenado, prediciendo el latente song-AE de 64 dimensiones de
+la siguiente pista y recuperando por coseno --- supera al modelo de transición
+de Markov de primer orden que la app hermana ya despacha, \emph{hacia adelante},
+sobre la partición de sesiones sin fugas? Cuatro ramas cruzaron la celda
+recurrente (GRU, LSTM), la capacidad (\texttt{hidden} 128, 256) y,
+decisivamente, la función de pérdida (coseno frente a InfoNCE), a 60 épocas.
+
+\emph{Resultados.} Ninguna rama superó la barra. La mejor rama (M3, GRU
+\texttt{hidden}128 InfoNCE) alcanzó un \emph{empate} estadístico con la barra de
+Markov en R@10 (\num{0.0894}, el IC del paired-$\Delta$ incluye cero) pero
+\emph{perdió} en MRR (\num{0.0388} frente a \num{0.0694}) y recall@20. La
+palanca dominante fue la función de pérdida: InfoNCE fue $\approx 2.3\times$ el
+coseno en R@10 (\num{0.0894} frente a \num{0.0391}), mientras que la capacidad
+(\texttt{h256}) y la celda LSTM apenas movieron las ramas coseno (todas en
+$\sim$0.038--0.041). Los pisos de popularidad y recencia quedaron cerca de cero
+(R@10 \num{0.0007}).
+
+\emph{Interpretación.} Un latente-más-un-solo-salto-coseno es una ruta más
+difícil a la \emph{pista} siguiente \emph{exacta} que un bigrama de co-escucha:
+el bigrama memoriza directamente ``qué sigue a qué'', mientras que la GRU debe
+aterrizar cerca del punto correcto en un espacio de contenido de 64-d y luego
+recuperar, perdiendo en el ranking preciso (MRR). El hallazgo es consistente con
+una realidad de deriva de gusto --- \num{0.55} de ítems fríos, comportamiento
+guiado por identidad/adyacencia --- y fijó la agenda: InfoNCE es la pérdida base,
+y la rama natural siguiente es un \emph{blend} de las puntuaciones de candidatos
+de la GRU con el bigrama de Markov.
+\emph{Fuente: \texttt{2026-07-13-nexttrack-sequence-sweep.md}.}
+
+\section{Barrido de topología: profundidad, anchura y dirección son una palanca agotada}
+\label{sec:topology}
+\emph{Motivación.} Con la pérdida fijada en InfoNCE, este barrido aisló la
+\emph{topología} de red: ¿la profundidad (capas apiladas), la anchura
+(\texttt{hidden} 256), una pila residual entre capas o la bidireccionalidad
+elevan el modelo de secuencias por encima de la barra de Markov? Como una RNN
+bidireccional bajo teacher forcing por paso filtraría ítems futuros, la rama
+bidireccional usó un objetivo leak-free de último ítem (codificar el prefijo
+completo, predecir solo el siguiente ítem retenido).
+
+\emph{Resultados.} Refutado. Ninguna rama superó la barra en ambas métricas. La
+mejor rama (anchura \texttt{h256}, R@10 \num{0.0957}) es un \emph{empate} en
+R@10 y pierde en MRR (\num{0.0411} frente a \num{0.0694}). La profundidad es
+plana de 1$\to$2 capas (\num{0.0894}$\to$\num{0.0922}, dentro de banda) y
+\emph{perjudica} con 3 capas (\num{0.0825}, fuera de banda por debajo de la
+barra); la pila residual sobre profundidad-2/h256 no añadió nada. La rama
+bidireccional colapsó (\num{0.0482}), pero esto es un artefacto del
+\emph{objetivo}, no un veredicto sobre la direccionalidad: el objetivo leak-free
+de último ítem aporta $\sim$1 objetivo de entrenamiento por sesión frente a los
+$\sim$13 pares de siguiente-paso del teacher forcing, así que entrenó con
+$\sim$13$\times$ menos señal.
+
+\emph{Interpretación.} La arquitectura no es la palanca para pista siguiente en
+este corpus. La señal transferible de recuperación por latente se estanca en
+R@10 $\sim$0.09--0.10 a través de profundidad, anchura, residual y dirección,
+por debajo del bigrama de co-escucha --- consistente con todo el arco: la
+función de pérdida movió la aguja y la capacidad/topología no. La única palanca
+inexplorada restante era el encuadre de candidatos / la fusión, que la campaña
+siguiente accionó decisivamente.
+\emph{Fuente: \texttt{2026-07-13-nexttrack-topology-scan.md}.}
+
+\section{El campeón de fusión GRU$\times$Markov, y por qué más ensamblado falla}
+\label{sec:blend}
+\emph{Motivación.} El barrido y el escaneo de topología coincidieron en que la
+mejor GRU individual solo \emph{empata} con la barra de Markov en R@10 mientras
+pierde en MRR. Esta campaña preguntó si \emph{combinar} modelos supera la barra,
+y hasta dónde llega el ensamblado. Se definieron tres ramas, cada una emitiendo
+puntuaciones de candidatos sobre todo el vocabulario: \textbf{M} = el bigrama de
+Markov solo de entrenamiento (la barra), \textbf{R} = la recurrencia
+GRU-infonce-h256, y \textbf{A} = un MLP ANN de bolsa-de-prefijo (un gemelo
+feed-forward de R). Se combinaron con un z-blend ponderado y, como alternativa
+aprendida, un stacker XGB.
+
+\emph{Resultados.} El \textbf{z-blend R+M} ($\alpha{=}0.5$) \emph{supera la barra
+de forma decisiva}: R@10 \num{0.1726} $[0.154, 0.192]$, MRR \num{0.0963}, un
+$\Delta$ pareado sobre Markov de $+\num{0.0657}$ $[+0.049, +0.083]$ (IC
+enteramente por encima de cero) --- $\sim$$+61\%$ de R@10, $+39\%$ de MRR --- en
+una meseta robusta a lo largo de $\alpha \in [0.25, 0.75]$ y reproducido a
+través de tres semillas (\num{0.1705} / \num{0.1726} / \num{0.1726}). Se
+registró como el predictor \texttt{seq-blend} y la definición
+\texttt{blend-gru-markov}, el primer campeón de pista siguiente. Más ensamblado
+luego \emph{no logró} mejorarlo (Tabla~\ref{tab:blend}): R+A+M (\num{0.1684}) es
+levemente peor, R+A ($\approx$ GRU sola, \num{0.0894}) es mucho peor, y ambas
+variantes del stacker XGB (M+R \num{0.1020}; M+R+A \num{0.0887}) apenas superan a
+Markov sola.
+
+\begin{table}[ht]
+  \centering
+  \caption{La campaña de fusión: el z-blend R+M supera la barra de Markov de
+  forma decisiva, y ningún ensamble más rico lo mejora. R@10 y MRR mejor cuanto
+  más alto; campeón en negrita.}
+  \label{tab:blend}
+  {\small\setlength{\tabcolsep}{5pt}\begin{tabular}{lccl}
+    \toprule
+    Modelo & R@10 [IC 95\%] & MRR & Nota \\
+    \midrule
+    \best{z-blend R+M $\alpha{=}0.5$} (campeón) & \best{0.1726 [0.154, 0.192]} & \best{0.0963} & $\Delta$ vs Markov $+0.066$ [$+0.05,+0.08$] \\
+    z-blend R+A+M                                & 0.1684 & 0.0943 & rama ANN redundante con GRU \\
+    B2 barra de Markov (M)                       & 0.1069 [0.092, 0.123] & 0.0694 & la referencia \\
+    XGB stacker M+R                              & 0.1020 & 0.0561 & combinador aprendido $\ll$ z-blend \\
+    GRU sola (R)                                 & 0.0957 & 0.0411 & empata la barra solo en R@10 \\
+    z-blend R+A                                  & 0.0894 & 0.0377 & $\approx$ GRU sola \\
+    XGB stacker M+R+A                            & 0.0887 & 0.0572 & apenas supera a Markov \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{Interpretación.} La victoria es sobre \emph{diversidad} de señal, no
+número de modelos. La GRU (similitud de latente) y Markov (conteos de
+co-ocurrencia) ordenan pistas correctas \emph{distintas}, así que fusionarlas
+aproximadamente duplica la tasa de acierto; amontonar más del \emph{mismo} tipo
+de señal --- otro predictor neuronal de latente (A), redundante con R --- no
+añade nada. El stacker XGB aprendido \emph{rinde por debajo} del z-blend simple,
+en contra de la intuición habitual de que ``apilar supera a mezclar'': su
+entrenamiento puntual binario-con-negativos no optimiza el objetivo de ranking
+tan bien como fusionar directamente puntuaciones normalizadas. El margen
+restante está acotado por la tasa de ítems fríos de \num{0.55} y requiere
+\emph{señal genuinamente nueva}, no más fusión de modelos --- la hipótesis que
+la campaña siguiente pone a prueba.
+\emph{Fuente: \texttt{2026-07-14-nexttrack-blend-and-ensemble.md}.}
+
+\section{Métricas de relevancia graduada y nuevos aprendices base: el contenido es la única señal aditiva}
+\label{sec:graded}
+\emph{Motivación.} Dos hilos en una campaña. (A) Hacer que la evaluación
+acredite aterrizar la \emph{banda/ambiente} correcto aunque la pista exacta esté
+mal --- la observación de que ``la primera elección normalmente no es la pista
+exacta, pero el artista normalmente es correcto'' --- promoviendo
+\emph{artist@k}, \emph{genre@k} y \emph{artist\_mrr} a métricas de primera clase
+cableadas de extremo a extremo (\texttt{seq\_common.eval\_from\_scores} $\to$
+\texttt{Metrics} / \texttt{MetricsSpec} de Rust $\to$ \texttt{domain.toml} $\to$
+UI). (B) Probar aprendices base leak-free genuinamente nuevos --- \textbf{C} =
+content-kNN, \textbf{M2} = un trigrama de Markov de segundo orden con back-off,
+e \textbf{I} = un item2vec SGNS solo de entrenamiento --- evaluados tanto en las
+métricas exactas como en las nuevas graduadas.
+
+\emph{Resultados.} La ruta de la métrica exacta fue idéntica byte a byte (claves
+puramente aditivas); el campeón reprodujo R@10 \num{0.1726} / MRR \num{0.0963}
+exactamente. Ningún aprendiz base nuevo superó la barra en solitario (M2
+\num{0.1076} $\approx$ M \num{0.1069} --- el trigrama cae al bigrama; item2vec
+\num{0.0517} es la rama más débil). Mezclado en el campeón, \textbf{el contenido
+es la única señal aditiva}: \textbf{R+M+C} (añadiendo la rama de contenido) es el
+mejor blend en MRR (\num{0.0963}$\to$\num{0.1014}), artist@10
+(\num{0.3215}$\to$\num{0.3298}) y artist\_mrr, y empata al campeón en R@10 exacto
+($\Delta$ pareado $+\num{0.0014}$, IC cruza cero). item2vec \emph{arrastra} el
+blend (R+M+I \num{0.1349}); el trigrama es neutral.
+
+\emph{Interpretación.} content-kNN ordena pistas cuasi-correctas
+\emph{distintas} (similitud de ambiente por latente) frente a la GRU
+(recurrencia de sesión) y Markov (co-ocurrencia), justo la diversidad que la
+campaña de fusión predijo que necesitaría la señal nueva. Sobre el espacio AE-64
+la rama de contenido solo \emph{empató} al campeón en recall exacto mientras
+elevaba las métricas graduadas, así que se llevó adelante como la tercera rama
+graded-preferred, no como un nuevo campeón exacto. Ese ``empate'' se vuelve una
+\emph{victoria} cuando el espacio de ítems es más rico (Sección~\ref{sec:phase2}):
+sobre PCA-192 la misma construcción R+M+C es la más fuerte registrada. El
+item2vec de co-escucha y el trigrama de Markov no añadieron nada en estos datos.
+\emph{Fuente: \texttt{2026-07-14-nexttrack-graded-relevance-and-new-legs.md}.}
+
+\section{El bake-off de compresión de la representación de ítems}
+\label{sec:compression}
+\emph{Motivación.} El espacio de ítems del campeón --- un latente AE de 64
+dimensiones --- fue una elección temprana arbitraria, y la GRU de secuencias
+predice \emph{hacia} y recupera \emph{sobre} cualquier geometría que ese espacio
+imponga. Esta campaña pregunta qué \emph{compresión} es el mejor espacio para la
+GRU: PCA lineal frente al autoencoder no lineal, cada uno a dimensión latente
+32 / 64 / 128. Se hornearon seis espacios alternativos desde la \emph{misma}
+fuente de contenido leak-safe de 384 dimensiones (\dsid{spotify\_tracks\_content}),
+cada uno ajustado sin supervisión sobre los \num{23529} ítems usando solo campos
+intrínsecos de contenido/acústica/catálogo, y luego evaluados bajo un readout
+GRU \emph{congelado} (\texttt{gru-infonce-h256}), de modo que el espacio latente
+de ítems es el único eje que se mueve. La apuesta del diseño era que la pérdida
+de reconstrucción de peso igual por bloque del AE \emph{preservaría} los
+pequeños bloques de acústica/catálogo que la varianza global dominada por texto
+de PCA muriera de hambre; la hipótesis nula era que la dimensión, no el
+compresor, fija el techo.
+
+\emph{Resultados.} La puerta de paridad pasó: el control AE-64 reprodujo su R@10
+registrado de \num{0.0957}. Los seis espacios entrenaron limpiamente
+(Tabla~\ref{tab:compression}; Figura~\ref{fig:compression}). \textbf{PCA-128} es
+el ganador GRU-individual con R@10 \num{0.1146}, un $\Delta$ pareado de
+$+\num{0.0189}$ $[+0.0042, +0.0335]$ sobre el control AE-64 --- un IC
+\emph{enteramente por encima de cero}, la única rama que supera el control
+significativamente --- y también encabeza MRR, artist@10 y artist\_mrr. PCA-64
+es el segundo (\num{0.1041}, empate). Los dos espacios de 32 dimensiones quedan
+muy por debajo del control de 64 dimensiones (ambos IC por debajo de cero). La
+sonda content-kNN sin entrenamiento es plana en $\sim$0.06 a través de los seis
+espacios y \emph{no} sigue el ranking de la GRU.
+
+\begin{table}[ht]
+  \centering
+  \caption{El bake-off de compresión de la representación de ítems: seis espacios
+  de ítems (PCA lineal frente al AE no lineal $\times$ dimensión latente
+  32 / 64 / 128), cada uno evaluado bajo el \emph{mismo} readout congelado
+  \texttt{gru-infonce-h256} (\num{1431} sesiones de prueba; paired-$\Delta$ vs el
+  control AE-64 del mismo lote). R@10, MRR, artist@10, genre@10 mejor cuanto más
+  alto. Ganador (PCA-128) en negrita; mejor celda por métrica en negrita.}
+  \label{tab:compression}
+  {\footnotesize\setlength{\tabcolsep}{3pt}\begin{tabular}{lp{2.05cm}ccccc}
+    \toprule
+    Espacio & Run id & R@10 [IC 95\%] & $\Delta$ vs AE-64 & MRR & art@10 & gen@10 \\
+    \midrule
+    \best{PCA-128} (ganador) & \runid{run-20260715-042100-a1d9d} & \best{0.1146 [0.099, 0.132]} & \best{$+0.019$ [$+0.004,+0.034$]} & \best{0.0489} & \best{0.3326} & 0.4521 \\
+    PCA-64 (segundo)        & \runid{run-20260715-042100-8851d} & 0.1041 [0.088, 0.121] & $+0.008$ (empate) & 0.0416 & 0.3117 & 0.4598 \\
+    AE-64 (control)         & \runid{run-20260715-042059-dd261} & 0.0957 [0.081, 0.111] & --- (control) & 0.0411 & 0.2942 & 0.4500 \\
+    AE-128                  & \runid{run-20260715-042059-e96ae} & 0.0929 [0.078, 0.108] & $-0.003$ (empate) & 0.0398 & 0.3026 & \best{0.4640} \\
+    AE-32                   & \runid{run-20260715-042059-d3f9e} & 0.0545 [0.043, 0.066] & $-0.041$ & 0.0274 & 0.2376 & 0.3955 \\
+    PCA-32                  & \runid{run-20260715-042059-b1242} & 0.0412 [0.031, 0.052] & $-0.055$ & 0.0224 & 0.2187 & 0.3816 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_compression}
+  \caption{La dimensión latente, no el compresor, es la palanca. Ambas series
+  suben abruptamente de dim 32 a 64; PCA (azul) luego sigue subiendo hasta 128 y
+  \emph{sobrepasa} al AE, mientras que el AE (gris) se estanca --- su punto de
+  128 dim de hecho cae por debajo de su propio control de 64 dim. En dim 32 el
+  AE roza a PCA, un cruce de baja capacidad que se revierte una vez que la
+  dimensión es generosa. El control AE-64 (anillo rojo) es el espacio de ítems
+  del campeón; el ganador PCA-128 (estrella verde) es la única rama cuyo IC del
+  paired-$\Delta$ supera cero. Las barras de error son IC bootstrap al 95\%; los
+  IC vecinos se solapan, así que la victoria descansa en el test \emph{pareado}.}
+  \label{fig:compression}
+\end{figure}
+
+La victoria GRU-individual \textbf{no} sobrevive al blend de producción:
+re-fusionar la rama GRU PCA-128 ganadora con la rama de Markov da R@10
+\num{0.1670}, \emph{por debajo} del blend campeón AE-64 (\num{0.1726}) con IC
+solapados. No se promovió nada; PCA-128 se llevó adelante solo como el espacio
+base sancionado para la Fase 2.
+
+\emph{Interpretación.} La dimensionalidad latente es la palanca dominante y el
+compresor es secundario. La hipótesis de preservación acústica del diseño queda
+\emph{refutada}: en dimensión generosa el PCA lineal supera al AE no lineal, y
+aunque AE-32 preserva los bloques numérico/acústico casi a la perfección queda
+cerca del fondo. Lo que ayuda es una geometría objetivo \emph{ordenada por
+varianza y decorrelacionada} que la GRU encuentra más fácil de regresar que los
+latentes de peso igual enredados del AE. La ventaja del AE en dim 32 es un
+fenómeno puramente de baja capacidad que se revierte una vez que la dimensión es
+generosa. La sonda content-kNN plana que no sigue el ranking de la GRU es una
+divergencia señalada: la victoria viene de la \emph{aprendibilidad} de la
+geometría objetivo de PCA, no de un espacio demostrablemente más rico. Y la
+salvedad de peso es el resultado del blend: una rama GRU claramente más fuerte
+no compró \emph{nada} en el blend, porque la rama de Markov es independiente de
+la representación y las pistas extra que la mejor GRU recupera se solapan con lo
+que Markov ya aporta.
+\emph{Fuente:
+\texttt{2026-07-15-nexttrack-compression-representation-bakeoff.md}.}
+
+\section{El techo de dimensión: PCA hace pico en 192}
+\label{sec:dim}
+\emph{Motivación.} Con la dimensión establecida como la palanca y PCA aún
+subiendo en 128, este tramo extendió el barrido de PCA hacia arriba (PCA-192,
+PCA-256) para localizar el óptimo real antes de que la Fase 2 comprometiera un
+espacio base, y añadió AE-192 para probar si PCA $\ge$ AE se sostiene a mayor
+dimensión. El protocolo fue idéntico (el mismo readout congelado
+\texttt{gru-infonce-h256}, la misma puerta de paridad); la referencia es PCA-128
+(\runid{run-20260715-042100-a1d9d}).
+
+\emph{Resultados.} La curva de R@10 frente a dimensión de PCA \textbf{hace pico
+en $\sim$192} (R@10 \num{0.1230}) y \emph{se revierte} hacia 256 (\num{0.1167});
+no seguía subiendo. La tendencia completa es $32\!\to\!\num{0.041}$,
+$64\!\to\!\num{0.104}$, $128\!\to\!\num{0.115}$, $\mathbf{192\!\to\!\num{0.123}}$,
+$256\!\to\!\num{0.117}$ (Figura~\ref{fig:dim}). PCA-192 es el óptimo puntual,
+pero su $\Delta$ pareado frente a PCA-128 es $+\num{0.0084}$ $[-0.0007, +0.0189]$
+--- falla la barra de ``IC enteramente por encima de cero'' por \num{0.0007}, un
+pelo --- así que \textbf{PCA-128 se mantiene como la base de la Fase 2}, con
+PCA-192 marcado como el candidato a confirmar-y-promover. PCA $\ge$ AE se
+sostiene con fuerza y la brecha es máxima en 192 (PCA-192 \num{0.123} frente a
+AE-192 \num{0.098}); el AE se estanca plano en $\sim$0.09--0.10 desde dim 64
+hacia arriba.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_dim_curve}
+  \caption{Se encuentra el techo de dimensión. Extendiendo el barrido de
+  compresión de la Figura~\ref{fig:compression} a PCA-192/256 y AE-192, la curva
+  PCA (azul) hace pico en $\sim$192 (R@10 \num{0.123}) y se revierte hacia 256,
+  mientras que el AE (gris) se estanca plano en $\sim$0.09--0.10 y nunca lo
+  alcanza --- la brecha PCA$\,\ge\,$AE es máxima en 192. PCA-192 es el óptimo
+  puntual (estrella verde) pero su $\Delta$ pareado sobre PCA-128 roza cero, así
+  que PCA-128 se mantiene como la base individual de la Fase 2. Las barras de
+  error son IC bootstrap al 95\% sobre las \num{1431} sesiones de prueba.}
+  \label{fig:dim}
+\end{figure}
+
+\emph{Interpretación.} La varianza extra más allá de $\sim$192 (PCA-256 captura
+un ratio de varianza explicada acumulado de \num{0.997}) son dimensiones de baja
+señal / ruido que la GRU no puede explotar y que diluyen levemente la geometría
+objetivo. La meseta plana del AE reconfirma la hipótesis refutada de
+preservación acústica a mayor dimensión: su objetivo de reconstrucción de peso
+igual sigue gastando capacidad en los pequeños bloques numérico/acústico
+(reconstrucción $R^2 \approx 0.999$ en 192) en lugar de la estructura de
+texto/catálogo de alta varianza que la GRU necesita. Como antes, la sonda
+content-kNN sin entrenamiento sigue plana y no reproduce el pico de la GRU, así
+que el óptimo de dimensión es sobre la \emph{aprendibilidad} del objetivo, no la
+riqueza intrínseca de recuperación.
+\emph{Fuente: \texttt{2026-07-15b-nexttrack-compression-dim-extension.md}.}
+
+\section{El barrido de familia de modelos y el nuevo campeón, R+M+C sobre PCA-192}
+\label{sec:phase2}
+\emph{Motivación.} Con el eje de compresión zanjado (base PCA-128, candidato
+PCA-192), esta campaña barrió la \emph{familia} de modelos sobre los espacios
+elegidos: ¿una celda recurrente distinta (LSTM), un MLP agregado no recurrente
+(ANN) o un stacker XGB \emph{aprendido} superan al z-blend fijo GRU$\times$Markov
+--- y añadir la tercera rama content-kNN (R+M+C) sobre el espacio PCA \emph{rico}
+finalmente supera al campeón? Una configuración fija corrió a través de todas
+las ramas; solo variaron la familia de modelos y la representación, y el
+servidor se serializó (\texttt{-{}-max-runs 1}) para evitar una trampa de
+rendimiento por sobresuscripción de hilos.
+
+\emph{Resultados.} Una \textbf{nueva fila «mejor registrada»}: el \textbf{z-blend
+R+M+C sobre PCA-192} (GRU $\times$ Markov solo de entrenamiento $\times$
+content-kNN, tercios iguales) alcanza R@10 \num{0.1859} $[0.166, 0.207]$, MRR
+\num{0.1025}, un $\Delta$ pareado sobre el campeón previo de $+\num{0.0133}$
+$[+0.0007, +0.0259]$ --- enteramente por encima de cero, sin regresión de MRR
+(Tabla~\ref{tab:phase2}; Figura~\ref{fig:phase2}). La rama de contenido es
+genuinamente aditiva sobre el espacio rico, superando al R+M del mismo espacio en
+$+\num{0.0154}$ (PCA-128) / $+\num{0.0147}$ (PCA-192), ambos IC por encima de
+cero --- \emph{más fuerte} que el R+M+C de AE-64 que solo empató
+(Sección~\ref{sec:graded}), porque el espacio más rico y de mayor EVR hace que la
+rama de contenido rinda. El \textbf{stacker XGB aprendido rinde muy por debajo}
+del z-blend fijo (\num{0.080}--\num{0.087}, perdiendo incluso ante su propia rama
+base GRU individual); la \textbf{LSTM es el mejor modelo individual} (PCA-128
+\num{0.1272}, $\Delta$ pareado sobre la GRU $+\num{0.0126}$, IC por encima de
+cero) pero muy por debajo de los blends; y la base individual de la Fase 2
+\textbf{se mantiene en PCA-128}.
+
+\begin{table}[ht]
+  \centering
+  \caption{Barrido de familia de modelos de la Fase 2 sobre los espacios PCA
+  ricos, ordenado por R@10 (mejor cuanto más alto). El z-blend fijo es el
+  combinador de referencia; el stacker XGB aprendido rinde muy por debajo. Fila
+  campeona y campeón previo en negrita; mejor celda por métrica en negrita. El
+  $\Delta$ pareado es por sesión contra la referencia nombrada.}
+  \label{tab:phase2}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{lp{2.4cm}ccp{2.9cm}}
+    \toprule
+    Modelo & Run id / fuente & R@10 [IC 95\%] & MRR & $\Delta$ pareado \\
+    \midrule
+    \best{R+M+C, PCA-192} (fila camp.) & \runid{analyze\_rmc} (A4) & \best{0.1859 [0.166, 0.207]} & \best{0.1025} & vs camp. $+0.0133$ [$+0.001,+0.026$] \\
+    R+M+C, PCA-128                       & \runid{analyze\_rmc} (A2) & 0.1824 [0.162, 0.203] & 0.0993 & vs camp. $+0.0098$ (empate) \\
+    \best{R+M, AE-64} (campeón previo)   & \runid{run-20260714-170928-645ae} & 0.1726 [0.154, 0.192] & 0.0963 & --- (referencia) \\
+    R+M, PCA-192                         & \runid{run-20260715-142440-96f53} & 0.1712 [0.151, 0.192] & 0.0952 & vs camp. $-0.0014$ (empate) \\
+    R+M, PCA-128                         & \runid{run-20260715-044920-36dce} & 0.1670 [0.148, 0.187] & 0.0920 & vs camp. $-0.0056$ (empate) \\
+    LSTM single, PCA-128                 & \runid{run-20260715-142440-546d0} & 0.1272 [0.110, 0.145] & 0.0495 & vs GRU-128 $+0.0126$ ($>0$) \\
+    GRU single, PCA-192                  & \runid{run-20260715-142440-89d6a} & 0.1230 [0.106, 0.140] & 0.0534 & vs GRU-128 $+0.0084$ (empate) \\
+    ANN pooled-MLP, PCA-128              & \runid{run-20260715-142440-7e528} & 0.0901 [0.076, 0.105] & 0.0394 & vs GRU-128 $-0.0245$ \\
+    XGB stacker M+G, PCA-128             & \runid{run-20260715-142440-371b1} & 0.0867 [0.073, 0.101] & 0.0493 & vs GRU-128 $-0.0280$ \\
+    XGB stacker M+G+A, PCA-192           & \runid{run-20260715-142440-f111d} & 0.0853 [0.071, 0.099] & 0.0490 & vs GRU-192 $-0.0377$ \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.85\textwidth]{nexttrack_phase2_families}
+  \caption{El barrido de familia de modelos de la Fase 2. El z-blend fijo es el
+  combinador de referencia: R+M+C sobre PCA-192 (verde) es la nueva fila
+  campeona, la rama de contenido es genuinamente aditiva sobre el espacio rico, y
+  el stacker XGB aprendido (rojo) rinde muy por debajo --- pierde incluso ante su
+  propia rama base GRU individual. LSTM roza a GRU como el mejor modelo
+  individual (gris) pero queda muy por debajo de los blends. La barra de Markov
+  de primer orden (\num{0.107}) es la referencia incumbente; la fila campeona
+  está en \num{0.186}.}
+  \label{fig:phase2}
+\end{figure}
+
+\emph{La coronación, y sus dos salvedades honestas.} El candidato a evento de
+tabla se confirmó reproduciendo la rama GRU-192 cinco veces (la original más
+cuatro re-ejecuciones) y recalculando R+M+C cada vez; el $\Delta$ pareado sobre
+el campeón previo fue $+\num{0.0133}$ $[+0.0007, +0.0259]$ en \emph{cada}
+re-ejecución, con la ventaja de MRR intacta, así que R+M+C sobre PCA-192 se
+registró como la nueva fila campeona. Dos salvedades viajan con la coronación y
+no deben omitirse. Primera, \textbf{la dispersión de reproducción fue
+exactamente cero} porque el entrenamiento de \texttt{seq-nexttrack} es
+determinista en esta CPU --- los cinco checkpoints GRU-192 fueron idénticos byte
+a byte --- así que la confirmación verificó \emph{determinismo, no robustez a la
+semilla}; la única incertidumbre cuantificada es el bootstrap de partición única.
+Segunda, \textbf{el límite inferior del $\Delta$ pareado es $+\num{0.0007}$}: la
+coronación supera cero por un pelo en una única partición. La coronación es real
+según el criterio pre-acordado, pero el margen sobre el campeón previo es
+delgado, y endurecerla requiere una segunda partición de prueba sin fugas (o
+ramas con semillas variadas una vez que el blend se generalice a tres ramas).
+
+\emph{Interpretación.} El hilo de compresión-más-familia-de-modelos queda por lo
+demás cerrado: PCA-128 es la base individual, la LSTM es el mejor modelo
+individual, el stacker aprendido está muerto como combinador, y el z-blend fijo
+es el combinador de referencia. El resultado de peso es que \emph{el contenido es
+la única rama que añade señal de ranking genuinamente nueva, y rinde más sobre el
+espacio PCA de mayor EVR} --- la excepción a la regla vigente de que las
+ganancias de modelo individual / representación no se trasladan al blend (el par
+R+M sobre los espacios PCA ricos solo empata al campeón AE-64). La brecha de
+productización persiste: el campeón es solo de entrenamiento y fuera del
+servidor, así que el campeón previo R+M sobre AE-64 sigue siendo el ancla
+desplegable hasta que el blend de tres ramas se registre con un subcomando
+\texttt{predict}.
+\emph{Fuente: \texttt{2026-07-15c-nexttrack-phase2-model-sweep.md}.}
+
+\section{Conclusiones}
+\label{sec:conclusions}
+Siete campañas (jul 2026) sobre la tarea de recuperación de pista siguiente
+convergen en una historia clara. (1) Un modelo de secuencias de sesión, incluso
+en su mejor forma (GRU-infonce), solo \emph{empata} con la barra de Markov de
+co-escucha de primer orden en recall@10 y pierde en MRR: predecir un latente del
+siguiente ítem y recuperar por un salto coseno es una ruta más difícil a la
+pista siguiente exacta que un bigrama que memoriza la adyacencia directamente.
+(2) La \emph{pérdida} de entrenamiento es la palanca individual dominante
+(InfoNCE $\approx 2.3\times$ el coseno); la \emph{topología} de red ---
+profundidad, anchura, residual, dirección --- es una palanca agotada, y ninguna
+arquitectura supera la barra. (3) El avance es la \emph{fusión de rankings}: un
+z-blend R+M de las ramas GRU y Markov supera la barra en $\sim$$+61\%$ de
+recall@10 (confirmado con 3 semillas), porque las dos ramas ordenan pistas
+correctas \emph{distintas}. La victoria es sobre \emph{diversidad} de señal, no
+número de modelos --- añadir una rama neuronal redundante no ayuda, y un stacker
+XGB aprendido \emph{rinde por debajo} del z-blend fijo, porque su entrenamiento
+puntual no captura el objetivo de ranking. (4) Un barrido de representación de
+ítems halló que la \emph{dimensión} latente, no el compresor, es la palanca: el
+PCA lineal supera al autoencoder no lineal en toda dimensión $\ge 64$ (la
+hipótesis de preservación acústica queda refutada), la curva hace pico en PCA-192
+y se revierte hacia 256, y PCA-128 es la base individual confirmada. (5) Sobre el
+espacio PCA rico la única señal nueva genuinamente aditiva --- \emph{content-kNN},
+que solo \emph{empató} al campeón sobre el espacio AE-64 --- se vuelve una
+victoria: un z-blend R+M+C de tres ramas sobre PCA-192 es la fila «mejor
+registrada» actual con recall@10 \num{0.1859}, MRR \num{0.1025} ($\Delta$ pareado
+sobre el campeón previo $+\num{0.0133}$, IC por encima de cero, confirmado a
+través de cinco reproducciones). (6) Dos salvedades honestas acotan la
+coronación: la confirmación por reproducción tuvo dispersión cero porque
+\texttt{seq-nexttrack} es determinista en esta CPU (así que verificó
+determinismo, no robustez a la semilla), y el límite inferior del paired-$\Delta$
+supera cero por solo $+\num{0.0007}$ en una única partición --- endurecerla
+requiere una segunda partición de prueba sin fugas. (7) Todo predictor de ranking
+aquí es solo de entrenamiento y fuera del servidor, así que la coronación es una
+fila «mejor registrada», no un modelo promovido y exportable a la app; el campeón
+previo R+M sobre AE-64 sigue siendo el ancla de productización, y registrar un
+blend de tres ramas con un subcomando \texttt{predict} es el trabajo futuro
+principal vigente.
+
+\section{Informes fuente}
+Esta síntesis consolida siete informes de campaña de pista siguiente de
+\texttt{experiments/}:
+\begin{itemize}
+  \item \texttt{2026-07-13-nexttrack-sequence-sweep.md} --- la campaña
+    fundacional de pista siguiente: un barrido de secuencias GRU/LSTM contra la
+    barra de Markov de primer orden; la mejor GRU-infonce empata en R@10 pero
+    pierde en MRR (Sección~\ref{sec:sweep}).
+  \item \texttt{2026-07-13-nexttrack-topology-scan.md} --- el barrido de
+    topología profundidad / anchura / residual / bidireccional; la arquitectura
+    es una palanca agotada, todas las ramas quedan bajo la barra de Markov
+    (Sección~\ref{sec:topology}).
+  \item \texttt{2026-07-14-nexttrack-blend-and-ensemble.md} --- el z-blend R+M
+    GRU$\times$Markov supera la barra en $+61\%$ de R@10 (el primer campeón de
+    pista siguiente); ningún ensamble más rico lo mejora y el stacker XGB
+    aprendido rinde por debajo (Sección~\ref{sec:blend}).
+  \item \texttt{2026-07-14-nexttrack-graded-relevance-and-new-legs.md} ---
+    métricas de relevancia graduada de primera clase (artist@k / genre@k /
+    artist\_mrr) y nuevos aprendices base leak-free; content-kNN es la única
+    señal aditiva, empatando al campeón sobre AE-64 (Sección~\ref{sec:graded}).
+  \item \texttt{2026-07-15-nexttrack-compression-representation-bakeoff.md} ---
+    el bake-off de compresión de la representación de ítems (PCA frente a
+    autoencoder $\times$ dimensión latente 32/64/128) bajo un readout GRU
+    congelado; PCA-128 es el ganador GRU-individual pero la victoria no se
+    traslada al blend (Sección~\ref{sec:compression}).
+  \item \texttt{2026-07-15b-nexttrack-compression-dim-extension.md} --- el
+    barrido de dimensión PCA/AE extendido a 192/256; la curva hace pico en
+    PCA-192 y se revierte, así que PCA-128 se mantiene como la base de la Fase 2
+    (Sección~\ref{sec:dim}).
+  \item \texttt{2026-07-15c-nexttrack-phase2-model-sweep.md} --- el barrido de
+    familia de modelos sobre los espacios PCA ricos; el z-blend fijo supera al
+    stacker aprendido, la LSTM es el mejor modelo individual, y R+M+C sobre
+    PCA-192 se corona como la nueva fila «mejor registrada»
+    (Sección~\ref{sec:phase2}).
+\end{itemize}
+
+\end{document}

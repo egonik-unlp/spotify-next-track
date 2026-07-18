@@ -27,7 +27,7 @@ import urllib.request
 
 from qdrant_client import QdrantClient
 
-QDRANT_URL = "http://localhost:6335"
+QDRANT_URL = "http://localhost:6337"
 API = "https://api.reccobeats.com/v1"
 FEATURES = [
     "danceability", "energy", "valence", "tempo", "acousticness",
