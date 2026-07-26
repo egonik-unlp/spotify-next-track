@@ -219,7 +219,19 @@ pub async fn backfill(db: &crate::Db, root: &Path) -> Result<BackfillReport> {
 
     // -------- datasets (file wins; full manifest as JSONB) --------
     for dir in subdirs(&root.join("data/datasets")) {
-        let manifest_path = dir.join("manifest.json");
+        // Pointwise datasets carry `manifest.json`; SEQUENCE datasets carry
+        // `sequence-manifest.json` instead. Checking only the pointwise name
+        // reported every sequence dataset as a problem AND skipped its upsert,
+        // so a sequence-only instance backfilled an empty dataset index while
+        // printing one error per dataset. (Same omission was already fixed in
+        // the dataset-archive endpoint and the remote worker; this was the
+        // third site.)
+        let pointwise = dir.join("manifest.json");
+        let manifest_path = if pointwise.is_file() {
+            pointwise
+        } else {
+            dir.join("sequence-manifest.json")
+        };
         let manifest: serde_json::Value = match read_json(&manifest_path) {
             Ok(m) => m,
             Err(e) => {
