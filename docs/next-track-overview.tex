@@ -1,0 +1,149 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.6cm]{geometry}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{parskip}
+\setlength{\emergencystretch}{3em}
+
+\title{Next-Track Recommendation:\\ A Plain-Language Overview}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent A less-technical companion to \texttt{next-track.pdf} --- the same
+story and the same headline numbers, with fewer acronyms. For the full
+statistics, confidence intervals, and run provenance, see the main document.
+\end{abstract}
+
+\section*{What we're trying to do}
+
+Given a listening session --- the songs you've played so far, in order ---
+predict the song you'll play \emph{next}, and more broadly build a continuation
+that feels right: same mood, sensible flow, not just ``more of the same album.''
+
+We test this the honest way. We take real sessions, hide the last song, let the
+model rank the whole catalog, and check whether the hidden song shows up in its
+top~10. The main score, \textbf{Recall@10}, is simply \emph{``how often is the
+real next song in the top~10?''}
+
+Two things make the scores look low, on purpose:
+
+\begin{itemize}
+  \item \textbf{We only count the \emph{exact} next track.} Landing a song by the
+  same artist, or the same genre, or one that simply \emph{sounds} like the
+  answer, gets no credit under Recall@10 (we track those separately as softer
+  scores).
+  \item \textbf{Cold start is the reality.} Because we split sessions by time,
+  \emph{over half} the test answers are songs that never appeared in any training
+  session. No model can memorize its way to those. This caps how high any score
+  can go, so every result is read \emph{relative to a simple baseline}, never as
+  an absolute number.
+\end{itemize}
+
+The dataset: about 7{,}150 sessions over about 19{,}400 tracks, split into a
+training half and a test half by date.
+
+\section*{The players, in plain terms}
+
+\begin{itemize}
+  \item \textbf{The sequence model (a ``GRU'').} A small neural network that
+  reads the session song-by-song and predicts what the next song should
+  ``sound like,'' then finds the closest catalog songs to that guess. It captures
+  the \emph{trajectory} of a session, not just the last song.
+  \item \textbf{The co-occurrence baseline (a ``Markov'' model).} A simple tally
+  of \emph{``which song tends to follow which''} learned from training sessions.
+  It's the bar everything must beat --- and it's the model the sibling app already
+  ships.
+  \item \textbf{The content / ``sounds-alike'' neighbor.} For each candidate, how
+  close does it sound to the session so far, using an audio-and-metadata
+  fingerprint of each track. No training required.
+\end{itemize}
+
+\section*{The story, campaign by campaign}
+
+\paragraph{1. A smart sequence model, alone, only ties the simple baseline.}
+The GRU on its own matched the co-occurrence tally on Recall@10 and actually did
+\emph{worse} on ranking quality. Predicting a next-song ``sound'' and hopping to
+it is a harder route to the \emph{exact} next track than just remembering what
+usually follows what.
+
+\paragraph{2. Making the network fancier didn't help.}
+Deeper, wider, bidirectional variants --- none beat the baseline. Architecture
+was a dead end. The one lever that mattered for the network was its \emph{training
+objective} (a contrastive setup was about $2.3\times$ better than the naive one),
+not its size or shape.
+
+\paragraph{3. The breakthrough: blend the two.}
+Combining the sequence model with the co-occurrence baseline jumped Recall@10 by
+\textbf{about $+61\%$} over the baseline. Why? The two models get \emph{different}
+songs right --- one knows session flow, the other knows raw adjacency --- so
+together they roughly double the hit rate. This blend became the first champion.
+
+\paragraph{4. More blending didn't help.}
+Adding a second neural model, or replacing the simple weighted blend with a
+learned ``combiner,'' made things \emph{worse}, not better. Piling on more of the
+same \emph{kind} of signal is redundant. The lesson: gains come from a
+\textbf{genuinely new signal}, not from fancier mixing.
+
+\paragraph{5. The one genuinely new signal was ``sounds-alike'' content.}
+Adding the content neighbor as a third ingredient was the only thing that
+actually improved the blend --- because it ranks \emph{different} near-misses
+than the other two. That gave a three-part blend.
+
+\paragraph{6. How we fingerprint each song matters --- and simpler won.}
+Each song is turned into a compact numeric ``fingerprint.'' We compared a fancy
+neural compression against a plain statistical one (PCA) at several sizes. The
+plain one won at every reasonable size, and quality peaked at \textbf{192 numbers
+per song} (past that it started adding noise). Intuition: the sequence model
+finds the plain, well-organized fingerprint easier to aim at.
+
+\paragraph{7. The current champion.}
+The best model on record is a three-part blend where the sequence and content
+legs both operate in a \textbf{learned ``sounds-like map''} --- a space tuned so
+that ``close'' means ``likely to come next.'' It lands the exact next track in
+the top~10 about \textbf{21\% of the time}, the right \emph{artist} about 33\%,
+and the right \emph{genre} about 40\% --- far more useful than the 21\% exact
+number alone suggests. Crucially, it also \textbf{reaches songs it never saw in
+training} (the cold-start majority), which the other legs can't. It's been
+hardened on a second, independent time-split and is \textbf{deployed and callable}
+as a live model, not just a spreadsheet row.
+
+\paragraph{8. ``Best at exact'' isn't ``best at vibe.''}
+We added a continuous ``sounds-alike'' score that gives partial credit for
+landing something that \emph{feels} like the answer. Interesting twist: the model
+that wins on exact hits is \textbf{not} the one whose misses sound closest to the
+truth. Different goals, different winners --- so we keep exact-recall as the
+official score and treat ``sounds-alike'' as a diagnostic.
+
+\paragraph{9. Why sessions can feel ``too album-eager,'' and the knob for it.}
+A common complaint is that top blends parrot the current artist or album. We
+measured it: the eagerness comes almost entirely from the \textbf{co-occurrence
+leg}, not the neural net (the neural models are actually the \emph{least} eager).
+And, against a popular hunch, the GRU and its longer-memory cousin (the LSTM) are
+statistically tied --- so \emph{``the GRU wins because it's more eager''} is
+\textbf{not} true. We also found a re-ranking knob that trades a \emph{tiny}
+amount of exact accuracy for noticeably more variety and mood-coherence ---
+essentially free at a light setting. It's available but off by default; the
+official score stays exact-recall.
+
+\section*{Bottom line}
+
+\begin{itemize}
+  \item A sequence model \textbf{alone} doesn't beat a simple
+  ``what-follows-what'' tally.
+  \item \textbf{Blending complementary signals} is where the wins are --- the
+  two-part blend was $+61\%$, and a ``sounds-alike'' content leg added the only
+  further gain.
+  \item \textbf{Simpler song fingerprints} (linear, 192 numbers) beat fancier
+  ones.
+  \item The champion is a deployed three-part blend that's strong on exact hits,
+  even stronger on getting the artist and genre right, and --- uniquely --- works
+  on songs it never saw before.
+  \item The ``album-eager'' feeling is real but comes from one specific leg, and
+  there's a dial to soften it when we want more adventurous sessions.
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,297 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{accent}{HTML}{C0392B}
+\definecolor{blu}{HTML}{2C6FBB}
+\definecolor{ink}{HTML}{2B2B2B}
+
+\titleformat{\section}{\Large\bfseries\color{ink}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries\color{blu}}{\thesubsection}{0.6em}{}
+\setlist{itemsep=2pt,topsep=3pt}
+\graphicspath{{figures/}}
+
+\newcommand{\artist}[1]{\textit{#1}}
+
+\begin{document}
+
+\begin{titlepage}
+\centering
+\vspace*{3cm}
+{\color{accent}\rule{\textwidth}{2pt}}\\[0.8em]
+{\Huge\bfseries A Portrait of a Predictor}\\[0.4em]
+{\Large What your next-track model hears coming}\\[0.6em]
+{\large\itshape Un retrato de quien predice --- lo que tu modelo del próximo tema oye venir}\\[0.8em]
+{\color{accent}\rule{\textwidth}{2pt}}\\[2cm]
+{\large A data portrait derived from 91{,}827 listening steps, the concepts a next-track\\
+GRU learned inside its own hidden state, and GPT-labeled sparse-autoencoder atoms.}\\[1cm]
+{\normalsize Spotify Next-Track Lab \quad$\cdot$\quad sequence dataset \texttt{seq-20260718-222807}}\\[0.3em]
+{\normalsize 2026-07-23}
+\vfill
+\end{titlepage}
+
+% ============================================================
+\section*{How to read this document}
+This report is bilingual. \textbf{Part~I is in English}; \textbf{Part~II es la
+versión en español} (identical content). It reads one thing: not \emph{what} you
+listen to, but what a machine trained to guess your \emph{next} track has learned
+about you. It is built from (1)~91{,}827 listening steps (each: the session so
+far $\rightarrow$ the track that actually came next); (2)~the champion blend's
+recurrent base learner, a GRU (\texttt{best-seq-nexttrack-20260718-230948-d3d4a})
+that predicts the next track's latent and ranks the library by it; and (3)~a
+sparse-autoencoder (SAE) probe of that GRU's hidden state, whose learned
+``atoms'' were named by GPT (\texttt{gpt-4o-mini}). Method and caveats are in the
+Provenance appendix --- read it: the model has \emph{genuinely} learned next-track
+structure, but it stores it in a \emph{dense, entangled} way, and that honesty is
+part of the picture.
+
+\clearpage
+\begin{center}{\color{blu}\Large\bfseries PART I \quad$\cdot$\quad ENGLISH}\end{center}
+\vspace{0.5em}
+
+\section{The one-paragraph portrait}
+Ask this model what you will play next and it thinks, above all, in
+\textbf{artists and their sonic neighbourhoods}. Its strongest internal features
+are dedicated detectors for the artists you loop hardest --- \artist{DIIV},
+\artist{Rammstein}, \artist{Thievery Corporation}, \artist{Aphex Twin},
+\artist{Four Tet} --- and for a handful of genre textures: \emph{alternative
+metal}, \emph{Brooklyn / indie rock}, \emph{album rock}, \emph{Düsseldorf
+electronic}, \emph{ambient}, and a clear seam of \emph{argentine rock}. From the
+session so far it can linearly guess the \emph{genre} of your very next track far
+above chance. It has learned the same listener the aggregate portrait found ---
+electronic core, rock heart, Argentine thread --- but arrived at it sideways, by
+learning what tends to \emph{follow} what in a session.
+
+\section{What it predicts}
+The model ranks your whole library for the next slot. On held-out sessions the
+true next track lands in its top~10 \textbf{15.7\%} of the time
+(\texttt{recall@10}), and when it misses the exact track it usually lands
+something that \emph{sounds} right: its top~10 scores \textbf{0.48}
+on \texttt{music@10} (sonic similarity to the truth). Most tellingly, the next
+track's \textbf{genre is linearly decodable from the GRU's hidden state at
+AUC~0.79} (41.7\% top-1 across 25~genres, against a 0.7\% chance rate) --- the
+recurrent state genuinely carries where the session is heading.
+
+\begin{center}\includegraphics[width=0.62\textwidth]{mind_decodability.pdf}\end{center}
+
+\section{The concepts it formed}
+The GRU doesn't store ``predict DIIV.'' It learns abstract feature detectors in
+its 256-dimensional hidden state; the SAE pulls those apart into individual
+``atoms,'' and GPT named each from the next-tracks that most excite it. The
+strongest atoms are crisp and namable:
+
+\begin{center}
+\begin{tabular}{@{}rll@{}}
+\toprule
+sep ($\sigma$) & Concept (GPT label) & Type \\
+\midrule
+$3.8$ & DIIV --- Brooklyn indie vibe & artist \\
+$3.5$ & Rammstein --- live performances & artist \\
+$3.4$ & Rammstein --- alternative-metal pattern & artist \\
+$3.0$ & Pink Floyd --- album-rock pattern & genre \\
+$2.8$ & Thievery Corporation --- downtempo & artist \\
+$2.8$ & Indie-rock favourites & genre \\
+$2.8$ & DIIV --- indie soundscape & artist \\
+$2.7$ & Aphex Twin --- ambient detection & artist \\
+$2.7$ & Four Tet --- electronica repetition & artist \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}\includegraphics[width=0.86\textwidth]{mind_concepts.pdf}\end{center}
+
+Each ``sep'' is how many standard deviations an atom's activation rises right
+before a next track of that artist/genre, versus every other step --- a clean
+$3.8\sigma$ for the DIIV detector is a strong, specific feature.
+
+\section{Who it thinks about most}
+The model spends its sharpest features on the artists that dominate your
+sessions. \textbf{Rammstein alone accounts for several of the top atoms}; DIIV
+gets two. This is the recurrent echo of heavy rotation: the more an artist
+anchors your sessions, the more dedicated hidden capacity the GRU devotes to
+seeing them coming. Some of these atoms also track \emph{sonic continuity} --- the
+Rammstein detectors carry a mood correlation of $\approx +0.2$, firing when the
+next track is not just same-artist but same-\emph{sound}, while the DIIV detector
+is almost purely identity ($\approx 0.0$).
+
+\section{What it captures --- and what it drops}
+Reassuringly, the model leaves almost nothing on the table: \textbf{all 25 of the
+frequent next-track genres are represented} by at least one dedicated atom, and
+\textbf{zero} frequent next-item concepts are dropped. The genres it separates
+most sharply are exactly your pillars:
+
+\begin{center}\includegraphics[width=0.82\textwidth]{mind_genre_repr.pdf}\end{center}
+
+\subsection{The honest caveat: dense, not clean}
+The catch is \emph{how} it stores all this. The hidden state is
+\textbf{dense, not sparse}: the SAE reconstructs it near-perfectly
+($99\%$ of variance), but $\approx 418$ of $512$ atoms fire on a typical step. So
+while the strongest atoms are namable, next-track information is \emph{smeared
+across nearly the whole layer} rather than isolated into a few tidy features. Read
+the concepts above as ``the dominant artists and genres each have a strong
+dedicated direction,'' not ``the model is a clean dictionary of your taste.'' This
+matches the standing lab finding that SAEs on this corpus don't yield crisp
+monosemantic atoms at this data scale --- the labels are suggestive readings, and
+the decodability numbers ($\S2$) are the solid ground.
+
+\section{The portrait in one line}
+\begin{quote}\itshape
+A next-track model that thinks in artists and their sonic neighbourhoods ---
+sharpest on the ones you loop (DIIV, Rammstein, Thievery Corporation, Aphex Twin,
+Four Tet), fluent in every genre from alternative metal to Düsseldorf electronic
+to argentine rock, able to call the next track's genre far above chance --- but
+holding it all in a dense, distributed hidden state rather than a tidy shelf of
+concepts.
+\end{quote}
+
+\clearpage
+\begin{center}{\color{blu}\Large\bfseries PARTE II \quad$\cdot$\quad ESPAÑOL}\end{center}
+\vspace{0.5em}
+
+\section{El retrato en un párrafo}
+Si le preguntas a este modelo qué vas a reproducir a continuación, piensa, ante
+todo, en \textbf{artistas y sus vecindarios sonoros}. Sus rasgos internos más
+fuertes son detectores dedicados a los artistas que más repites ---
+\artist{DIIV}, \artist{Rammstein}, \artist{Thievery Corporation}, \artist{Aphex
+Twin}, \artist{Four Tet}--- y a unas pocas texturas de género: \emph{alternative
+metal}, \emph{indie} de Brooklyn, \emph{album rock}, electrónica de Düsseldorf,
+\emph{ambient} y una veta clara de \emph{rock argentino}. A partir de la sesión
+hasta ese punto puede adivinar linealmente el \emph{género} del próximo tema muy
+por encima del azar. Ha aprendido al mismo oyente que encontró el retrato
+agregado --- núcleo electrónico, corazón de rock, hebra argentina--- pero llegó de
+costado, aprendiendo qué suele \emph{seguir} a qué dentro de una sesión.
+
+\section{Lo que predice}
+El modelo ordena toda tu biblioteca para el próximo lugar. En sesiones reservadas,
+el próximo tema real cae en su top~10 el \textbf{15,7\,\%} de las veces
+(\texttt{recall@10}), y cuando falla el tema exacto suele acertar algo que
+\emph{suena} bien: su top~10 marca \textbf{0,48} en \texttt{music@10} (similitud
+sonora con lo verdadero). Y lo más revelador: el \textbf{género del próximo tema
+es linealmente decodificable desde el estado oculto del GRU con AUC~0,79} (41,7\,\%
+de acierto top-1 entre 25~géneros, frente a un azar del 0,7\,\%) --- el estado
+recurrente sí lleva hacia dónde va la sesión.
+
+\begin{center}\includegraphics[width=0.62\textwidth]{mind_decodability.pdf}\end{center}
+\begin{center}\small\itshape (Etiquetas de la figura en inglés: ``accuracy'' $=$ acierto; ``chance'' $=$ azar.)\end{center}
+
+\section{Los conceptos que formó}
+El GRU no guarda ``predecir DIIV''. Aprende detectores de rasgos abstractos en su
+estado oculto de 256 dimensiones; el SAE los separa en ``átomos'' individuales, y
+GPT nombró cada uno a partir de los próximos temas que más lo activan. Los átomos
+más fuertes son nítidos y nombrables:
+
+\begin{center}
+\begin{tabular}{@{}rll@{}}
+\toprule
+sep ($\sigma$) & Concepto (etiqueta GPT) & Tipo \\
+\midrule
+$3{,}8$ & DIIV --- \emph{indie} de Brooklyn & artista \\
+$3{,}5$ & Rammstein --- en vivo & artista \\
+$3{,}4$ & Rammstein --- patrón \emph{alt-metal} & artista \\
+$3{,}0$ & Pink Floyd --- patrón \emph{album rock} & género \\
+$2{,}8$ & Thievery Corporation --- \emph{downtempo} & artista \\
+$2{,}8$ & Favoritos del \emph{indie rock} & género \\
+$2{,}8$ & DIIV --- paisaje \emph{indie} & artista \\
+$2{,}7$ & Aphex Twin --- \emph{ambient} & artista \\
+$2{,}7$ & Four Tet --- repetición \emph{electronica} & artista \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}\includegraphics[width=0.86\textwidth]{mind_concepts.pdf}\end{center}
+
+Cada ``sep'' es cuántas desviaciones estándar sube la activación de un átomo justo
+antes de un próximo tema de ese artista/género, frente al resto de los pasos --- un
+$3{,}8\sigma$ limpio para el detector de DIIV es un rasgo fuerte y específico.
+
+\section{En quién piensa más}
+El modelo gasta sus rasgos más afilados en los artistas que dominan tus sesiones.
+\textbf{Rammstein solo se lleva varios de los átomos principales}; DIIV, dos. Es el
+eco recurrente de la reescucha intensa: cuanto más ancla un artista tus sesiones,
+más capacidad oculta le dedica el GRU a verlo venir. Algunos de esos átomos también
+siguen la \emph{continuidad sonora} --- los detectores de Rammstein llevan una
+correlación de humor de $\approx +0{,}2$, activándose cuando el próximo tema no solo
+es del mismo artista sino del mismo \emph{sonido}, mientras que el de DIIV es casi
+pura identidad ($\approx 0{,}0$).
+
+\section{Lo que captura --- y lo que deja pasar}
+Tranquiliza que el modelo casi no deja nada sobre la mesa: \textbf{los 25 géneros
+frecuentes del próximo tema están representados} por al menos un átomo dedicado, y
+se descartan \textbf{cero} conceptos frecuentes. Los géneros que separa con más
+nitidez son justamente tus pilares:
+
+\begin{center}\includegraphics[width=0.82\textwidth]{mind_genre_repr.pdf}\end{center}
+
+\subsection{La advertencia honesta: denso, no limpio}
+El detalle es \emph{cómo} guarda todo esto. El estado oculto es \textbf{denso, no
+disperso}: el SAE lo reconstruye casi a la perfección ($99\%$ de la varianza), pero
+$\approx 418$ de $512$ átomos se activan en un paso típico. Así que, aunque los
+átomos más fuertes sean nombrables, la información del próximo tema está
+\emph{repartida por casi toda la capa} en vez de aislada en unos pocos rasgos
+limpios. Lee los conceptos de arriba como ``los artistas y géneros dominantes
+tienen cada uno una dirección dedicada fuerte'', no como ``el modelo es un
+diccionario limpio de tu gusto''. Esto coincide con el hallazgo estable del
+laboratorio de que los SAE en este corpus no dan átomos monosemánticos nítidos a
+esta escala de datos --- las etiquetas son lecturas sugerentes, y los números de
+decodificación ($\S2$) son el terreno firme.
+
+\section{El retrato en una línea}
+\begin{quote}\itshape
+Un modelo del próximo tema que piensa en artistas y sus vecindarios sonoros --- más
+afilado en los que repites (DIIV, Rammstein, Thievery Corporation, Aphex Twin,
+Four Tet), fluido en cada género del \emph{alternative metal} a la electrónica de
+Düsseldorf y el rock argentino, capaz de anticipar el género del próximo tema muy
+por encima del azar --- pero guardándolo todo en un estado oculto denso y
+distribuido en vez de un estante ordenado de conceptos.
+\end{quote}
+
+\clearpage
+\section*{Provenance \& honest caveats \quad$\cdot$\quad Procedencia y advertencias}
+
+\textbf{Data.} A single user's Spotify listening history, sessionized into the
+sequence dataset \texttt{seq-20260718-222807}. The per-model SAE ran over
+\textbf{91{,}827} \emph{(session, step)} rows (73{,}632 train / 18{,}195 test);
+each row is the hidden state at one step paired with the track that actually came
+next. Aggregate concept statistics are computed directly over these rows.
+
+\textbf{Model.} \texttt{best-seq-nexttrack-20260718-230948-d3d4a}, a
+single-layer GRU (256-d hidden) --- the recurrent base learner of the promoted
+GRU$\times$Markov blend champion. It encodes the session prefix and ranks the
+library by cosine to its predicted next-track latent
+(\texttt{recall@10}~$=0.157$, \texttt{music@10}~$=0.48$).
+
+\textbf{Interpretability.} A sparse autoencoder (512 atoms, $2\times$ overcomplete,
+$\ell_1=0.0015$, 40 epochs) trained on the GRU's per-step hidden activations;
+analysis \texttt{interp-run-20260723-204848-4e89f-msae} (reopen it under the UI's
+\emph{Saved analyses} tool). ``Concepts'' are read against the \emph{next item}:
+an atom's association is its mean-activation separation (in $\sigma$) for a
+next-track artist / genre / album class. Next-item genre decodability is a
+logistic probe on the raw activations (top-1 accuracy + macro-AUC vs. a majority
+baseline). The 12 surfaced atoms per layer had their top-activating next-tracks
+sent to \textbf{GPT (\texttt{gpt-4o-mini})} for a concept label.
+
+\textbf{The honest caveat.} The GRU has genuinely learned next-track structure ---
+genre is decodable at AUC~0.79 and every frequent concept is represented --- but the
+representation is \emph{dense}: $\approx 418$ of $512$ atoms fire per step and the
+code reconstructs $99\%$ of the layer's variance, so ``concepts'' are strong
+\emph{directions} in an entangled space, not clean monosemantic units. The SAE is a
+discovery lens, not a decision rule; the GPT labels are automated readings of
+10~tracks each and occasionally blur. The decodability and coverage numbers are
+solid; the atom labels are illustrative.
+
+\vfill
+\begin{center}\small
+Generated from the Spotify Next-Track Lab
+$\cdot$ analysis \texttt{interp-run-20260723-204848-4e89f-msae}
+$\cdot$ figures: \texttt{docs/figures/make\_mind\_figures.py}
+\end{center}
+
+\end{document}

@@ -960,6 +960,253 @@ def fig_nexttrack_phase2_families():
     save(fig, "nexttrack_phase2_families.pdf")
 
 
+# Fig 20: the musical-distance metric (music@10) back-filled across the 53
+# next-track runs — Recall@10 (x) vs music@10 (y), one point per run, colored by
+# predictor family. The metric CORRELATES with exact recall (r=0.609, stated in
+# the report) but crowns a DIFFERENT winner: the Recall@10 champion is a
+# seq-blend run (0.223), while the musically-closest predictions come from
+# seq-nexttrack (which regresses the next track's content latent and retrieves
+# by cosine) — best music@10 0.482, highest family mean 0.448 — even though its
+# exact recall is lower. The seq-popularity floor is correctly worst (0.185), so
+# the metric is not trivially saturated. music@10 is DISPLAY-ONLY; recall@10
+# stays primary. (2026-07-20-musical-distance-metric.md, sec. 4-5.)
+def fig_nexttrack_music_scatter():
+    # (recall@10, music@10) per run, grouped by predictor family. Transcribed
+    # verbatim from the full 53-run backfill table (report sec. 5).
+    fam = {
+        "seq-blend": {
+            "color": ACCENT, "marker": "o",
+            "r": [0.223, 0.217, 0.216, 0.212, 0.212, 0.209, 0.208, 0.205, 0.205,
+                  0.200, 0.195, 0.194, 0.193, 0.186, 0.173, 0.173, 0.171, 0.171,
+                  0.167, 0.158, 0.152, 0.128, 0.117],
+            "m": [0.461, 0.460, 0.455, 0.454, 0.454, 0.452, 0.454, 0.452, 0.455,
+                  0.458, 0.448, 0.447, 0.447, 0.449, 0.441, 0.441, 0.443, 0.396,
+                  0.444, 0.434, 0.429, 0.383, 0.377],
+        },
+        "seq-nexttrack": {
+            "color": GOOD, "marker": "s",
+            "r": [0.159, 0.157, 0.157, 0.153, 0.149, 0.148, 0.138, 0.127, 0.123,
+                  0.123, 0.123, 0.123, 0.123, 0.123, 0.122, 0.117, 0.115, 0.104,
+                  0.098, 0.096, 0.096, 0.093, 0.055, 0.041],
+            "m": [0.465, 0.482, 0.462, 0.475, 0.472, 0.450, 0.458, 0.451, 0.456,
+                  0.456, 0.456, 0.456, 0.456, 0.456, 0.450, 0.456, 0.457, 0.437,
+                  0.436, 0.432, 0.432, 0.436, 0.368, 0.392],
+        },
+        "seq-markov": {"color": "#9333ea", "marker": "D", "r": [0.107], "m": [0.407]},
+        "seq-ann": {"color": "#ea580c", "marker": "^", "r": [0.090], "m": [0.426]},
+        "seq-stacker": {"color": "#0891b2", "marker": "v",
+                        "r": [0.087, 0.085, 0.080], "m": [0.418, 0.408, 0.409]},
+        "seq-popularity": {"color": BAD, "marker": "X", "r": [0.001], "m": [0.185]},
+    }
+
+    fig, ax = plt.subplots(figsize=(6.4, 4.0))
+    for name, d in fam.items():
+        ax.scatter(d["r"], d["m"], s=42, color=d["color"], marker=d["marker"],
+                   edgecolors="white", linewidths=0.4, zorder=4, label=name)
+
+    # least-squares guide line (visual aid only; the r=0.609 is transcribed).
+    allr = [v for d in fam.values() for v in d["r"]]
+    allm = [v for d in fam.values() for v in d["m"]]
+    a, b = np.polyfit(allr, allm, 1)
+    xs = np.array([min(allr), max(allr)])
+    ax.plot(xs, a * xs + b, color=MUTED, ls="--", lw=1.2, zorder=2,
+            label="least-squares fit")
+
+    # the recall@10 champion (seq-blend a781c) — top on exact recall
+    ax.annotate("Recall@10 champion\n(seq-blend, 0.223)", xy=(0.223, 0.461),
+                xytext=(0.150, 0.492), ha="center", fontsize=6.8, color=ACCENT,
+                arrowprops=dict(arrowstyle="->", color=ACCENT, lw=0.8))
+    # the music@10 champion (seq-nexttrack d3d4a) — musically closest misses
+    ax.annotate("music@10 champion\n(seq-nexttrack, 0.482)", xy=(0.157, 0.482),
+                xytext=(0.052, 0.500), ha="center", fontsize=6.8, color=GOOD,
+                arrowprops=dict(arrowstyle="->", color=GOOD, lw=0.8))
+    # the popularity floor — correctly worst
+    ax.annotate("seq-popularity floor\n(0.185, correctly worst)", xy=(0.001, 0.185),
+                xytext=(0.062, 0.232), ha="center", fontsize=6.8, color=BAD,
+                arrowprops=dict(arrowstyle="->", color=BAD, lw=0.8))
+
+    ax.set_xlim(-0.01, 0.245)
+    ax.set_ylim(0.16, 0.515)
+    ax.set_xlabel("Recall@10 (next-distinct, exact hit)")
+    ax.set_ylabel("music@10 (best cosine in the balanced space)")
+    ax.xaxis.set_major_formatter(afmt)
+    ax.yaxis.set_major_formatter(afmt)
+    ax.set_title("music@10 correlates with Recall@10 ($r=0.609$) but crowns a\ndifferent winner: the recall leader is not the musically-closest")
+    ax.legend(loc="lower right", fontsize=6.8, ncol=2)
+    save(fig, "nexttrack_music_scatter.pdf")
+
+
+# Fig 21: the learned-content-projection champion HARDENED across two disjoint
+# leak-free splits. R'+M+C' beats the R+M+C crown on BOTH the canonical
+# 0.55-cold split (paired-D +0.0259) and a disjoint, colder 0.64-cold
+# earlier-holdout split (paired-D +0.0426): the lead WIDENS on the colder split,
+# exactly as the cold-reaching content leg predicts. Absolute R@10 is lower on
+# the colder split BY CONSTRUCTION; the verdict is the paired-D, not absolute
+# reproduction. (2026-07-18-nexttrack-literature-fit-campaign.md, Tier A1;
+# 2026-07-18b-nexttrack-projection-registration-and-scan.md, Second-split hardening.)
+def fig_nexttrack_projection_hardening():
+    groups = ["canonical split\n(cold 0.55)", "disjoint earlier split\n(cold 0.64)"]
+    proj = [0.2117, 0.1705]
+    rmc = [0.1859, 0.1279]
+    rm = [0.1712, 0.1174]
+    dtext = ["paired-$\\Delta$ +0.0259\n[+0.012, +0.041]",
+             "paired-$\\Delta$ +0.0426\n[+0.028, +0.057]"]
+    x = np.arange(len(groups))
+    w = 0.26
+
+    fig, ax = plt.subplots(figsize=(6.6, 4.0))
+    bars_p = ax.bar(x - w, proj, w, color=GOOD, label="R$'$+M+C$'$ projection (champion)")
+    bars_c = ax.bar(x, rmc, w, color=ACCENT, label="R+M+C crown (prior)")
+    bars_m = ax.bar(x + w, rm, w, color=MUTED, label="R+M 2-leg")
+    for bars in (bars_p, bars_c, bars_m):
+        for r in bars:
+            ax.text(r.get_x() + r.get_width() / 2, r.get_height() + 0.003,
+                    f"{r.get_height():.3f}", ha="center", va="bottom", fontsize=6.6)
+    for xi, t in zip(x, dtext):
+        ax.text(xi, 0.246, t, ha="center", va="top", fontsize=6.6, color=GOOD)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(groups)
+    ax.set_ylim(0.0, 0.30)
+    ax.set_ylabel("recall@10 (P(next-track hit))")
+    ax.yaxis.set_major_formatter(afmt)
+    ax.set_title("The projection lead WIDENS on the colder split:\ntwo-split hardening of the next-track champion")
+    ax.legend(loc="upper right", fontsize=7.0)
+    save(fig, "nexttrack_projection_hardening.pdf")
+
+
+# Fig 22: the item-vector variance budget, and why the champion projection is the
+# fix. The equal-weighted 4-block PCA-192 orders dimensions by RAW variance, so
+# 87% of the captured budget goes to the behaviorally-inert numeric+acoustic
+# blocks (43%+44% of raw input variance = popularity/era/loudness), reconstructed
+# to R2=1.000, while the signal-carrying text block (2.5% of raw variance,
+# L2-normalized -> tiny per-dim scale) is under-preserved (R2=0.717). Per-column
+# whitening FLIPS the captured budget to 73% text / 21% categorical (text
+# R2=0.905). The learned InfoNCE projection learns the same reweighting from data.
+# (2026-07-18c-nexttrack-representation-exploration.md, EVR preflight.)
+def fig_nexttrack_evr_budget():
+    blocks = ["text\n(artist/genre\nsignal)", "numeric+acoustic\n(popularity/era/\nloudness)", "categorical"]
+    full = [2.5, 87.0, 10.5]   # equal-weight PCA-192 captured budget == raw variance share
+    whit = [73.0, 6.0, 21.0]   # per-column standardize (whitening) captured budget
+    x = np.arange(len(blocks))
+    w = 0.38
+
+    fig, ax = plt.subplots(figsize=(6.4, 3.9))
+    b1 = ax.bar(x - w / 2, full, w, color=MUTED, label="equal-weight PCA-192 (variance-ordered)")
+    b2 = ax.bar(x + w / 2, whit, w, color=GOOD, label="per-column whitening")
+    for bars in (b1, b2):
+        for r in bars:
+            ax.text(r.get_x() + r.get_width() / 2, r.get_height() + 1.2,
+                    f"{r.get_height():.0f}%", ha="center", va="bottom", fontsize=7.2)
+    ax.set_xticks(x)
+    ax.set_xticklabels(blocks, fontsize=7.6)
+    ax.set_ylim(0, 100)
+    ax.set_ylabel("share of captured variance budget (%)")
+    ax.set_title("The equal-weighted PCA-192 spends 87% of its budget on inert\nnumeric+acoustic; whitening FLIPS it to text (the signal block)")
+    ax.annotate("text $R^2$: 0.717 $\\to$ 0.905", xy=(0, 73), xytext=(0.34, 52),
+                ha="left", fontsize=7.0, color=ACCENT,
+                arrowprops=dict(arrowstyle="->", color=ACCENT, lw=0.8))
+    ax.legend(loc="upper right", fontsize=7.2)
+    save(fig, "nexttrack_evr_budget.pdf")
+
+
+# Fig 23: the representation handicap is real for the RAW GRU but ABSORBED by the
+# champion projection. Per-variant paired-D on exact hit@10 vs the same-readout
+# PCA-192 baseline, under readout C (frozen gru-infonce-h256, raw representation)
+# and readout A (champion projection blend-gru-markov-content-proj). Six of eight
+# whitening / acoustic-drop / metric spaces LIFT the raw GRU (readout C, CI>0),
+# but NONE lift the champion (readout A) -- the learned InfoNCE map already
+# re-weights away the loud acoustic/numeric directions, so whitening the input
+# first is redundant at the champion ceiling.
+# (2026-07-18c-nexttrack-representation-exploration.md, Verdict 1.)
+def fig_nexttrack_representation():
+    # sorted by readout-C delta descending
+    variants = ["V5 balanced", "V3 std-noaco", "V4 textcat", "V2 std",
+                "V7 std-txtcatup", "V1 noaco", "V10 text-only", "V6 sonic-64"]
+    dC = [0.0356, 0.0342, 0.0335, 0.0300, 0.0259, 0.0252, 0.0147, -0.0014]
+    dA = [0.0042, 0.0049, -0.0168, -0.0035, -0.0063, -0.0028, -0.0119, -0.0182]
+    y = np.arange(len(variants))[::-1]
+    h = 0.38
+
+    fig, ax = plt.subplots(figsize=(6.6, 4.2))
+    ax.barh(y + h / 2, dC, h, color=GOOD, label="readout C: frozen GRU (raw representation)")
+    ax.barh(y - h / 2, dA, h, color=ACCENT, label="readout A: champion projection")
+    ax.axvline(0, color="black", lw=1.0)
+    ax.set_yticks(y)
+    ax.set_yticklabels(variants, fontsize=7.6)
+    ax.set_xlabel("paired-$\\Delta$ exact hit@10 vs same-readout PCA-192 baseline")
+    ax.xaxis.set_major_formatter(afmt)
+    ax.set_xlim(-0.03, 0.052)
+    ax.set_title("Whitening/acoustic-drop lifts the RAW GRU (readout C) but NOT the\nchampion projection (readout A): the projection already fixes it")
+    ax.legend(loc="lower right", fontsize=7.2)
+    save(fig, "nexttrack_representation.pdf")
+
+
+# Fig 24: the MMR-lambda anti-eager trade-off on the next-track champion. The
+# eval-time MMR re-rank (mmr_lambda, 1.0=off) is the STRONG holisticness lever:
+# as lambda drops off->0.3 recall@10 falls (the only thing traded), while ild@10
+# RISES (more diverse) and artist_adj@10 FALLS (less artist-eager). lambda=0.9 is
+# essentially FREE (recall dD -0.0014, inside the +/-0.015 noise band = TIE) yet
+# already lifts ild 0.406->0.436; lambda~0.7 buys a big ild gain (+0.114) and real
+# de-eagering (-0.039) for ~2 recall points. music@10 RISES monotonically as you
+# diversify (0.454->0.492) -- sonic closeness and list diversity are not in
+# tension; exact recall is the only cost. All from the champion A1 checkpoint,
+# offline (mmr_pool=200). (2026-07-22-session-holisticness-and-antieager-levers.md,
+# Phase C.)
+def fig_nexttrack_mmr_tradeoff():
+    labels = ["off\n(1.0)", "0.9", "0.7", "0.5", "0.3"]
+    x = np.arange(len(labels))
+    recall = [0.2117, 0.2103, 0.1936, 0.1642, 0.1097]
+    ild = [0.406, 0.436, 0.520, 0.653, 0.815]
+    artist_adj = [0.610, 0.603, 0.571, 0.486, 0.293]
+    music = [0.454, 0.462, 0.476, 0.487, 0.492]
+    band = 0.015  # recall@10 practical half-width; a dD inside it is a TIE
+
+    fig, ax = plt.subplots(figsize=(6.6, 4.0))
+    # left axis: recall@10 (the cost), with the noise band around the off point
+    ax.axhspan(recall[0] - band, recall[0] + band, color=BAD, alpha=0.08,
+               label="recall $\\pm0.015$ tie band")
+    ax.plot(x, recall, "o-", color=BAD, lw=2.0, zorder=5, label="recall@10 (cost)")
+    for xi, v in zip(x, recall):
+        ax.text(xi, v - 0.020, f"{v:.3f}", ha="center", fontsize=6.6, color=BAD)
+    ax.set_ylim(0.05, 0.87)
+    ax.set_ylabel("recall@10 (P(next-track hit))", color=BAD)
+    ax.tick_params(axis="y", labelcolor=BAD)
+    ax.yaxis.set_major_formatter(afmt)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_xlabel("MMR $\\lambda$ (1.0 = off; lower = more diversified)")
+    ax.grid(False)
+
+    # right axis: holisticness levers (ild up = good, artist_adj down = good)
+    ax2 = ax.twinx()
+    ax2.spines["top"].set_visible(False)
+    ax2.plot(x, ild, "s-", color=GOOD, lw=1.8, label="ild@10 $\\uparrow$ (diversity)")
+    ax2.plot(x, artist_adj, "D--", color=ACCENT, lw=1.8,
+             label="artist_adj@10 $\\downarrow$ (eagerness)")
+    ax2.plot(x, music, "^:", color=MUTED, lw=1.6, label="music@10 $\\uparrow$")
+    ax2.set_ylim(0.05, 0.87)
+    ax2.set_ylabel("holisticness metrics", color="#374151")
+    ax2.yaxis.set_major_formatter(afmt)
+    ax2.grid(False)
+
+    # annotate the two operating points
+    ax.annotate("$\\lambda=0.9$ near-free\n(recall TIE, ild +0.030)", xy=(1, 0.2103),
+                xytext=(1.15, 0.30), ha="left", fontsize=6.6, color=GOOD,
+                arrowprops=dict(arrowstyle="->", color=GOOD, lw=0.8))
+    ax.annotate("$\\lambda\\approx0.7$ de-eager\n($-2$ recall pts, ild +0.114)",
+                xy=(2, 0.1936), xytext=(1.7, 0.09), ha="left", fontsize=6.6,
+                color=ACCENT, arrowprops=dict(arrowstyle="->", color=ACCENT, lw=0.8))
+
+    # merged legend
+    h1, l1 = ax.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax.legend(h1 + h2, l1 + l2, loc="upper center", fontsize=6.5, ncol=2)
+    ax.set_title("MMR $\\lambda$ is the strong anti-eager lever: diversifying trades exact\nrecall for holisticness, and $\\lambda=0.9$ is essentially free")
+    save(fig, "nexttrack_mmr_tradeoff.pdf")
+
+
+
 if __name__ == "__main__":
     fig_ae_latent_knn()
     fig_svm_mae_vs_r2()
@@ -980,3 +1227,8 @@ if __name__ == "__main__":
     fig_nexttrack_compression()
     fig_nexttrack_dim_curve()
     fig_nexttrack_phase2_families()
+    fig_nexttrack_music_scatter()
+    fig_nexttrack_projection_hardening()
+    fig_nexttrack_evr_budget()
+    fig_nexttrack_representation()
+    fig_nexttrack_mmr_tradeoff()

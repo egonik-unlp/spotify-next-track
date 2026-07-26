@@ -12,6 +12,8 @@
 \newcommand{\runid}[1]{\texttt{\small\seqsplit{#1}}}
 \newcommand{\dsid}[1]{\texttt{\small #1}}
 \newcommand{\best}[1]{\textbf{#1}}
+\newcommand{\Rp}{\ensuremath{R'}}
+\newcommand{\Cp}{\ensuremath{C'}}
 
 \title{Recomendación de Pista Siguiente en Sesión: Síntesis de Experimentos}
 \author{}
@@ -32,7 +34,7 @@ realmente, evaluada sobre una única partición cronológica sin fugas
 \num{5723} entrenamiento / \num{1431} prueba; tasa de ítems fríos (cold-item)
 \num{0.55}). La métrica principal es recall@10, reportada junto al rango
 recíproco medio (MRR) y los diagnósticos de relevancia graduada artist@10 /
-genre@10 / artist\_mrr. Se consolidan siete campañas. Una GRU de sesión por sí
+genre@10 / artist\_mrr. Se consolidan doce campañas. Una GRU de sesión por sí
 sola solo \emph{empata} con la barra de Markov de co-escucha de primer orden
 (R@10 \num{0.1069}) en recall@10 y pierde en MRR, y ni el ajuste de la función
 de pérdida ni ninguna topología de red (profundidad, anchura, residual,
@@ -45,15 +47,29 @@ genuinamente aditiva es el \emph{contenido}: un barrido de representación de
 ítems halló que la \emph{dimensión} latente (no el compresor) es la palanca,
 con un pico en PCA-192, y sobre ese espacio rico un z-blend R+M+C de tres ramas
 (GRU $\times$ Markov $\times$ content-kNN) es la fila «mejor registrada» actual
-con recall@10 \num{0.1859}, MRR \num{0.1025} (paired $\Delta$ sobre el campeón
-previo $+\num{0.0133}$, IC por encima de cero). Dos salvedades acotan la
-coronación --- la confirmación por reproducción tuvo dispersión cero porque el
-entrenador es determinista (verificó determinismo, no robustez a la semilla), y
-el límite inferior del paired-$\Delta$ supera cero por solo $+\num{0.0007}$ en
-una única partición. Todos los predictores de ranking aquí son solo de
-entrenamiento y fuera del servidor, así que una victoria confirmada es una fila
-«mejor registrada», no un modelo promovido, y el campeón previo R+M sobre AE-64
-sigue siendo el ancla de productización.
+con recall@10 \num{0.1859}, MRR \num{0.1025}. Una campaña posterior de
+ajuste-a-la-literatura superó luego esa coronación: una \emph{proyección de
+contenido aprendida} supervisada (\Rp+M+\Cp), que ajusta un mapa métrico lineal
+del espacio de ítems PCA-192 hacia la adyacencia de pista siguiente por InfoNCE
+y recupera las ramas GRU y de contenido en él, alcanza recall@10 \num{0.2117},
+MRR \num{0.1220} (paired $\Delta$ sobre R+M+C $+\num{0.0259}$, IC por encima de
+cero), es \emph{robusta a la semilla} a través de tres semillas y
+\emph{alcanza ítems fríos}, y se endurece en una segunda partición disjunta con
+0.64 de fríos (paired $\Delta$ $+\num{0.0426}$, IC por encima de cero) ---
+resolviendo las dos salvedades delgadas (confirmación solo-determinista, margen
+$+\num{0.0007}$) que acotaban la coronación R+M+C. A diferencia de todo predictor
+de ranking previo, está registrada, promovida y es \emph{servible}
+(\texttt{blend-gru-markov-content-proj}, rango 1 del grupo de mejores modelos),
+cerrando la brecha de productización; una exploración de representación del vector
+de ítem y una métrica continua \emph{music@10} de tipo ``suena parecido''
+corroboran al campeón sin destronarlo. Una campaña final de medición añade una suite
+\emph{solo de visualización} de holisticidad de sesión (artist\_adj@10 /
+mood\_coh@10 / ild@10) que toma la huella del campeón como el modelo \emph{más}
+artist-eager medido (artist\_adj@10 \num{0.610}) --- con la eagerness proveniente de
+su pata de bigrama de Markov, no de la RNN, y la GRU y la LSTM estadísticamente
+empatadas --- y encuentra que un re-ranqueo MMR en evaluación ($\lambda\approx\num{0.9}$)
+es una palanca de holisticidad casi gratis, mientras que un regularizador anti-eager de
+entrenamiento es débil; no se promueve nada y la métrica principal sigue siendo Recall@10.
 \end{abstract}
 
 \section{Introducción}
@@ -105,23 +121,32 @@ más potente (coronó a ambos campeones) y puede discrepar de la barra estricta.
 Las métricas graduadas son el marcador honesto: el recall exacto es modesto por
 construcción, pero el campeón acierta el \emph{artista} correcto en el top diez
 $\sim$32\% de las veces y el \emph{género} correcto $\sim$40\% --- mucho más
-útil que el número exacto de $\sim$17\% que impone la tasa de ítems fríos.
+útil que el número exacto de $\sim$17\% que impone la tasa de ítems fríos. Desde
+2026-07-20 la tabla también incluye \textbf{music@10}, una métrica graduada
+continua de tipo ``suena parecido'' (Sección~\ref{sec:music}): el coseno máximo
+medio, en un espacio intrínseco balanceado de distancia musical, entre la
+siguiente pista verdadera y los diez candidatos recuperados --- un superconjunto
+suave de recall@10 que acredita aterrizar algo que \emph{suena como} la verdad en
+un fallo exacto. Es solo de visualización; la métrica principal sigue siendo
+recall@10.
 
-\paragraph{El campeón vigente y el ancla de productización.} La fila «mejor
-registrada» actual es un blend de fusión de rankings de tres ramas,
-\emph{R+M+C} (una GRU de sesión $\times$ un modelo de co-ocurrencia de Markov de
-primer orden $\times$ una rama content-kNN) sobre un espacio de ítems PCA-192,
-con R@10 \num{0.1859}, MRR \num{0.1025} (Sección~\ref{sec:phase2}). El campeón
-previo, el z-blend de dos ramas \emph{R+M} sobre el espacio del
-song-autoencoder de 64 dimensiones (AE-64), con R@10 \num{0.1726} / MRR
-\num{0.0963} (Sección~\ref{sec:blend}), sigue siendo el \emph{ancla de
-productización}: es el blend de dos ramas que mapea directamente sobre la ranura
-de transición de la app hermana, y sigue siendo el modelo desplegable hasta que
-el blend de tres ramas se registre como predictor. \textbf{Ningún predictor de
-ranking aquí es promovible al grupo de mejores modelos}: son solo de
-entrenamiento (sin subcomando \texttt{predict}), y R+M+C es un driver de fusión
-fuera del servidor, así que una victoria confirmada es una fila «mejor
-registrada», no un modelo promovido.
+\paragraph{El campeón vigente.} La fila «mejor registrada» actual --- y, desde
+2026-07-18, un modelo \emph{registrado, promovido y servible} --- es una
+\emph{proyección de contenido aprendida} supervisada, \emph{\Rp+M+\Cp}: una GRU
+de sesión $\times$ un modelo de co-ocurrencia de Markov de primer orden $\times$
+una rama content-kNN, donde la GRU (\Rp) y la rama de contenido (\Cp) recuperan en
+un mapa métrico InfoNCE del espacio de ítems PCA-192 ajustado hacia la adyacencia
+de pista siguiente, con R@10 \num{0.2117}, MRR \num{0.1220}
+(Secciones~\ref{sec:projection}--\ref{sec:projection-scan}). Supera al z-blend de
+tres ramas \emph{R+M+C} sobre el mismo espacio PCA-192 (R@10 \num{0.1859};
+Sección~\ref{sec:phase2}), que a su vez había destronado al z-blend de dos ramas
+\emph{R+M} sobre el espacio del song-autoencoder de 64 dimensiones (AE-64, R@10
+\num{0.1726}; Sección~\ref{sec:blend}). La proyección es \emph{robusta a la
+semilla} y \emph{endurecida en dos particiones}, y es desplegable vía
+\texttt{POST /api/models/blend-gru-markov-content-proj/predict} --- cerrando la
+brecha de productización que dejaban los drivers de fusión fuera del servidor
+previos. Los campeones previos siguen siendo referencias útiles (R+M sigue siendo
+el blend de dos ramas más ligero), pero ya no son el ancla desplegable.
 
 \section{Trasfondo: la tarea de secuencias, las líneas base y las métricas}
 \label{sec:background}
@@ -181,6 +206,17 @@ informes.
   forma decisiva, porque el entrenamiento puntual binario del stacker no
   optimiza el objetivo de ranking tan bien como fusionar directamente
   puntuaciones normalizadas.
+  \item[Proyección de contenido aprendida (mapa métrico supervisado).] Un mapa
+  lineal $W$ del espacio de latentes de ítems ajustado por \textbf{InfoNCE} sobre
+  los pares consecutivos de entrenamiento $(u\!\to\!v)$ (auto-bucles descartados,
+  convención de Markov), de modo que el coseno en el espacio-$W$ refleja
+  ``probable de seguir''. Es leak-free (solo pares de entrenamiento $+$ latentes
+  de contenido intrínsecos, nunca la partición). Tanto la rama content-kNN (\Cp)
+  como la GRU (\Rp) recuperan luego en el espacio proyectado; Markov no cambia. Es
+  la única alternativa \emph{supervisada} a la geometría PCA no supervisada y
+  ordenada por varianza y --- como el contenido es el único canal con alcance a
+  ítems fríos --- eleva \emph{ambas} ramas que comparten el espacio, siendo el
+  campeón actual (Sección~\ref{sec:projection}).
 \end{description}
 
 \paragraph{Espacios de latentes de ítems: song-AE frente a PCA, y la trampa de
@@ -214,44 +250,52 @@ espacio es un eje de primera clase. Aparecen tres familias:
 \section{Tabla de clasificación de pista siguiente}
 \label{sec:leaderboard}
 La Tabla~\ref{tab:lb} es la tabla vigente de «mejor registrada». Está sobre la
-única partición next-distinct sin fugas y ordenada por recall@10. \textbf{Todo
-predictor de ranking aquí es solo de entrenamiento y fuera del servidor}, así
-que el ``campeón'' es una fila «mejor registrada», no un modelo promovido y
-exportable a la app; el campeón previo R+M sobre AE-64 sigue siendo el ancla de
-productización (Sección~\ref{sec:intro}). Los espacios de ítems se ajustan todos
-desde la fuente de contenido leak-safe (Sección~\ref{sec:background}).
+única partición next-distinct sin fugas y ordenada por recall@10. Desde
+2026-07-18 la familia de secuencias lleva un contrato de servicio de ranking, así
+que el blend campeón de proyección aprendida es un modelo \emph{promovido y
+servible} (\texttt{blend-gru-markov-content-proj}, rango 1 del grupo de mejores
+modelos), no una mera fila de tabla (Sección~\ref{sec:projection-scan}); los blends
+anteriores debajo de él, y las ramas en solitario, siguen siendo referencias fuera
+del servidor. Los espacios de ítems se ajustan todos desde la fuente de contenido
+leak-safe (Sección~\ref{sec:background}). Desde 2026-07-22 la evaluación también
+lleva una suite \emph{solo de visualización} de holisticidad de sesión (artist\_adj@10 /
+mood\_coh@10 / ild@10; Sección~\ref{sec:holisticness}); no reordena este tablero (la
+métrica principal sigue siendo Recall@10), pero toma la huella del campeón como la fila
+más artist-eager.
 
 \begin{table}[ht]
   \centering
   \caption{Tabla de «mejor registrada» de pista siguiente, sobre la partición
   next-distinct sin fugas (\num{1431} sesiones de prueba; IC bootstrap al 95\%
-  sobre \num{2000} remuestreos). R@10, MRR, artist@10, genre@10 mejor cuanto más
-  alto; el modelo de Markov de primer orden es la barra de referencia
-  incumbente. Fila campeona y campeón previo en negrita; mejor celda por métrica
-  en negrita.}
+  sobre \num{2000} remuestreos). R@10, MRR, artist@10, genre@10, music@10 mejor cuanto más
+  alto; el modelo de Markov de primer orden es la barra de referencia incumbente.
+  Los valores de music@10 son el backfill offline (Sección~\ref{sec:music}); las
+  filas sin un run mapeado se dejan en blanco. Fila campeona y campeones previos en
+  negrita; mejor celda por métrica en negrita.}
   \label{tab:lb}
-  {\footnotesize\setlength{\tabcolsep}{3.8pt}\begin{tabular}{lccccl}
+  {\footnotesize\setlength{\tabcolsep}{3.2pt}\begin{tabular}{lcccccl}
     \toprule
-    Modelo & R@10 [IC 95\%] & MRR & art@10 & gen@10 & Nota \\
+    Modelo & R@10 [IC 95\%] & MRR & art@10 & gen@10 & mus@10 & Nota \\
     \midrule
-    \best{R+M+C, PCA-192} (fila campeona) & \best{0.1859 [0.166, 0.207]} & \best{0.1025} & 0.331 & 0.394 & mejor registrada \\
-    R+M+C, PCA-128                        & 0.1824 [0.162, 0.203] & 0.0993 & 0.332 & 0.396 & contenido aditivo \\
-    \best{R+M, AE-64} (campeón previo)    & 0.1726 [0.154, 0.192] & 0.0963 & 0.322 & 0.397 & ancla prod.; 3 semillas \\
-    R+M+C, AE-64 (graded-preferred)       & 0.1740 [0.154, 0.194] & 0.1014 & \best{0.330} & 0.400 & contenido solo empata \\
-    R+M, PCA-192                          & 0.1712 [0.151, 0.192] & 0.0952 & 0.329 & 0.398 & $\approx$ campeón previo \\
-    R+M, PCA-128                          & 0.1670 [0.148, 0.187] & 0.0920 & 0.329 & 0.398 & ganancia GRU no traslada \\
-    R+A+M, AE-64                          & 0.1684 & 0.0943 & --- & --- & rama ANN redundante \\
-    LSTM single, PCA-128                  & 0.1272 [0.110, 0.145] & 0.0495 & 0.335 & \best{0.458} & mejor único; $\ll$ blend \\
-    GRU single, PCA-192                   & 0.1230 [0.106, 0.140] & 0.0534 & \best{0.338} & 0.450 & óptimo puntual de dim \\
-    GRU single, PCA-128 (base)            & 0.1146 [0.099, 0.132] & 0.0489 & 0.333 & 0.452 & espacio base confirmado \\
-    GRU single, PCA-256                   & 0.1167 [0.101, 0.134] & 0.0502 & 0.338 & 0.458 & pasado el pico de dim \\
-    B2 Markov de primer orden (barra)     & 0.1069 [0.092, 0.124] & 0.0694 & 0.298 & 0.389 & incumbente de la app \\
-    GRU single, AE-64 (control)           & 0.0957 [0.081, 0.111] & 0.0411 & 0.294 & 0.450 & control del bake-off \\
-    ANN pooled-MLP, PCA-128               & 0.0901 [0.076, 0.105] & 0.0394 & 0.299 & 0.435 & pierde ante la GRU \\
-    XGB stacker (M+G / M+G+A)             & 0.080--0.087 & 0.042--0.049 & 0.31 & 0.38 & el combinador rinde peor \\
-    content-kNN (song-AE)                 & 0.0636 [0.050, 0.077] & 0.0321 & 0.272 & 0.405 & la rama C aditiva \\
-    item2vec (SGNS solo entren.)          & 0.0517 & 0.0214 & 0.166 & 0.312 & arrastra el blend \\
-    B0 popularidad / B1 recencia          & 0.0007 & --- & --- & --- & pisos \\
+    \best{\Rp+M+\Cp, PCA-192} (campeón, servible) & \best{0.2117 [0.191, 0.233]} & \best{0.1220} & 0.333 & 0.401 & 0.454 & nuevo campeón \\
+    R+M+C, PCA-192 (campeón de fusión previo) & 0.1859 [0.166, 0.207] & 0.1025 & 0.331 & 0.394 & 0.449 & contenido aditivo \\
+    R+M+C, PCA-128                        & 0.1824 [0.162, 0.203] & 0.0993 & 0.332 & 0.396 & --- & contenido aditivo \\
+    \best{R+M, AE-64} (campeón previo)    & 0.1726 [0.154, 0.192] & 0.0963 & 0.322 & 0.397 & 0.441 & ancla prod.; 3 semillas \\
+    R+M+C, AE-64 (graded-preferred)       & 0.1740 [0.154, 0.194] & 0.1014 & \best{0.330} & 0.400 & --- & contenido solo empata \\
+    R+M, PCA-192                          & 0.1712 [0.151, 0.192] & 0.0952 & 0.329 & 0.398 & 0.443 & $\approx$ campeón previo \\
+    R+M, PCA-128                          & 0.1670 [0.148, 0.187] & 0.0920 & 0.329 & 0.398 & 0.444 & ganancia GRU no traslada \\
+    R+A+M, AE-64                          & 0.1684 & 0.0943 & --- & --- & --- & rama ANN redundante \\
+    LSTM single, PCA-128                  & 0.1272 [0.110, 0.145] & 0.0495 & 0.335 & \best{0.458} & 0.451 & mejor único; $\ll$ blend \\
+    GRU single, PCA-192                   & 0.1230 [0.106, 0.140] & 0.0534 & \best{0.338} & 0.450 & 0.456 & óptimo puntual de dim \\
+    GRU single, PCA-128 (base)            & 0.1146 [0.099, 0.132] & 0.0489 & 0.333 & 0.452 & \best{0.457} & espacio base confirmado \\
+    GRU single, PCA-256                   & 0.1167 [0.101, 0.134] & 0.0502 & 0.338 & 0.458 & 0.456 & pasado el pico de dim \\
+    B2 Markov de primer orden (barra)     & 0.1069 [0.092, 0.124] & 0.0694 & 0.298 & 0.389 & 0.407 & incumbente de la app \\
+    GRU single, AE-64 (control)           & 0.0957 [0.081, 0.111] & 0.0411 & 0.294 & 0.450 & 0.432 & control del bake-off \\
+    ANN pooled-MLP, PCA-128               & 0.0901 [0.076, 0.105] & 0.0394 & 0.299 & 0.435 & 0.426 & pierde ante la GRU \\
+    XGB stacker (M+G / M+G+A)             & 0.080--0.087 & 0.042--0.049 & 0.31 & 0.38 & 0.41 & el combinador rinde peor \\
+    content-kNN (song-AE)                 & 0.0636 [0.050, 0.077] & 0.0321 & 0.272 & 0.405 & --- & la rama C aditiva \\
+    item2vec (SGNS solo entren.)          & 0.0517 & 0.0214 & 0.166 & 0.312 & --- & arrastra el blend \\
+    B0 popularidad / B1 recencia          & 0.0007 & --- & --- & --- & 0.185 & pisos \\
     \bottomrule
   \end{tabular}}
 \end{table}
@@ -658,9 +702,677 @@ desplegable hasta que el blend de tres ramas se registre con un subcomando
 \texttt{predict}.
 \emph{Fuente: \texttt{2026-07-15c-nexttrack-phase2-model-sweep.md}.}
 
+\section{La proyección de contenido aprendida: un nuevo campeón de la campaña de ajuste-a-la-literatura}
+\label{sec:projection}
+\emph{Motivación.} El campeón R+M+C (Sección~\ref{sec:phase2}) llevaba dos
+salvedades delgadas --- una confirmación por reproducción solo-determinista y un
+límite inferior del paired-$\Delta$ de solo $+\num{0.0007}$ --- y su margen estaba
+acotado por la tasa de ítems fríos de \num{0.55}, que solo la señal \emph{nueva}
+puede atacar. Guiada por un estudio de la literatura establecida de recomendación
+en sesión (la línea de session-kNN de Jannach--Ludewig, reglas secuenciales /
+Markov factorizado, trucos de entrenamiento de GRU4Rec, fusión de rankings y
+learning-to-rank, recomendación en sesión consciente de contenido / arranque en
+frío), esta campaña pre-registró tres niveles de métodos clásicos y preguntó
+cuáles mejoran realmente el ajuste a \emph{este} problema --- una tarea de
+\emph{recuperación} de pista siguiente distinta, de un solo usuario, basada en
+sesión, con 55\% de objetivos fríos. Todas las ramas se midieron fuera del
+servidor sobre el artefacto campeón PCA-192 \dsid{seq-20260715-131139},
+reutilizando el driver sancionado que reproduce al campeón (R+M+C \num{0.1859})
+exactamente; el estadístico de decisión es el $\Delta$ pareado por sesión contra
+ese campeón.
+
+\emph{Resultados --- la única victoria.} Una \textbf{proyección de contenido
+aprendida} supervisada es una nueva fila «mejor registrada». Ajustar un mapa
+métrico lineal $W$ del espacio de contenido PCA-192 hacia la adyacencia de pista
+siguiente (InfoNCE sobre pares consecutivos de entrenamiento, auto-bucles
+descartados) y luego recuperar \emph{ambas} la rama de contenido (\Cp) y la GRU
+(\Rp) en ese espacio proyectado da \textbf{z-blend \Rp+M+\Cp R@10 \num{0.2117}
+$[0.191, 0.233]$, MRR \num{0.1220}} --- un $\Delta$ pareado sobre el campeón de
+$+\num{0.0259}$ $[+0.012, +0.041]$, enteramente por encima de cero
+(Tabla~\ref{tab:projection}). A diferencia de la coronación R+M+C, es
+\textbf{robusta a la semilla} (tres semillas; $\Delta$ pareado $+\num{0.026}$ /
+$+\num{0.025}$ / $+\num{0.029}$, todos IC $>0$ --- una confirmación genuina con
+semillas variadas, ya que la proyección tiene init aleatorio y lotes barajados) y
+\textbf{alcanza ítems fríos}: la rama de contenido proyectada \Cp\ puntúa
+objetivos fríos \num{0.152} $\approx$ cálidos \num{0.151}, frente a los cálidos
+\num{0.226} / fríos \num{0.010} de Markov, así que alcanza ítems nunca vistos tan
+bien como los vistos --- generalización de contenido genuina, el único canal que
+alcanza la mayoría fría del 55\%. El mapa simétrico único supera al two-tower
+direccional, y rango-192 $=$ rango-64 (la ganancia es la supervisión, no la
+capacidad). Como efecto secundario, la GRU individual proyectada \Rp\
+($\sim$\num{0.176}) casi iguala al blend campeón \emph{antiguo} y aplasta al mejor
+individual previo (LSTM \num{0.127}).
+
+\begin{table}[ht]
+  \centering
+  \caption{Nivel A1 de la campaña de ajuste-a-la-literatura: la proyección de
+  contenido aprendida sobre PCA-192, frente al campeón R+M+C (\num{1431} sesiones
+  de prueba; IC bootstrap al 95\%; $\Delta$ pareado por sesión vs el campeón).
+  Ganador (\Rp+M+\Cp) en negrita; mejor celda por métrica en negrita.}
+  \label{tab:projection}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{lccccl}
+    \toprule
+    Modelo & R@10 [IC 95\%] & MRR & art@10 & gen@10 & $\Delta$ pareado vs campeón \\
+    \midrule
+    R+M+C campeón (tercios)           & 0.1859 [0.166, 0.207] & 0.1025 & 0.331 & 0.394 & --- (referencia) \\
+    \best{\Rp+M+\Cp (ambas proyectadas)} & \best{0.2117 [0.191, 0.233]} & \best{0.1220} & 0.333 & 0.401 & \best{$+0.0259$ [$+0.012,+0.041$] $>0$} \\
+    R+M+C+\Cp (4 ramas)               & 0.2061 [0.185, 0.227] & 0.1148 & \best{0.345} & \best{0.410} & $+0.0203$ [$+0.013,+0.029$] $>0$ \\
+    R+M+\Cp (cambia C$\to$\Cp)        & 0.1971 [0.177, 0.218] & 0.1107 & 0.334 & 0.400 & $+0.0112$ [$-0.000,+0.023$] cand. \\
+    \Cp\ proj-contenido (sim, r192)   & 0.1516 & 0.0708 & 0.305 & 0.401 & vs C no-sup. 0.0685: $+0.083$ \\
+    \Cp\ two-tower dir.\ (r192)       & 0.1349 & 0.0552 & 0.291 & 0.393 & gana simétrica \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{Las vías que se cerraron.} Toda otra dirección de ajuste-a-la-literatura no
+logró superar al z-blend fijo, exactamente como el estudio predijo para un corpus
+de un solo usuario y con muchos fríos (Tabla~\ref{tab:projection-lanes}). El
+suavizado principiado de Markov (descuento absoluto $+$ un piso de continuación de
+Kneser--Ney) es una ganancia de estimador en solitario real pero minúscula
+(\num{0.1069}$\to$\num{0.1104}) que se diluye en el blend ($-\num{0.0021}$, IC
+cruza 0 --- la rama de contenido ya cubre la masa fría marginal que recupera). Un
+combinador consciente de ranking no tiene margen honesto: incluso los pesos
+\emph{oráculo}, ajustados directamente sobre las etiquetas de prueba, alcanzan
+solo \num{0.1901} ($+\num{0.0042}$, cruza 0), y la fusión de ranking RRF
+\emph{perjudica} el recall ($-\num{0.029}$, IC$<$0, descartando la magnitud de
+puntuación que el z-blend conserva). Un kNN de sesión V-SKNN con puerta es
+solo-cálido frente al 55\% de objetivos fríos y \emph{arrastra} el blend
+($-\num{0.038}$, IC$<$0) --- el escenario de un solo usuario elimina el vecindario
+colaborativo entre usuarios que impulsa sus victorias de benchmark multiusuario. Y
+los negativos por importancia de GRU4Rec (un banco de negativos ponderado por
+soporte más grande) dan un tick en solitario dentro del ruido ($+\num{0.005}$) que
+también se diluye ($-\num{0.0014}$, empate). \textbf{La única ganancia aditiva
+viene de señal nueva, no de fusión más astuta.}
+
+\begin{table}[ht]
+  \centering
+  \caption{Las vías de ajuste-a-la-literatura que se cerraron: cada método
+  prestado no logra superar al z-blend fijo campeón (\num{1431} sesiones de prueba;
+  $\Delta$ pareado del blend por sesión vs el campeón).}
+  \label{tab:projection-lanes}
+  {\footnotesize\setlength{\tabcolsep}{5pt}\begin{tabular}{llcl}
+    \toprule
+    Vía & R@10 en solitario & $\Delta$ del blend vs campeón & Veredicto \\
+    \midrule
+    Suavizado KN de Markov (Nivel A2)      & 0.1069$\to$0.1104 & $-0.0021$ (cruza 0) & nulo en el blend \\
+    Combinador de ranking, \emph{oráculo} (B1) & 0.1901 (blend) & $+0.0042$ (cruza 0) & sin margen honesto \\
+    Fusión de ranking RRF (B1)             & 0.1572 (blend) & $-0.029$ (IC$<$0) & perjudica recall \\
+    V-SKNN kNN de sesión (B2)              & 0.0671 & $-0.038$ (IC$<$0) & arrastra (solo cálidos) \\
+    Negativos por importancia GRU (C)      & 0.1230$\to$0.1279 & $-0.0014$ (empate) & se diluye \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{Interpretación.} La proyección de contenido supervisada es la primera señal
+nueva genuinamente aditiva desde la propia rama de contenido, y funciona por la
+razón que el estudio señaló: el contenido es el único canal con alcance a ítems
+fríos, y reemplazar la geometría PCA no supervisada y ordenada por varianza por una
+ajustada al objetivo eleva \emph{ambas} ramas que la comparten. Los métodos
+prestados vistosos --- session-kNN, combinadores aprendidos, trucos de pérdida del
+lado GRU --- son callejones sin salida aquí porque o rebarajan las mismas tres
+ramas (sin margen sobre el z-blend, incluso para el oráculo) o importan una
+suposición colaborativa que el corpus de un solo usuario viola. El único eje
+secundario movible es la relevancia graduada: los reponderados oráculo / RRF y la
+proyección empujan artist@10 / genre@10, una palanca que el eje de recall exacto no
+comparte.
+\emph{Fuente: \texttt{2026-07-18-nexttrack-literature-fit-campaign.md}.}
+
+\section{Registro, el barrido de objetivo / rango / $\tau$, y endurecimiento en segunda partición}
+\label{sec:projection-scan}
+\emph{Motivación.} La victoria de la proyección aterrizó como driver fuera del
+servidor --- la misma brecha de productización que tenía la coronación R+M+C. Este
+seguimiento implementó la proyección como capacidad de primera clase del predictor
+\texttt{seq-blend} (hiperparámetros \texttt{projection}, \texttt{projection\_rank},
+\texttt{projection\_objective}, \texttt{projection\_tau}, \dots: ajusta el mapa
+métrico desde los pares consecutivos de entrenamiento, lo guarda como
+\texttt{projection.npz} en el directorio del run, y lo hornea en el modelo promovido
+para servicio), luego (1) reprodujo la victoria on-server y la registró $+$ promovió,
+y (2) corrió un barrido de ablación pre-aprobado de objetivo / rango / $\tau$ para
+confirmar que el default es la config robusta a promover.
+
+\emph{Registro.} El run de verificación
+(\runid{run-20260718-191539-1b89c-seq-blend}, default de la definición $=$ InfoNCE /
+rango completo / $\tau$ \num{0.07}) reprodujo el driver fuera del servidor a cuatro
+decimales --- R@10 \num{0.21174}, MRR \num{0.12199} --- y se promovió vía la API como
+\texttt{blend-gru-markov-content-proj}, con la matriz de proyección horneada en el
+directorio del modelo para servicio. \texttt{GET /api/best-models} lo confirma en
+\textbf{rango 1} (\num{0.21174}), por encima del campeón servible previo
+\texttt{blend-gru-markov-content} (rango 2, \num{0.18588}). Con el contrato de
+servicio de ranking de la familia de secuencias este es un modelo genuinamente
+desplegable, servible vía \texttt{POST /api/models/blend-gru-markov-content-proj/predict}.
+
+\emph{El barrido.} La regla de decisión --- re-promover solo una config que supere
+al default en \emph{ambos} R@10 y MRR por más que la banda de ruido de
+$\sim$$\pm\num{0.015}$ --- confirma el default (Tabla~\ref{tab:projection-scan}).
+\textbf{InfoNCE $\gg$ BPR} es el eje más agudo: ambas celdas BPR (\num{0.1579},
+\num{0.1523}) caen $\sim$\num{0.055} bajo el default InfoNCE y aterrizan \emph{por
+debajo incluso del viejo campeón R+M+C} (\num{0.1859}), así que el mapa BPR por
+pares produce una geometría materialmente peor para ambas ramas de latente
+compartido. \textbf{Rango completo $\ge$ rango-64} ($-\num{0.006}$, un empate ---
+reconfirmando ``la ganancia es la supervisión, no la capacidad''). Y \textbf{$\tau$
+es levemente sensible y monótona hacia arriba} en el rango probado
+(\num{0.05}$\to$\num{0.1929}, \num{0.07}$\to$\num{0.2117},
+\num{0.10}$\to$\num{0.2229}) --- pero la celda superior nominal $\tau$-\num{0.10}
+supera al default por solo $+\num{0.0112}$ en recall, \emph{dentro} de la banda de
+ruido, así que es un empate y el default se \textbf{MANTUVO}. A diferencia del eje
+de reponderación de la Sección~\ref{sec:projection}, aquí las métricas graduadas
+\emph{siguen} al recall (mejor y peor juntas), porque el barrido mueve la
+\emph{calidad de señal} en vez de refusionar ramas fijas.
+
+\begin{table}[ht]
+  \centering
+  \caption{El barrido de ablación on-server de objetivo / rango / $\tau$ (6 celdas,
+  ordenadas por recall@10). Todas superponen la definición promovida; hit@10 $=$
+  recall@10 por construcción. Campeón promovido (default, mantenido) en negrita;
+  mejor celda por métrica en negrita (todas de la celda sub-ruido $\tau$-\num{0.10}).}
+  \label{tab:projection-scan}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{lccccp{3.0cm}}
+    \toprule
+    Config & recall@10 & MRR & art@10 & gen@10 & run id \\
+    \midrule
+    S2 infonce / full / $\tau$ \num{0.10}          & \best{0.2229} & \best{0.1273} & \best{0.3424} & \best{0.4032} & \runid{run-20260718-193111-a781c} \\
+    \best{infonce / full / $\tau$ \num{0.07} (promovido, mantenido)} & \best{0.2117} & \best{0.1220} & 0.3326 & 0.4011 & \runid{run-20260718-191539-1b89c} \\
+    S3 infonce / rank 64 / $\tau$ \num{0.07}        & 0.2055 & 0.1169 & 0.3326 & 0.3990 & \runid{run-20260718-193650-66c96} \\
+    S1 infonce / full / $\tau$ \num{0.05}          & 0.1929 & 0.1111 & 0.3354 & 0.3997 & \runid{run-20260718-192443-57432} \\
+    S4 bpr / full / $\tau$ \num{0.07}              & 0.1579 & 0.0939 & 0.3187 & 0.3913 & \runid{run-20260718-194228-4cc06} \\
+    S5 bpr / rank 64 / $\tau$ \num{0.07}            & 0.1523 & 0.0909 & 0.3194 & 0.3906 & \runid{run-20260718-194832-d070f} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\subsection{Endurecimiento en segunda partición}
+\label{sec:projection-hardening}
+\emph{Motivación.} La coronación de la proyección se midió sobre una única
+partición sin fugas. Este pase solo-de-validación la re-corrió --- más los dos
+blends de referencia --- sobre una \textbf{segunda partición disjunta y sin fugas}
+para zanjar si la victoria es específica de la partición. Nada se promueve ni
+re-promueve. La partición \dsid{seq-20260718-211238} es una banda cronológica de
+\emph{holdout-temprano} 60--80\% sobre el mismo espacio PCA-192 (train 4.292 [60\%
+más temprano] / test 1.431 [banda 60--80\%]); el espacio de ítems es idéntico byte
+a byte al de la partición campeona, y la ventana de prueba es \textbf{disjunta en
+índice y tiempo} respecto al test 80--100\% de la partición campeona. Su
+\textbf{tasa de ítems fríos es \num{0.64}} (frente a \num{0.55}), un test de estrés
+de alcance a fríos más fuerte e independiente --- así que el R@10 absoluto aterriza
+\emph{por debajo} del \num{0.212} de la primera partición por construcción, y el
+veredicto es el $\Delta$ pareado por sesión sobre \emph{esta} partición, no la
+reproducción absoluta.
+
+\begin{table}[ht]
+  \centering
+  \caption{Endurecimiento en segunda partición sobre la partición disjunta de
+  holdout-temprano con 0.64 de fríos \dsid{seq-20260718-211238} (\num{1431} sesiones
+  de prueba; solo-validación, nada promovido). Métricas puntuales (arriba) y el
+  $\Delta$ pareado por sesión (abajo, bootstrap de 2000 remuestreos, semilla 1337).
+  Campeón de proyección en negrita.}
+  \label{tab:projection-hardening}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{lccccp{3.0cm}}
+    \toprule
+    Config & recall@10 & MRR & art@10 & gen@10 & run id \\
+    \midrule
+    \best{\Rp+M+\Cp campeón de proyección} & \best{0.1705} & \best{0.1050} & \best{0.2991} & \best{0.3417} & \runid{run-20260718-212639-50e1d} \\
+    Coronación R+M+C (referencia primaria) & 0.1279 & 0.0816 & 0.2956 & 0.3410 & \runid{run-20260718-213156-cf1dd} \\
+    R+M 2 ramas (referencia de contexto)   & 0.1174 & 0.0791 & 0.2844 & 0.3368 & \runid{run-20260718-214114-93bad} \\
+    \midrule
+    \multicolumn{6}{l}{\emph{$\Delta$ pareado recall@10 (proyección $-$ referencia):}} \\
+    PROY vs R+M+C (primaria) & \multicolumn{5}{l}{$+\num{0.0426}$ $[+0.0280, +0.0573]$ --- enteramente $>0$; MRR $+\num{0.0234}$ (sin regresión)} \\
+    PROY vs R+M (contexto)   & \multicolumn{5}{l}{$+\num{0.0531}$ $[+0.0391, +0.0678]$ --- enteramente $>0$} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_projection_hardening}
+  \caption{La ventaja de la proyección \emph{se ensancha} en la partición más fría.
+  Sobre la partición canónica con 0.55 de fríos el campeón de proyección supera a la
+  coronación R+M+C por $\Delta$ pareado $+\num{0.0259}$; sobre una partición disjunta
+  y más fría de holdout-temprano con 0.64 de fríos el margen \emph{crece} a
+  $+\num{0.0426}$ (ambos IC enteramente $>0$). El R@10 absoluto es menor en la
+  partición más fría por construcción (más objetivos son fríos); el veredicto es el
+  $\Delta$ pareado, inequívoco en ambas. El mecanismo: en una partición más fría las
+  ramas Markov / content-kNN de la coronación alcanzan menos objetivos, y la rama de
+  contenido \Cp\ de la proyección, que alcanza fríos, carga proporcionalmente más de
+  la victoria.}
+  \label{fig:nexttrack-projection-hardening}
+\end{figure}
+
+\emph{Veredicto --- coronación endurecida.} La regla de decisión ($\Delta$ pareado
+vs R+M+C con IC 95\% enteramente $>0$ y MRR sin regresión) se cumple: $\Delta$
+pareado \textbf{$+\num{0.0426}$ $[+0.0280, +0.0573]$}, MRR $+\num{0.0234}$ (sin
+regresión). La ventaja de la proyección no es específica de la partición --- de
+hecho el margen es \emph{más ancho} aquí ($+\num{0.0426}$) que en la primera
+partición ($+\num{0.0259}$), consistente con el mecanismo de alcance a fríos
+(Figura~\ref{fig:nexttrack-projection-hardening}). Combinado con la robustez a la
+semilla de tres semillas y la descomposición de alcance a fríos previas, la
+coronación está ahora endurecida en dos particiones disjuntas sin fugas ---
+resolviendo ambas salvedades que viajaban con la coronación R+M+C.
+\emph{Fuente: \texttt{2026-07-18b-nexttrack-projection-registration-and-scan.md}.}
+
+\section{Representación del vector de ítem: ¿es la geometría el cuello de botella?}
+\label{sec:representation}
+\emph{Motivación.} El eje de compresión (Secciones~\ref{sec:compression}--\ref{sec:dim})
+halló que la \emph{dimensión} latente domina pero nunca preguntó si la
+\emph{composición} del vector de ítem de 192-d --- el PCA de 4 bloques de peso igual
+(texto / numérico / acústico / categórico) --- es en sí misma un lastre. Un
+preflight de ratio de varianza explicada (EVR) dijo que podría serlo: el presupuesto
+de varianza de entrada crudo es 44\% acústico $+$ 43\% numérico frente a solo 2.5\%
+texto (el texto está L2-normalizado, así que su escala por dimensión es minúscula),
+así que el PCA-192 de matriz completa gasta \textbf{87\% de su presupuesto de
+varianza} reconstruyendo los bloques numérico $+$ acústico a $R^2 = \num{1.000}$
+mientras que el bloque de texto portador de señal alcanza solo $R^2 = \num{0.717}$;
+la estandarización por columna (whitening) voltea el presupuesto capturado a 73\%
+texto / 21\% categórico (texto $R^2$ \num{0.905})
+(Figura~\ref{fig:nexttrack-evr-budget}). Se construyeron ocho espacios de latentes
+de ítems alternativos (whitening $\times$ drop-acústico, solo-texto,
+texto$+$categórico, y la geometría métrica de distancia musical) con puerta de
+paridad respecto a la partición campeona (vocab / partición idénticos byte a byte;
+solo difiere \texttt{item\_latents.f32}) y cada uno se evaluó bajo \emph{dos}
+readouts: \textbf{(A)} la proyección campeona \texttt{blend-gru-markov-content-proj}
+(el mapa InfoNCE se reajusta sobre ese espacio --- el techo del espacio bajo la
+receta ganadora) y \textbf{(C)} la GRU individual congelada
+\texttt{gru-infonce-h256} (calidad de representación cruda). Solo-validación; nada
+promovido.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.78\textwidth]{nexttrack_evr_budget}
+  \caption{Por qué el vector de ítem es un lastre para un modelo crudo --- y por qué
+  la proyección es el arreglo. El PCA-192 de peso igual ordena las dimensiones por
+  varianza cruda, así que 87\% de su presupuesto capturado reconstruye los bloques
+  numérico $+$ acústico conductualmente inertes (popularidad / era / volumen)
+  mientras que el bloque de texto portador de señal (2.5\% de la varianza de entrada
+  cruda, L2-normalizado) queda infra-preservado ($R^2$ \num{0.717}). La
+  estandarización por columna voltea el presupuesto capturado a 73\% texto / 21\%
+  categórico (texto $R^2$ \num{0.905}). La proyección InfoNCE aprendida aprende esta
+  misma reponderación de los datos.}
+  \label{fig:nexttrack-evr-budget}
+\end{figure}
+
+\begin{table}[ht]
+  \centering
+  \caption{Exploración de representación del vector de ítem: ocho espacios de ítems
+  de 192-d alternativos vs el campeón PCA-192, bajo readout A (proyección campeona) y
+  readout C (GRU congelada). $\Delta$ pareado sobre hit@10 exacto (bootstrap de 2000
+  remuestreos, rng 1337) vs la línea base del mismo readout; una mejora necesita el
+  IC enteramente $>0$. Filas de línea base y la mejor mejora de readout C (V5) en
+  negrita.}
+  \label{tab:representation}
+  {\scriptsize\setlength{\tabcolsep}{3pt}\begin{tabular}{llcccc}
+    \toprule
+    & & \multicolumn{2}{c}{Readout A (proyección)} & \multicolumn{2}{c}{Readout C (GRU congelada)} \\
+    \cmidrule(lr){3-4}\cmidrule(lr){5-6}
+    Variante (espacio) & dataset id & R@10 & $\Delta$ hit@10 [IC] & R@10 & $\Delta$ hit@10 [IC] \\
+    \midrule
+    \best{full --- PCA-192 (línea base)} & \dsid{seq-20260715-131139} & \best{0.2117} & (línea base) & \best{0.1230} & (línea base) \\
+    V1 noaco               & \dsid{seq-20260718-222742} & 0.2089 & $-0.0028$ [$-0.013,+0.008$] & 0.1481 & $+0.0252$ [$+0.009,+0.041$] \\
+    V2 std (whiten todo)   & \dsid{seq-20260718-222754} & 0.2082 & $-0.0035$ [$-0.015,+0.008$] & 0.1530 & $+0.0300$ [$+0.011,+0.049$] \\
+    V3 std-noaco           & \dsid{seq-20260718-222807} & 0.2166 & $+0.0049$ [$-0.008,+0.017$] & 0.1572 & $+0.0342$ [$+0.015,+0.055$] \\
+    V4 textcat             & \dsid{seq-20260718-222820} & 0.1950 & $-0.0168$ [$-0.029,-0.006$] & 0.1565 & $+0.0335$ [$+0.015,+0.051$] \\
+    \best{V5 balanced-pca192} & \dsid{seq-20260718-222834} & 0.2159 & $+0.0042$ [$-0.006,+0.015$] & \best{0.1586} & \best{$+0.0356$ [$+0.019,+0.052$]} \\
+    V7 std-txtcatup        & \dsid{seq-20260718-222848} & 0.2055 & $-0.0063$ [$-0.019,+0.006$] & 0.1488 & $+0.0259$ [$+0.006,+0.046$] \\
+    V10 text-only          & \dsid{seq-20260718-222901} & 0.1999 & $-0.0119$ [$-0.025,+0.001$] & 0.1377 & $+0.0147$ [$-0.005,+0.034$] \\
+    V6 sonic-64 (64-d)     & \dsid{seq-20260718-222905} & 0.1936 & $-0.0182$ [$-0.031,-0.005$] & 0.1216 & $-0.0014$ [$-0.017,+0.013$] \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_representation}
+  \caption{El lastre de representación es real para la GRU \emph{cruda} pero
+  \emph{absorbido} por la proyección campeona. Seis de ocho espacios de whitening /
+  drop-acústico / métricos elevan la GRU congelada (readout C, verde; los seis con
+  IC del paired-$\Delta$ enteramente $>0$, $+\num{0.025}$ a $+\num{0.036}$), pero
+  ninguno eleva la proyección campeona (readout A, azul; los dos espacios
+  nominalmente positivos cruzan 0, y V4/V6 regresan significativamente). El mapa
+  InfoNCE aprendido ya reponderó fuera las direcciones acústicas / numéricas
+  ruidosas, así que hacer whitening a la entrada primero es redundante en el techo
+  del campeón: el whitening y la proyección son el mismo arreglo.}
+  \label{fig:nexttrack-representation}
+\end{figure}
+
+\emph{Veredicto --- recall exacto.} \textbf{Readout A: ninguna variante supera al
+campeón PCA-192 con IC del $\Delta$ pareado enteramente $>0$.} Los dos espacios
+nominalmente positivos (V3 std-noaco $+\num{0.0049}$, V5 balanced-pca192
+$+\num{0.0042}$) cruzan cero; dos espacios son significativamente \emph{peores} (V4
+textcat $-\num{0.0168}$, dejar caer numérico$+$acústico le cuesta señal real a la
+proyección; V6 sonic-64 $-\num{0.0182}$, el lastre esperado de 64-d). \textbf{Readout
+C: seis de ocho variantes superan a la GRU congelada con IC del $\Delta$ pareado
+enteramente $>0$} ($+\num{0.025}$ a $+\num{0.036}$; mejor V5 balanced $+\num{0.0356}$,
+V3 std-noaco $+\num{0.0342}$). Así que la geometría PCA-192 de matriz completa cruda
+\emph{es} un lastre --- suprimir las direcciones acústicas / numéricas ruidosas eleva
+la GRU cruda en $\sim$20--29\% relativo --- \textbf{pero la ganancia es absorbida por
+completo por la proyección}: el whitening eleva el readout C, no el readout A, porque
+el mapa InfoNCE aprendido ya reponderó fuera esas direcciones de los datos. El
+whitening y la proyección aprendida son el \emph{mismo arreglo}, y el campeón ya lo
+accionó (Figura~\ref{fig:nexttrack-representation}).
+
+\emph{Graduadas y music@10.} Las palancas de representación mueven el eje
+\emph{graduado} más limpiamente que el recall exacto: el whitening eleva el genre@10
+de la GRU congelada a $\sim$\num{0.47} (V7 std-txtcatup \num{0.4717}, V3 std-noaco
+\num{0.4710} vs línea base \num{0.4500}), y bajo la proyección un espacio solo-texto
+(V10) publica los máximos de readout A en artist@10 (\num{0.3466}) y genre@10
+(\num{0.4144}) mientras cede $-\num{0.0119}$ de recall exacto. La métrica continua
+\textbf{music@10} (Sección~\ref{sec:music}) \emph{corrobora} el veredicto de recall
+exacto en vez de revertirlo: el campeón de proyección la lidera (\num{0.4538}) sobre
+la coronación R+M+C (\num{0.4491}), y bajo la proyección campeona es plana a través
+de las ocho representaciones ($\sim$\num{0.447}--\num{0.460}). Re-basar la geometría
+mueve el emparejamiento de banda / ambiente, pero la adyacencia exacta de pista
+siguiente en el techo del campeón es inamovible --- que es precisamente el eje que la
+proyección supervisada posee.
+
+\emph{Interpretación.} El vector de ítem PCA-192 de peso igual es un lastre genuino
+para un modelo \emph{crudo}, y la proyección aprendida es exactamente la respuesta
+correcta a él --- esta campaña valida de forma independiente \emph{por qué} la
+proyección es el campeón (es el arreglo de representación, aprendido) y confirma que
+no queda almuerzo gratis en re-basar la geometría de entrada. La única precaución:
+dejar caer numérico$+$acústico \emph{por completo} (V4 textcat) perjudica al campeón
+aunque ayude a la GRU cruda, así que el bloque numérico porta algo que la proyección
+usa --- conservar numérico, hacer whitening / dejar caer solo acústico. La dirección
+abierta más prometedora es componer los dos arreglos: ajustar la proyección
+\emph{sobre} un espacio whitened / std-noaco / métrico para ver si alcanza más lejos
+o es redundante.
+\emph{Fuente: \texttt{2026-07-18c-nexttrack-representation-exploration.md}.}
+
+\section{La métrica music@10: el campeón de recall no es el más cercano musicalmente}
+\label{sec:music}
+\emph{Motivación.} El recall@10 exacto es implacable sobre un corpus de un solo
+usuario con 55\% de fríos, y los diagnósticos artist@10 / genre@10 son aciertos de
+categoría toscos. Esta campaña introduce una métrica graduada \emph{continua} de tipo
+``suena parecido'', \textbf{music@10}, y la back-fillea a través de cada run de pista
+siguiente. Se define como la media sobre casos de prueba del mejor coseno (máximo),
+en un espacio intrínseco \emph{balanceado} de distancia musical
+(\dsid{spotify\_tracks\_content\_metric}: una fusión con pesos por bloque,
+parcialmente whitened, del latente song-AE de 64-d whitened, el embedding de texto de
+nombre/tag de 384-d, cinco numéricos de metadatos, y un prototipo AE por género),
+entre la siguiente pista verdadera y los diez candidatos recuperados. Un top-diez que
+contiene la verdad exacta puntúa \num{1.0}, así que music@10 es un \emph{superconjunto
+suave} de recall@10 --- acredita aterrizar algo que \emph{suena como} la verdad
+incluso en un fallo exacto / de artista / de género. Es solo de visualización; la
+métrica principal sigue siendo recall@10.
+
+\emph{Resultados.} music@10 se recalculó offline y de forma no destructiva a través
+de los 53 runs de pista siguiente (desde el \texttt{predictions.json} almacenado de
+cada run y su \texttt{items.json} de dataset, sobre la partición compartida de
+\num{1431} casos). \textbf{Correlaciona} con recall@10 ($r = \num{0.609}$) --- un
+mejor ranker también aterriza fallos más cercanos --- pero está lejos de ser
+redundante, y corona a un ganador \emph{distinto} (Tabla~\ref{tab:music-families};
+Figura~\ref{fig:nexttrack-music-scatter}). El campeón de recall@10 es un run
+\texttt{seq-blend} (\num{0.223}), pero las predicciones \emph{más cercanas
+musicalmente} vienen de \texttt{seq-nexttrack} --- que regresa directamente el latente
+de contenido de la siguiente pista y recupera por coseno --- con mejor music@10
+\num{0.482} y la media de familia más alta (\num{0.448}). Cuando un modelo de pista
+siguiente falla la pista exacta, aún tiende a hacer aflorar algo que \emph{suena}
+bien; el piso \texttt{seq-popularity} es correctamente el peor (music@10 \num{0.185}),
+confirmando que la métrica no está trivialmente saturada.
+
+\begin{table}[ht]
+  \centering
+  \caption{music@10 por familia de predictor, del backfill offline sobre los 53 runs
+  de pista siguiente (una partición compartida de \num{1431} casos). El campeón de
+  recall@10 (\texttt{seq-blend}) \emph{no} es el campeón de music@10
+  (\texttt{seq-nexttrack}). Mejor celda por columna en negrita.}
+  \label{tab:music-families}
+  {\footnotesize\setlength{\tabcolsep}{6pt}\begin{tabular}{lcccc}
+    \toprule
+    Familia de predictor & runs & mejor recall@10 & mejor music@10 & music@10 medio \\
+    \midrule
+    seq-blend      & 23 & \best{0.223} & 0.461 & 0.441 \\
+    seq-nexttrack  & 24 & 0.159 & \best{0.482} & \best{0.448} \\
+    seq-markov     & 1  & 0.107 & 0.407 & 0.407 \\
+    seq-ann        & 1  & 0.090 & 0.426 & 0.426 \\
+    seq-stacker    & 3  & 0.087 & 0.418 & 0.411 \\
+    seq-popularity & 1  & 0.001 & 0.185 & 0.185 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.82\textwidth]{nexttrack_music_scatter}
+  \caption{music@10 frente a recall@10 a través de los 53 runs de pista siguiente, un
+  punto por run, coloreado por familia de predictor. Los dos ejes correlacionan
+  ($r = \num{0.609}$: un mejor ranker también aterriza fallos más cercanos) pero
+  coronan ganadores distintos --- el campeón de recall@10 (un run \texttt{seq-blend} en
+  \num{0.223}) no es el más cercano musicalmente, que es un run \texttt{seq-nexttrack}
+  (music@10 \num{0.482}) que regresa el latente de contenido y recupera por coseno. El
+  piso \texttt{seq-popularity} es correctamente el peor en ambos. music@10 es solo de
+  visualización; recall@10 sigue siendo la métrica principal.}
+  \label{fig:nexttrack-music-scatter}
+\end{figure}
+
+\emph{Interpretación.} music@10 es una vista genuinamente distinta y no saturada de la
+calidad de pista siguiente: premia la proximidad \emph{sónica}, que la métrica de
+acierto exacto ignora. El desacople recall-versus-music tiene un mecanismo limpio ---
+un modelo que regresa el latente de contenido (\texttt{seq-nexttrack}) aterriza
+\emph{cerca} de la verdad en el espacio de contenido incluso cuando falla la pista
+exacta, así que sus fallos ``suenan bien'' más a menudo que los del blend, que
+optimiza el rango exacto. Por eso la métrica es solo de visualización y no debe
+volverse silenciosamente un objetivo de selección: la promoción aún ordena por
+recall@10. La métrica hereda una circularidad leve del dial \emph{balanced} (el bloque
+de texto embebe el nombre del artista; el bloque de género es un prototipo de género),
+así que premia parcialmente la proximidad de mismo-artista / género --- pensada para
+``suena / se siente parecido'', no una verdad perceptual de referencia. Un endpoint
+compañero \texttt{GET /api/pathfinder/similar} sirve ``canciones como esta'' sobre el
+mismo índice.
+\emph{Fuente: \texttt{2026-07-20-musical-distance-metric.md}.}
+
+\section{Métricas de holisticidad de sesión y las palancas anti-eager (MMR $\lambda$ / eager $\beta$)}
+\label{sec:holisticness}
+\emph{Motivación.} Una queja cualitativa recurrente sobre los mejores blends es que
+sus predicciones se sienten ``demasiado album-eager / de tipo bigrama'' --- repiten
+como loro el artista actual en lugar de curar una continuación holística. Esta
+campaña cuantifica ese síntoma con una nueva suite \emph{solo de visualización} de
+métricas de \emph{holisticidad de sesión}, pone a prueba la hipótesis del usuario de
+que \emph{la GRU supera a la LSTM porque es más eager} (más ansiosa por repetir el
+artista actual), y mide si dos nuevas palancas de la Fase 2 reducen esa eagerness a
+un costo de recall aceptable: un re-ranqueo MMR en evaluación (\texttt{mmr\_lambda}) y
+un regularizador anti-eager de entrenamiento (\texttt{eager\_beta}). Es un pase de
+medición / exploratorio: no se promueve nada, la métrica principal sigue siendo
+Recall@10 y la decisión sobre el objetivo de holisticidad se difiere explícitamente al
+usuario. Cada rama corre sobre la partición \emph{canónica} PCA-192 del campeón
+\dsid{seq-20260715-131139} (\num{1431} sesiones de test; tasa de ítems fríos
+\num{0.55}), y el campeón reprodujo exactamente su Recall@10 de registro \num{0.2117}
+(\num{0.21174}).
+
+\paragraph{Las nuevas métricas de holisticidad solo de visualización.} Cableadas de
+extremo a extremo junto a music@10 (\texttt{seq\_common.eval\_from\_scores} $\to$ Rust
+$\to$ \texttt{domain.toml} $\to$ UI); la métrica principal no cambia.
+\begin{description}
+  \item[artist\_adj@10 ($\downarrow$).] Fracción del top-10 que comparte el artista de
+  la pista \emph{semilla} --- la tasa de ``repite como loro el artista actual''.
+  \textbf{Menor es mejor}.
+  \item[album\_adj@10.] Lo mismo sobre (artista, álbum); \textbf{omitida en este
+  dataset} porque su \texttt{items.json} no lleva el campo de álbum (esperado, no un
+  error --- cubierto por un dataset separado que sí lleva álbum).
+  \item[mood\_coh@10 ($\uparrow$).] Coseno medio del top-10 al centroide de mood del
+  prefijo en el espacio content-metric; mayor es más coherente en mood.
+  \item[ild@10 ($\uparrow$).] Diversidad intra-lista (distancia sónica media por pares)
+  del top-10; mayor es menos duplicativo.
+  \item[suffix\_recall@10 / cont\_prec@10.] Cobertura de continuación multi-paso,
+  producida solo por el arnés bajo demanda \texttt{seq\_continuation\_eval.py}
+  (Fase E, abajo), no por los runs normales.
+\end{description}
+La puerta de sanidad pasó: music@10 / mood\_coh@10 / ild@10 se pueblan en todos los
+runs de blend y GRU, de modo que los vectores content-metric cargaron y las palancas
+MMR / mood / ild están vivas, no son no-ops. Ambas palancas nuevas están APAGADAS por
+defecto y verificadas byte-idénticas al estar apagadas.
+
+\emph{Resultados --- la huella de holisticidad (Fase A).} La Tabla~\ref{tab:holisticness-fingerprint}
+toma la huella de la familia de modelos. \textbf{La eagerness sigue a Recall@10 dentro
+de la familia de blends} --- el campeón (Recall@10 \num{0.2117}) es el modelo \emph{más}
+artist-eager medido (artist\_adj@10 \num{0.610}), con R+M a continuación (\num{0.579})
+--- pero la eagerness vive en la pata de \emph{Markov}, no en la RNN: la barra de Markov
+de primer orden por sí sola ya está en \num{0.543}, mientras que la GRU / LSTM
+individuales quedan mucho más abajo, en artist\_adj@10 $\approx$ \num{0.345}. Así que
+los blends compran su ventaja en Recall@10 siendo artist-adyacentes (de tipo bigrama),
+que es exactamente lo que la suite de holisticidad señala. Las RNN individuales son, en
+cambio, los modelos \emph{coherentes en mood y de baja eagerness} (el mayor
+mood\_coh@10, el menor artist\_adj@10 entre modelos reales). Crucialmente, las métricas
+\emph{no se juegan trivialmente}: el suelo de popularidad maximiza ild@10 (\num{0.898})
+y minimiza artist\_adj@10 (\num{0.003}) pero puntúa $\approx 0$ recall y mood\_coh@10
+\emph{negativo} --- se maximizan siendo aleatorio, así que los modelos de baja eagerness
+/ alta diversidad con sentido son las RNN individuales reales.
+
+\begin{table}[ht]
+  \centering
+  \caption{Huella de holisticidad de la Fase A a través de la familia de modelos,
+  ordenada por Recall@10 (\num{1431} sesiones de test). Todos los runs comparten el
+  prefijo \protect\runid{run-20260722-165345-}; la columna id lista el sufijo
+  distintivo. Recall@10 (aciertos crudos de \num{1431}), MRR, artist@10, genre@10,
+  music@10, mood\_coh@10, ild@10 mejor-mayor; \textbf{artist\_adj@10 mejor-menor}. Fila
+  del campeón y mejor celda por métrica en negrita. \textsuperscript{\dag}~Los valores
+  extremos de artist\_adj@10 / ild@10 del suelo de popularidad son \emph{degenerados}
+  (ignora la semilla): aterriza $\approx 0$ recall y mood\_coh@10 negativo, probando que
+  las métricas no se juegan bajo/alto por un buen modelo.}
+  \label{tab:holisticness-fingerprint}
+  {\scriptsize\setlength{\tabcolsep}{3pt}\begin{tabular}{llcccccccc}
+    \toprule
+    Config & id & R@10 (crudo) & MRR & art@10 & gen@10 & mus@10 & artadj@10\,$\downarrow$ & mood@10\,$\uparrow$ & ild@10\,$\uparrow$ \\
+    \midrule
+    \best{A1 campeón \Rp+M+\Cp} & \texttt{82a8f} & \best{0.2117 (303)} & \best{0.122} & 0.333 & 0.401 & 0.454 & 0.610 & 0.398 & 0.406 \\
+    A2 R+M (blend)               & \texttt{28dbb} & 0.1712 (245) & 0.095 & 0.329 & 0.398 & 0.443 & 0.579 & 0.399 & 0.403 \\
+    A3 GRU sola ($\beta{=}0$)    & \texttt{e39c9} & 0.1230 (176) & 0.053 & \best{0.338} & 0.450 & \best{0.456} & 0.347 & \best{0.479} & 0.454 \\
+    B LSTM (resto igual a A3)    & \texttt{bb387} & 0.1188 (170) & 0.049 & 0.328 & \best{0.455} & 0.449 & 0.344 & 0.458 & 0.463 \\
+    A4 markov (primer orden)     & \texttt{047cc} & 0.1069 (153) & 0.069 & 0.298 & 0.389 & 0.407 & 0.543 & 0.310 & 0.462 \\
+    A5 popularidad               & \texttt{34614} & 0.0007 (1)   & 0.001 & 0.014 & 0.085 & 0.185 & \best{0.003}\textsuperscript{\dag} & $-0.041$ & \best{0.898}\textsuperscript{\dag} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{GRU frente a LSTM (Fase B) --- la hipótesis no se sostiene.} Con los
+hiperparámetros igualados (h256, InfoNCE, 40 épocas, lr \num{1e-3}), la GRU y la LSTM
+quedan estadísticamente \emph{empatadas}: Recall@10 \num{0.1230} frente a \num{0.1188}
+($\Delta$ $+\num{0.0042}$, dentro de la banda $\pm\num{0.015}$), y artist\_adj@10
+\num{0.347} frente a \num{0.344} (un $+\num{0.003}$ despreciable). La GRU no es
+medibiblemente más eager que la LSTM en esta partición, así que la hipótesis ``la GRU
+gana porque repite el artista actual con más fuerza'' queda \textbf{refutada aquí}.
+
+\emph{La palanca MMR $\lambda$ (Fase C) --- la palanca fuerte.} MMR es un re-ranqueo
+puramente en evaluación, así que los cuatro runs de entrenamiento por-$\lambda$
+lanzados originalmente fueron \emph{cancelados} (no experimentos fallidos); el barrido
+se computó offline desde el único checkpoint del campeón (la celda $\lambda{=}$off
+reprodujo exactamente el Recall@10 \num{0.2117} del campeón). A medida que $\lambda$ cae
+de off hacia \num{0.3} (Tabla~\ref{tab:mmr-sweep}; Figura~\ref{fig:nexttrack-mmr-tradeoff}),
+Recall@10 baja --- lo \emph{único} que se sacrifica --- mientras ild@10 sube y
+artist\_adj@10 baja (des-eagering). \textbf{$\lambda{=}\num{0.9}$ es esencialmente
+gratis}: el $\Delta$ de recall es $-\num{0.0014}$, bien dentro de la banda
+$\pm\num{0.015}$ (un empate), pero ya eleva ild@10 \num{0.406}$\to$\num{0.436} y recorta
+la eagerness \num{0.610}$\to$\num{0.603}. \textbf{$\lambda\approx\num{0.7}$} sacrifica
+$\sim$2 puntos de recall ($\Delta$ $-\num{0.0181}$, justo fuera de la banda) por una
+gran ganancia de ild@10 (\num{0.406}$\to$\num{0.520}) y una caída real de eagerness
+(\num{0.610}$\to$\num{0.571}). Un efecto colateral notable: \textbf{music@10 sube
+monótonamente} a medida que se diversifica (\num{0.454}$\to$\num{0.492}) --- cercanía
+sónica y diversidad de lista no están en tensión; solo se sacrifica el recall exacto.
+
+\begin{table}[ht]
+  \centering
+  \caption{Barrido MMR $\lambda$ de la Fase C sobre el campeón, computado offline desde
+  su checkpoint (\texttt{mmr\_pool} \num{200}; \num{1431} sesiones de test). Recall@10
+  (aciertos crudos), MRR, artist@10, music@10, mood\_coh@10, ild@10 mejor-mayor;
+  \textbf{artist\_adj@10 mejor-menor}. Mejor celda por métrica en negrita; recall / MRR
+  del default del campeón ($\lambda{=}$off) en negrita.}
+  \label{tab:mmr-sweep}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{lcccccccc}
+    \toprule
+    $\lambda$ & R@10 (crudo) & $\Delta$ vs off & MRR & art@10 & mus@10 & artadj\,$\downarrow$ & mood\,$\uparrow$ & ild\,$\uparrow$ \\
+    \midrule
+    off (1.0) & \best{0.2117 (303)} & --- & \best{0.122} & 0.333 & 0.454 & 0.610 & \best{0.398} & 0.406 \\
+    0.9 & 0.2103 (301) & $-0.0014$ (EMPATE) & 0.121 & 0.341 & 0.462 & 0.603 & 0.391 & 0.436 \\
+    0.7 & 0.1936 (277) & $-0.0181$ & 0.116 & 0.347 & 0.476 & 0.571 & 0.364 & 0.520 \\
+    0.5 & 0.1642 (235) & $-0.0475$ & 0.108 & \best{0.359} & 0.487 & 0.486 & 0.315 & 0.653 \\
+    0.3 & 0.1097 (157) & $-0.1020$ & 0.100 & 0.358 & \best{0.492} & \best{0.293} & 0.238 & \best{0.815} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_mmr_tradeoff}
+  \caption{El trade-off de MMR $\lambda$ sobre el campeón de pista siguiente. A medida
+  que $\lambda$ cae de off hacia \num{0.3}, Recall@10 (rojo, eje izquierdo) baja --- lo
+  único que se sacrifica --- mientras ild@10 sube y artist\_adj@10 baja (eje derecho;
+  más diverso, menos artist-eager) y music@10 incluso \emph{sube}.
+  $\lambda{=}\num{0.9}$ queda dentro de la banda de empate de recall $\pm\num{0.015}$
+  pero ya eleva ild@10 en \num{0.030}; $\lambda\approx\num{0.7}$ compra una gran
+  ganancia de ild@10 y des-eagering real por $\sim$2 puntos de recall. MMR es la palanca
+  de holisticidad fuerte; $\beta$ (Tabla~\ref{tab:eager-beta}) es débil.}
+  \label{fig:nexttrack-mmr-tradeoff}
+\end{figure}
+
+\emph{El regularizador anti-eager $\beta$ (Fase D) --- la palanca débil.} Una
+penalización de entrenamiento sobre la predicción casi-copia del latente de la pista
+actual (\texttt{eager\_margin} \num{0.0}) apenas mueve la aguja
+(Tabla~\ref{tab:eager-beta}): a lo largo de $\beta$ \numrange{0}{0.2}, artist\_adj@10
+solo se desplaza \num{0.347}$\to$\num{0.340} ($\Delta$ $-\num{0.0074}$) e ild@10 solo
+\num{0.454}$\to$\num{0.458}, con Recall@10 plano (las cuatro dentro de $\pm\num{0.015}$).
+La GRU individual ya es de baja eagerness (\num{0.347}), así que queda poco comportamiento
+de copia para penalizar --- $\beta$ no es una palanca de holisticidad útil en estos
+ajustes.
+
+\begin{table}[ht]
+  \centering
+  \caption{Barrido del regularizador anti-eager $\beta$ de la Fase D sobre la GRU
+  individual (\texttt{eager\_margin} \num{0.0}; \num{1431} sesiones de test). Recall@10,
+  artist@10, mood\_coh@10, ild@10 mejor-mayor; \textbf{artist\_adj@10 mejor-menor}. Mejor
+  celda por métrica en negrita.}
+  \label{tab:eager-beta}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{lccccccc}
+    \toprule
+    run id & $\beta$ & R@10 (crudo) & MRR & art@10 & artadj\,$\downarrow$ & mood\,$\uparrow$ & ild\,$\uparrow$ \\
+    \midrule
+    \runid{run-20260722-165345-e39c9} & 0.0  & 0.1230 (176) & 0.053 & \best{0.338} & 0.347 & \best{0.479} & 0.454 \\
+    \runid{run-20260722-165345-353b5} & 0.05 & \best{0.1237 (177)} & 0.053 & 0.337 & 0.346 & 0.478 & 0.455 \\
+    \runid{run-20260723-002044-af11a} & 0.1  & 0.1202 (172) & 0.053 & 0.335 & 0.344 & 0.477 & 0.456 \\
+    \runid{run-20260723-002044-17cf8} & 0.2  & 0.1202 (172) & 0.051 & 0.336 & \best{0.340} & 0.475 & \best{0.458} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{Continuación multi-paso (Fase E).} El arnés bajo demanda
+(\texttt{seq\_continuation\_eval.py} \texttt{-m 3 -k 10}, \num{1172} casos de
+continuación) muestra que la GRU \emph{supera} al bigrama de Markov en ambas métricas
+multi-paso (Tabla~\ref{tab:continuation}): la ventaja de la RNN \emph{se ensancha} más
+allá de la pista siguiente inmediata, porque la co-ocurrencia de un solo paso del
+bigrama no se compone en buenas continuaciones de 3 pasos, mientras que el estado de
+secuencia aprendido de la GRU sí --- la imagen especular del tablero de un solo paso,
+donde el blend con bigrama gana el Recall@10 crudo.
+
+\begin{table}[ht]
+  \centering
+  \caption{Continuación multi-paso de la Fase E (arnés \texttt{-m 3 -k 10},
+  \num{1172} casos) sobre \dsid{seq-20260715-131139}: la GRU (checkpoint A3) supera al
+  bigrama de Markov de primer orden en ambas métricas (mejor-mayor). Ganador en negrita.}
+  \label{tab:continuation}
+  {\footnotesize\setlength{\tabcolsep}{6pt}\begin{tabular}{lcc}
+    \toprule
+    Modelo & suffix\_recall@10 & cont\_prec@10 \\
+    \midrule
+    markov (bigrama de primer orden) & 0.0869 & 0.0236 \\
+    \best{GRU (gru-infonce-h256, A3)} & \best{0.0963} & \best{0.0273} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{Interpretación y la decisión diferida.} La campaña entrega un relato mecanístico
+limpio del síntoma de eagerness: proviene de la pata de bigrama de Markov (que repite
+como loro el artista actual vía co-ocurrencia cruda), no de la pata neural, así que
+cualquier des-eagering futuro debería apuntar al bigrama / la fusión, no a la RNN. De
+las dos nuevas palancas, el re-ranqueo MMR en evaluación es la palanca \emph{fuerte} y
+el regularizador $\beta$ de entrenamiento es \emph{débil}. No se promueve nada --- la
+métrica principal sigue siendo Recall@10 y el campeón no cambia --- pero
+\textbf{$\lambda\approx\num{0.9}$ queda señalado como una mejora de holisticidad casi
+gratis para una futura decisión de promoción del usuario} (Recall@10 empate dentro del
+ruido, ild@10 \num{0.406}$\to$\num{0.436}, eagerness \num{0.610}$\to$\num{0.603}), con
+$\lambda\approx\num{0.7}$ como el punto de operación de ``des-eagering significativo por
+$\sim$2 puntos de recall''; adoptar cualquiera de los dos requiere una decisión del
+usuario más una confirmación de 3 semillas / run nativo. El regularizador $\beta$ no se
+recomienda como palanca en estos ajustes.
+\emph{Fuente: \texttt{2026-07-22-session-holisticness-and-antieager-levers.md}.}
+
 \section{Conclusiones}
 \label{sec:conclusions}
-Siete campañas (jul 2026) sobre la tarea de recuperación de pista siguiente
+Doce campañas (jul 2026) sobre la tarea de recuperación de pista siguiente
 convergen en una historia clara. (1) Un modelo de secuencias de sesión, incluso
 en su mejor forma (GRU-infonce), solo \emph{empata} con la barra de Markov de
 co-escucha de primer orden en recall@10 y pierde en MRR: predecir un latente del
@@ -696,9 +1408,51 @@ fila «mejor registrada», no un modelo promovido y exportable a la app; el camp
 previo R+M sobre AE-64 sigue siendo el ancla de productización, y registrar un
 blend de tres ramas con un subcomando \texttt{predict} es el trabajo futuro
 principal vigente.
+(8) Una campaña posterior de ajuste-a-la-literatura \emph{superó} luego la
+coronación con la primera señal nueva genuinamente aditiva desde el contenido: una
+\emph{proyección de contenido aprendida} supervisada (\Rp+M+\Cp), un mapa métrico
+InfoNCE del espacio de ítems PCA-192 ajustado hacia la adyacencia de pista siguiente
+en el que recuperan tanto la GRU como la rama de contenido, con recall@10
+\num{0.2117}, MRR \num{0.1220} (paired $\Delta$ sobre R+M+C $+\num{0.0259}$, IC$>$0).
+Resuelve ambas salvedades de R+M+C --- es robusta a la semilla a través de tres
+semillas y alcanza ítems fríos (su rama de contenido puntúa objetivos fríos tan bien
+como cálidos) --- y fue \emph{registrada, promovida y servible}
+(\texttt{blend-gru-markov-content-proj}, rango 1 del grupo de mejores modelos),
+cerrando la brecha de productización; un barrido de objetivo / rango / $\tau$ confirma
+InfoNCE $\gg$ BPR y mantiene el default, y la coronación luego se endureció en una
+segunda partición disjunta con 0.64 de fríos (paired $\Delta$ $+\num{0.0426}$, IC$>$0,
+el margen \emph{más ancho} en la partición más fría). Todo método prestado de
+ajuste-a-la-literatura (session-kNN, fusión de rankings / combinadores aprendidos,
+trucos de pérdida del lado GRU, suavizado de Markov) se cerró --- la única ganancia
+aditiva vino de señal nueva, no de fusión más astuta. (9) Una exploración de
+representación del vector de ítem confirmó luego \emph{por qué} la proyección es el
+campeón: la geometría PCA-192 de peso igual es un lastre real para un modelo crudo
+(seis de ocho espacios whitened / drop-acústico / métricos elevan la GRU congelada,
+IC del $\Delta$ pareado $>0$), pero la ganancia es \emph{absorbida} por completo por la
+proyección aprendida (ningún espacio supera al campeón en readout A) --- el whitening y
+la proyección son el mismo arreglo, y el campeón ya lo accionó. (10) Finalmente, se
+introdujo una métrica continua de tipo ``suena parecido'', \emph{music@10}, y se
+back-filleó a través de los 53 runs: correlaciona con recall@10 ($r=\num{0.609}$) pero
+corona a un ganador distinto (el \texttt{seq-nexttrack} que regresa contenido aterriza
+los fallos más cercanos musicalmente, mejor \num{0.482}), corroborando los hallazgos
+de recall exacto sin revertirlos; es solo de visualización y la métrica principal sigue
+siendo recall@10. (11) Finalmente,
+una campaña de medición añadió una suite \emph{solo de visualización} de holisticidad de
+sesión (artist\_adj@10 / mood\_coh@10 / ild@10) y dos palancas anti-eager. Encontró que el
+síntoma de eagerness \emph{sigue} a Recall@10 dentro de la familia de blends --- el campeón
+es el modelo más artist-eager (artist\_adj@10 \num{0.610}) --- pero la eagerness proviene de
+la pata de bigrama de \emph{Markov}, no de la RNN (GRU / LSTM individuales con artist\_adj@10
+$\approx$ \num{0.345}), y la GRU y la LSTM están estadísticamente empatadas tanto en recall
+como en eagerness (la hipótesis ``la GRU gana por ser más eager'' queda refutada). De las dos
+palancas, el re-ranqueo MMR en evaluación es la palanca fuerte ($\lambda{=}\num{0.9}$ casi
+gratis: recall empate, ild@10 \num{0.406}$\to$\num{0.436}; $\lambda\approx\num{0.7}$
+des-eagers por $\sim$2 puntos de recall; music@10 incluso sube al diversificar la lista)
+mientras que el regularizador $\beta$ de entrenamiento es débil ($\beta$ \numrange{0}{0.2}
+mueve artist\_adj@10 solo $-\num{0.0074}$); no se promovió nada, y $\lambda\approx\num{0.9}$
+queda señalado para una futura decisión de holisticidad del usuario (Sección~\ref{sec:holisticness}).
 
 \section{Informes fuente}
-Esta síntesis consolida siete informes de campaña de pista siguiente de
+Esta síntesis consolida doce informes de campaña de pista siguiente de
 \texttt{experiments/}:
 \begin{itemize}
   \item \texttt{2026-07-13-nexttrack-sequence-sweep.md} --- la campaña
@@ -731,6 +1485,34 @@ Esta síntesis consolida siete informes de campaña de pista siguiente de
     stacker aprendido, la LSTM es el mejor modelo individual, y R+M+C sobre
     PCA-192 se corona como la nueva fila «mejor registrada»
     (Sección~\ref{sec:phase2}).
+  \item \texttt{2026-07-18-nexttrack-literature-fit-campaign.md} --- una exploración
+    guiada por bibliografía; una proyección de contenido aprendida supervisada
+    (\Rp+M+\Cp) es la nueva fila «mejor registrada» (R@10 \num{0.2117}, paired $\Delta$
+    sobre R+M+C $+\num{0.0259}$ IC$>$0, robusta a la semilla, alcanza fríos), y cada
+    método prestado (session-kNN, fusión de rankings, combinador aprendido, suavizado
+    de Markov, negativos por importancia de GRU) se cierra (Sección~\ref{sec:projection}).
+  \item \texttt{2026-07-18b-nexttrack-projection-registration-and-scan.md} --- la
+    proyección reproducida on-server, registrada $+$ promovida $+$ servible como
+    \texttt{blend-gru-markov-content-proj} (rango 1 del grupo de mejores modelos); un
+    barrido de objetivo / rango / $\tau$ (InfoNCE $\gg$ BPR; default mantenido) y
+    endurecimiento en segunda partición sobre una partición disjunta con 0.64 de fríos
+    (paired $\Delta$ $+\num{0.0426}$ IC$>$0) (Sección~\ref{sec:projection-scan}).
+  \item \texttt{2026-07-18c-nexttrack-representation-exploration.md} --- una auditoría
+    de representación del vector de ítem; la geometría PCA-192 de peso igual lastra la
+    GRU cruda (seis de ocho espacios alternativos la elevan IC$>$0) pero la ganancia es
+    absorbida por la proyección (ningún espacio supera al campeón en readout A)
+    (Sección~\ref{sec:representation}).
+  \item \texttt{2026-07-20-musical-distance-metric.md} --- la métrica continua de tipo
+    ``suena parecido'' music@10 y su backfill offline de 53 runs; correlaciona con
+    recall@10 ($r=\num{0.609}$) pero corona a un ganador distinto, el
+    \texttt{seq-nexttrack} que regresa contenido (Sección~\ref{sec:music}).
+  \item \texttt{2026-07-22-session-holisticness-and-antieager-levers.md} ---
+    una suite solo de visualización de holisticidad de sesión (artist\_adj@10 /
+    mood\_coh@10 / ild@10) y dos palancas anti-eager (MMR en evaluación
+    \texttt{mmr\_lambda}, y \texttt{eager\_beta} de entrenamiento); el campeón es el
+    modelo más artist-eager, la eagerness proviene de la pata de Markov,
+    GRU\,$\approx$\,LSTM, y MMR $\lambda$ es la palanca fuerte
+    (Sección~\ref{sec:holisticness}).
 \end{itemize}
 
 \end{document}
