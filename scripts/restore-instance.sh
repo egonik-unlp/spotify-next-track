@@ -145,7 +145,7 @@ esac
 # ---- 6. .env reminder --------------------------------------------------------
 if [ ! -f .env ]; then
   cp .env.example .env 2>/dev/null || true
-  warn "created .env from .env.example — set SPOTIFY_CLIENT_ID/SECRET only if you want the Pathfinder 'Export to Spotify' button"
+  warn "created .env from .env.example — set SPOTIFY_CLIENT_ID/SECRET only if you want corpus enrich (Spotify Web API)"
 fi
 
 cat <<EOF
@@ -154,17 +154,13 @@ cat <<EOF
 Instance restored. Final steps:
 
   1. (optional) Set SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET in .env — needed
-     only for the Pathfinder "Export to Spotify" button and corpus enrich.
+     only for corpus enrich (Spotify Web API client-credentials flow).
 
-  2. (one-time) Create the Pathfinder sidecar venv, spawned by the server:
-
-       zig build pathfinder-setup
-
-  3. Start the server, pointing Qdrant at the restored local instance:
+  2. Start the server, pointing Qdrant at the restored local instance:
 
        zig build serve -Dqdrant-url=$QDRANT_URL
 
-  4. (optional) Reconcile Postgres against the restored files:
+  3. (optional) Reconcile Postgres against the restored files:
 
        zig build migrate-data        # idempotent, prints a consistency report
 

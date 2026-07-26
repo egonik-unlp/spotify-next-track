@@ -1,0 +1,74 @@
+# spotify-next-track — snappler host deployment (image-only, pulls from ghcr).
+#
+# Place at /srv/shared/docker/spotify-next-track/docker-compose.yml on the host.
+# Unlike deploy/docker-compose.yml (which BUILDS from the repo), this pulls the
+# published image — the instance source need not live on snappler.
+#
+#   # from the dev machine (has the repo):
+#   cd deploy && docker compose build && docker compose push
+#   # on snappler:
+#   cd /srv/shared/docker/spotify-next-track
+#   cp /path/to/.env .env            # DB creds + Spotify/OpenAI keys
+#   docker compose pull && docker compose up -d
+#
+# Then restore instance state (Postgres dump + Qdrant snapshot + data/) — see
+# deploy/README.md — and add the Caddyfile route (deploy/Caddyfile.snippet).
+name: spotify-nexttrack
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: spotify-nexttrack-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${LENSING_DB_USER:-pg}
+      POSTGRES_PASSWORD: ${LENSING_DB_PASSWORD:-pg}
+      POSTGRES_DB: ${LENSING_DB_NAME:-lensing}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LENSING_DB_USER:-pg} -d ${LENSING_DB_NAME:-lensing}"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: spotify-nexttrack-qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  lensing-server:
+    image: ghcr.io/egonik-unlp/spotify-nexttrack:latest
+    container_name: spotify-nexttrack-server
+    restart: unless-stopped
+    environment:
+      LENSING_PORT: 8096
+      LENSING_QDRANT_URL: http://qdrant:6333
+      LENSING_COLLECTION: ${LENSING_COLLECTION:-spotify_tracks}
+      LENSING_DATABASE_URL: postgres://${LENSING_DB_USER:-pg}:${LENSING_DB_PASSWORD:-pg}@postgres:5432/${LENSING_DB_NAME:-lensing}
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+      SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "${LENSING_PORT:-8096}:8096"     # Caddy router → http://nexttrack.snappler
+    volumes:
+      - lensing_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8096/api/runs"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  pgdata:
+  qdrant_storage:
+  lensing_data:

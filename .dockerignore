@@ -1,0 +1,28 @@
+# Build-context excludes for deploy/Dockerfile (context = repo root).
+# Everything rebuilt inside the image or provided as a runtime volume/secret.
+.git
+.gitignore
+
+# Large binary state — mounted as the lensing_data volume at runtime, never baked.
+data
+instance-bundle
+*.tar
+*.tar.gz
+*.tgz
+
+# Rebuilt inside the image.
+target
+**/.venv
+**/node_modules
+ui/dist
+dist
+
+# Secrets — passed via compose environment, not baked into the image.
+.env
+deploy/.env
+
+# Docs / editor / OS noise.
+*.pdf
+docs/figures/*.png
+.DS_Store
+**/__pycache__

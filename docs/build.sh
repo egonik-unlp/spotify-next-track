@@ -18,6 +18,7 @@ fi
 echo "== figures =="
 python3 figures/make_figures.py
 python3 figures/make_taste_figures.py
+python3 figures/make_mind_figures.py
 
 echo "== experiments.tex =="
 "$TECTONIC" experiments.tex
@@ -28,5 +29,8 @@ echo "== api.tex =="
 echo "== music-taste.tex =="
 "$TECTONIC" music-taste.tex
 
+echo "== next-track-mind.tex =="
+"$TECTONIC" next-track-mind.tex
+
 echo "== done =="
-ls -la experiments.pdf api.pdf music-taste.pdf
+ls -la experiments.pdf api.pdf music-taste.pdf next-track-mind.pdf

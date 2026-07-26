@@ -29,8 +29,12 @@
 //!   db-down       → docker compose down (the pgdata volume survives)
 //!   migrate-data  → backend, db-up, then lensing-server migrate-data (idempotent
 //!                   file→postgres backfill + consistency report)
+//!   docker-serve  → docker compose up --build in deploy/ (whole instance as
+//!                   containers: server+UI+predictors + Postgres + Qdrant)
+//!   docker-build  → docker compose build in deploy/ (image only)
+//!   docker-down   → docker compose down in deploy/ (named volumes survive)
 //!   check         → test, lint, py-check
-//!   dev, julia-setup, py-setup, pathfinder-setup, test, lint, py-check are
+//!   dev, julia-setup, py-setup, test, lint, py-check are
 //!   independent leaves.
 
 const std = @import("std");
@@ -192,6 +196,36 @@ pub fn build(b: *std.Build) void {
     const infer = b.step("infer", "Run a predict-only inference node (models materialized from Postgres, port 8090)");
     infer.dependOn(&run_infer.step);
 
+    // ---------------- docker: build + run the whole instance as containers ----------------
+    // deploy/ holds a self-contained stack: one image (Rust server + built UI +
+    // the Python predictor venvs) plus its own Postgres + Qdrant. It
+    // serves on the same http://localhost:<port> the skills/agents expect, so
+    // Claude Code + the UI work against it unchanged. NOTE: the containers share
+    // port 8096 and the `spotify-nexttrack-*` names with `serve`/`db-up`, so stop
+    // those first (`zig build db-down`, Ctrl-C the dev server). Fresh volumes
+    // start EMPTY — restore an instance bundle for real corpus/models/data
+    // (deploy/README.md). Runs `docker compose` from deploy/ (picks up deploy/.env).
+    const docker_build_cmd = b.addSystemCommand(&.{ "docker", "compose", "build" });
+    docker_build_cmd.setCwd(b.path("deploy"));
+    docker_build_cmd.stdio = .inherit;
+    docker_build_cmd.has_side_effects = true;
+    const docker_build = b.step("docker-build", "Build the containerized instance image (deploy/Dockerfile: server + UI + predictor venvs)");
+    docker_build.dependOn(&docker_build_cmd.step);
+
+    const docker_up_cmd = b.addSystemCommand(&.{ "docker", "compose", "up", "--build" });
+    docker_up_cmd.setCwd(b.path("deploy"));
+    docker_up_cmd.stdio = .inherit; // foreground: stream logs, Ctrl-C stops (mirrors `serve`)
+    docker_up_cmd.has_side_effects = true;
+    const docker_serve = b.step("docker-serve", "Build + run the full instance as containers (server + Postgres + Qdrant; http://localhost:8096, Ctrl-C to stop)");
+    docker_serve.dependOn(&docker_up_cmd.step);
+
+    const docker_down_cmd = b.addSystemCommand(&.{ "docker", "compose", "down" });
+    docker_down_cmd.setCwd(b.path("deploy"));
+    docker_down_cmd.stdio = .inherit;
+    docker_down_cmd.has_side_effects = true;
+    const docker_down = b.step("docker-down", "Stop the containerized stack (deploy/ compose; named volumes survive)");
+    docker_down.dependOn(&docker_down_cmd.step);
+
     // ---------------- dev: Vite dev server with hot reload ----------------
     // Vite proxies /api to :8080, so run `zig build serve` in another
     // terminal first (or any lensing-server instance).
@@ -327,25 +361,4 @@ pub fn build(b: *std.Build) void {
 
     const py_setup = b.step("py-setup", "Create predictors/.venv and install the Python predictor deps (one-time)");
     py_setup.dependOn(&pip_install.step);
-
-    // ---------------- pathfinder-setup: one-time venv for the pathfinder sidecar ----------------
-    // The pathfinder service (pathfinder.service, spawned by lensing-server)
-    // needs the Qdrant client + numpy + requests, which the predictor venv
-    // does not carry. Kept in its own venv to stay independent of the heavy
-    // ML stack in predictors/.venv.
-    const pf_venv_create = b.addSystemCommand(&.{ "python3", "-m", "venv", "pathfinder/.venv" });
-    pf_venv_create.setCwd(b.path("."));
-    pf_venv_create.stdio = .inherit;
-    pf_venv_create.has_side_effects = true;
-
-    const pf_pip_install = b.addSystemCommand(&.{
-        "pathfinder/.venv/bin/pip", "install", "-r", "pathfinder/requirements.txt",
-    });
-    pf_pip_install.setCwd(b.path("."));
-    pf_pip_install.stdio = .inherit;
-    pf_pip_install.has_side_effects = true;
-    pf_pip_install.step.dependOn(&pf_venv_create.step);
-
-    const pathfinder_setup = b.step("pathfinder-setup", "Create pathfinder/.venv and install the pathfinder sidecar deps (one-time)");
-    pathfinder_setup.dependOn(&pf_pip_install.step);
 }

@@ -1,0 +1,8 @@
+# Append to /srv/shared/docker/router/Caddyfile, then:
+#   cd /srv/shared/docker/router && docker compose restart caddy
+# Reachable at http://nexttrack.snappler from any tailnet device.
+
+# spotify next-track (lensing) — UI + API
+http://nexttrack.snappler {
+	reverse_proxy localhost:8096
+}
