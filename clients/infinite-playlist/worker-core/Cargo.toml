@@ -1,0 +1,26 @@
+# Standalone crate — not part of the instance's Rust workspace (crates/*).
+[workspace]
+
+[package]
+name = "worker-core"
+version = "0.1.0"
+edition = "2021"
+description = "Infinite-Playlist compute core: cold-start projector (bge-m3 + metadata → PCA-192 seed latent) compiled to WASM for the Cloudflare Worker."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# The module is tiny; skip wasm-opt (mirrors ../app, avoids a workerd table-grow issue).
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

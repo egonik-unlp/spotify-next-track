@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playlist lab · lensing</title>
+<link rel="icon" href="/favicon.svg">
+<!-- Root-absolute, NOT relative: the lab answers at both /lab and /lab/, and
+     under the bare form a relative href resolves against / — where the React
+     SPA fallback returns index.html, so the page silently loads no CSS or JS. -->
+<link rel="stylesheet" href="/lab/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="wordmark" href="/">
+    <span class="mark" aria-hidden="true"></span>
+    <span class="wm-name">lensing</span>
+    <span class="wm-sep">·</span>
+    <span class="wm-instance">playlist lab</span>
+  </a>
+  <nav class="topnav">
+    <a href="/models" class="chrome-link">Models</a>
+    <a href="/interpretability" class="chrome-link">Interpretability</a>
+  </nav>
+  <span class="spacer"></span>
+  <output id="status" class="live" for="run">initialising…</output>
+</header>
+
+<div class="band">
+  <div class="band-titles">
+    <h1>Session generators</h1>
+    <p class="band-meta" id="bandmeta">
+      Autoregressive journeys from one seed, under one shared retrieval policy.
+    </p>
+  </div>
+  <button id="run" class="btn-primary" type="button">Generate</button>
+</div>
+
+<main class="view-body">
+
+  <form class="controls" id="controls" autocomplete="off">
+    <fieldset class="ctl ctl-seed">
+      <legend>Seed</legend>
+      <textarea id="seed" rows="3" spellcheck="false"
+        placeholder="spotify:track:000xQBsBOXGbHzbOwWsTua"
+        aria-describedby="seedhelp"></textarea>
+      <p class="help" id="seedhelp">
+        Spotify URIs, bare track ids, open.spotify.com URLs or vocab indices —
+        one per line. More seed tracks give the model more context.
+      </p>
+      <div class="seed-actions">
+        <button id="rand" class="btn-quiet" type="button">Random library track</button>
+        <span id="seedinfo" class="meta" role="status"></span>
+      </div>
+    </fieldset>
+
+    <fieldset class="ctl ctl-models">
+      <legend>Models</legend>
+      <div class="field">
+        <label for="modelA"><span class="series-dot series-a" aria-hidden="true"></span> A</label>
+        <select id="modelA"></select>
+      </div>
+      <div class="field">
+        <label for="modelB"><span class="series-dot series-b" aria-hidden="true"></span> B</label>
+        <select id="modelB"></select>
+      </div>
+      <p class="help">Both slots run the same seed and the same policy, so the
+        only difference is the algorithm.</p>
+    </fieldset>
+
+    <fieldset class="ctl ctl-knobs">
+      <legend>Retrieval policy</legend>
+      <div class="knob">
+        <label for="steps">steps</label>
+        <input id="steps" type="number" min="1" max="200" value="20">
+      </div>
+      <div class="knob">
+        <label for="artist_penalty">artist&nbsp;penalty</label>
+        <input id="artist_penalty" type="number" step="0.25" min="0" value="2">
+      </div>
+      <div class="knob">
+        <label for="anchor_lambda">anchor&nbsp;λ</label>
+        <input id="anchor_lambda" type="number" step="0.1" min="0" value="1">
+      </div>
+      <div class="knob">
+        <label for="temperature">temperature</label>
+        <input id="temperature" type="number" step="0.1" min="0" value="0">
+      </div>
+      <div class="knob">
+        <label for="policy_pool">policy&nbsp;pool</label>
+        <input id="policy_pool" type="number" min="10" max="5000" value="200">
+      </div>
+      <p class="help">Units are pool-local score <em>z</em>, so one value means
+        the same displacement for every model. Temperature 0 is greedy.</p>
+    </fieldset>
+  </form>
+
+  <section id="empty" class="empty">
+    <h2>How to read a journey</h2>
+    <dl class="legend">
+      <div>
+        <dt>Intent</dt>
+        <dd>What the model wanted next, not just what it took: score mass by
+          genre, how committed it is (<span class="mono">ent</span> 0 = one
+          narrow pocket, 1 = wandering), whether it is reaching for a single
+          artist (<span class="mono">conc</span>), and the top-1/top-2 gap
+          (<span class="mono">margin</span>). <span class="mono">aim</span> is
+          the predicted latent's nearest genres — the target point itself, which
+          only the next-latent families expose.</dd>
+      </div>
+      <div>
+        <dt>Diagnostics</dt>
+        <dd>The crown's own facets, computed on the journey you are hearing
+          rather than a held-out split — so <span class="mono">H</span> here is
+          comparable to the leaderboard's.</dd>
+      </div>
+      <div>
+        <dt>Flags</dt>
+        <dd><span class="mono">maxrun</span> and <span class="mono">hhi</span>
+          measure journey-internal repetition, which
+          <span class="mono">artist_adj</span> cannot see: it only counts the
+          <em>seed's</em> artist, so a generator looping on some other artist
+          scores a perfect 0. Cells turn red when a run reaches 3 or
+          concentration reaches 0.25.</dd>
+      </div>
+    </dl>
+    <p class="meta">Pick a seed and press Generate. One journey costs about one
+      artifact load (~4&nbsp;s) regardless of length.</p>
+  </section>
+
+  <div id="panels" class="panels" aria-live="polite"></div>
+</main>
+
+<aside id="dock" class="dock" hidden>
+  <div class="dock-label">
+    <span class="dot-live" aria-hidden="true"></span>
+    <span id="dockname" class="mono"></span>
+  </div>
+  <iframe id="embed" title="Spotify preview" allow="encrypted-media" loading="lazy"></iframe>
+  <label class="autoplay" id="autoplaywrap">
+    <input type="checkbox" id="autoplay" checked>
+    Auto-advance
+  </label>
+  <button id="dockclose" class="btn-quiet" type="button" aria-label="Close preview">Close</button>
+</aside>
+
+<template id="panel-tpl">
+  <section class="panel">
+    <header class="panel-head">
+      <span class="series-dot" aria-hidden="true"></span>
+      <div class="panel-titles">
+        <h2 class="pname mono"></h2>
+        <span class="ppred meta"></span>
+      </div>
+      <span class="spacer"></span>
+      <button class="handoff btn-quiet" type="button">Hand off →</button>
+    </header>
+    <div class="diag" role="table" aria-label="Journey diagnostics"></div>
+    <ol class="stops"></ol>
+  </section>
+</template>
+
+<template id="skeleton-tpl">
+  <section class="panel skeleton" aria-hidden="true">
+    <header class="panel-head">
+      <span class="series-dot"></span>
+      <div class="panel-titles"><span class="sk sk-title"></span></div>
+    </header>
+    <div class="diag">
+      <span class="sk sk-cell"></span><span class="sk sk-cell"></span>
+      <span class="sk sk-cell"></span><span class="sk sk-cell"></span>
+      <span class="sk sk-cell"></span><span class="sk sk-cell"></span>
+    </div>
+    <ol class="stops">
+      <li class="stop"><span class="sk sk-row"></span></li>
+      <li class="stop"><span class="sk sk-row"></span></li>
+      <li class="stop"><span class="sk sk-row"></span></li>
+      <li class="stop"><span class="sk sk-row"></span></li>
+      <li class="stop"><span class="sk sk-row"></span></li>
+      <li class="stop"><span class="sk sk-row"></span></li>
+    </ol>
+  </section>
+</template>
+
+<script src="/lab/app.js"></script>
+</body>
+</html>

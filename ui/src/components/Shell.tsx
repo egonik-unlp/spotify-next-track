@@ -8,9 +8,10 @@ const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform)
 
 export default function Shell() {
   const domain = useDomain()
-  // Interpretability (scalar-target probes) and Predict (scalar consensus) are
-  // pointwise-only; a ranking instance predicts a next-item ordering, so they
-  // don't apply. Hide them from the spine (the views also guard direct URLs).
+  // Predict (scalar consensus) is pointwise-only; a ranking instance predicts a
+  // next-item ordering, so it doesn't apply — hidden from the spine. The
+  // Interpretability panel DOES apply (its per-model SAE reads activations
+  // against the next item); its pointwise-only tabs guard themselves.
   const isRanking = domain.target.task === 'ranking'
   // Tone-step the topbar's bottom hairline once content scrolls under it
   // (flat elevation: a border step, never a resting shadow).
@@ -74,13 +75,17 @@ export default function Shell() {
                 Predict
               </NavLink>
             )}
-            <NavLink to="/pathfinder" className="nav-link">
-              Pathfinder
+            <NavLink to="/interpretability" className="nav-link">
+              Interpretability
             </NavLink>
-            {!isRanking && (
-              <NavLink to="/interpretability" className="nav-link">
-                Interpretability
-              </NavLink>
+            {isRanking && (
+              /* Plain anchor, not NavLink: the playlist lab is a separate
+                 static app served at /lab, outside this router. Ranking-only —
+                 it drives POST /api/models/{name}/extend, which needs a baked
+                 sequence artifact. */
+              <a href="/lab/" className="nav-link">
+                Playlist lab
+              </a>
             )}
           </nav>
           <button
