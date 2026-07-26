@@ -28,7 +28,7 @@ runs, promoted models and predictions behind a React UI.
   export), runs + metrics, promoted-model records, the best-models group,
   dataset index, run events. `zig build migrate-data` backfills it from the
   files and prints a consistency report — it never modifies the files.
-- The **best-models group** (top-12 by recall@10)
+- The **best-models group** (top-12 by holisticness@10)
   is server-maintained: recomputed on every run completion and model
   promotion/deletion, auto-promoting top runs. Served at
   `GET /api/best-models`; consensus predictions at
@@ -70,9 +70,9 @@ runs, promoted models and predictions behind a React UI.
 
 | command | what it does |
 |---|---|
-| `zig build serve` | build backend + UI, start Postgres, run lensing-server (also spawns the playlist-pathfinder sidecar) |
-| `zig build pathfinder-setup` | one-time `pathfinder/.venv` for the playlist-pathfinder sidecar (qdrant-client + numpy + requests) |
+| `zig build serve` | build backend + UI, start Postgres, run lensing-server |
 | `zig build db-up` / `db-down` | start/stop the compose services (pgdata volume survives) |
+| `zig build docker-serve` / `docker-build` / `docker-down` | run / build / stop the whole instance as containers (server + UI + predictor venvs + Postgres + Qdrant) via `deploy/` — serves on the same `:8096` the skills expect (stop `serve`/`db-up` first; fresh volumes need an instance-bundle restore, see `deploy/README.md`) |
 | `zig build migrate-data` | idempotent file→Postgres backfill + consistency report |
 | `zig build dataset` | build a dataset with default flags |
 | `zig build render-agents` | render `.claude/.agents/.gemini` from `agents-src/` + `domain.toml` |

@@ -1,6 +1,6 @@
 ---
 name: information-capture
-description: Compare how much next track-relevant information competing MLP models capture inside their own hidden activations, using a sparse autoencoder (SAE) trained per hidden layer via the pg-server interpretability API. Use when the user wants to compare MLP models (or blend legs) on information capture — capacity/utilization, interpretable concepts, per-segment representation, concept-vs-decodability by depth, and the next track-relevant embedding signal a model drops — beyond leaderboard recall@10. Runs `POST /api/interp/model-sae` and distills a side-by-side comparison. For a full campaign write-up, delegate to the information-capture-analyst agent.
+description: Compare how much next track-relevant information competing sequence next-track models (the GRU and its ANN feed-forward twin / blend legs) capture inside their own hidden activations, using a sparse autoencoder (SAE) trained per hidden layer via the pg-server interpretability API. Use when the user wants to compare next-track models on information capture — capacity/utilization, interpretable next-item concepts, per-concept-class representation, concept-vs-decodability by depth, and the next-item concepts a model drops — beyond leaderboard holisticness@10. Runs `POST /api/interp/model-sae` and distills a side-by-side comparison. For a full campaign write-up, delegate to the information-capture-analyst agent.
 user-invocable: true
 argument-hint: "[model ...] [compare-embedding]"
 allowed-tools:
@@ -11,44 +11,44 @@ allowed-tools:
 ---
 <!-- GENERATED from agents-src/skills/information-capture/SKILL.md by agents-src/render.py — edit the template (and domain.toml), not this file; then run `zig build render-agents`. -->
 
-Compare **information capture** across MLP models: how much of the target's
+Compare **information capture** across next-track models (the recurrent GRU and
+its feed-forward ANN twin — the blend's base learners): how much next-item
 structure each trained net actually re-represents inside its own hidden layers,
-read with a sparse autoencoder (SAE) — the nonlinear sibling of the layer probe.
-This answers a question the leaderboard can't: two MLPs can post the same
-recall@10 while one *captures* far more structure (and drops less of the
-embedding's next track-relevant signal) than the other.
+read with a sparse autoencoder (SAE). Because a next-track model has no scalar
+target, the SAE's atoms are read against the **next item** — the artist / genre
+/ album / sonic-continuity the holisticness suite cares about. This answers a
+question the leaderboard can't: two models can post the same holisticness@10
+while one *captures* far more next-item structure (and drops fewer next-item
+concepts) than the other.
 
 This is an **agent-layer wrapper** over the existing interpretability API
 (`POST /api/interp/model-sae`); it computes nothing itself — it orchestrates the
-jobs and distills their JSON into a comparison. The engine, method and prior
-results are documented in `docs/interpretability-toolkit-explained.md` (§2) and
-`docs/interpretability-queue.md` (P2) — read them before interpreting.
+jobs and distills their JSON into a comparison. The engine lives in
+`predictors/seq_model_sae.py` (shared by `seq_ann.py` / `seq_nexttrack.py`).
 
 ## What "information capture" means here
 
-The toolkit separates three fates of a signal (per
-`docs/interpretability-toolkit-explained.md`): a next track-relevant signal
-can be **absent** from the input, **present but discarded** (compression), or
-**present but unused** (modelling). The per-model SAE reads the *model's* side of
-that: for each hidden layer it reports
+Rows are `(session, step)` pairs: the activation at each step paired with the
+teacher-forcing target — the **next item**. The per-model SAE reads the *model's*
+side of the next-track task: for each hidden layer it reports
 
 - **capacity** — `utilization` (fraction of atoms that ever fire), `dead_atoms`,
-  `rare_atoms`, `l0_mean` (atoms active per track), and `var_explained`
-  (how well the sparse code reconstructs the layer). Low utilization / high dead
-  count = the layer is using a small slice of its width.
-- **n_interpretable_concepts** — atoms whose activation correlates with the
-  target above the engine's concept bar; a proxy for how many nameable,
-  next track-relevant features the layer has formed.
-- **segments** — per one-hot category value, whether a dedicated atom *separates*
-  that segment (`represented: true/false`). Surfaces rare-segment structure the
-  bulk fit buries.
-- **concept_vs_decodability** — joins the linear next track R² at each depth
-  (`linear_r2_target`/`linear_r2_log`) with the interpretable-concept count there,
-  so you can see where in the net decodable structure and nameable concepts form.
-- **dropped_vs_embedding** (only with `compare_embedding`) — next track-relevant
-  concepts present in the *embedding* SAE that no atom in this layer tracks: the
-  signal the model discarded. Roughly doubles run time (it trains a dataset SAE
-  first).
+  `rare_atoms`, `l0_mean` (atoms active per step), and `var_explained` (how well
+  the sparse code reconstructs the layer). Low utilization / high dead count =
+  the layer is using a small slice of its width.
+- **n_interpretable_concepts** — atoms whose activation separates a next-item
+  concept class (artist / genre / album) above the engine's separation bar; a
+  proxy for how many nameable next-track features the layer has formed.
+- **segments** — per next-item `genre` class value, whether a
+  dedicated atom *separates* it (`represented: true/false`). Surfaces
+  rare-class structure the bulk fit buries.
+- **next_item_decodability** — how linearly decodable the next item's
+  `genre` is from the raw activations (`acc`/`auc` vs a majority
+  `baseline_acc`), joined per layer with the interpretable-concept count, so you
+  can see where decodable structure and nameable concepts form. The model's own
+  retrieval recall@10 anchors it (`model_recall_at_10`).
+- **dropped_vs_next_item** — frequent next-item concept classes that NO atom at
+  a layer represents: next-track structure the model leaves on the table.
 
 ## Ground rules
 
@@ -61,13 +61,15 @@ that: for each hidden layer it reports
   analyze it. The server auto-promotes top runs as `best-<predictor>-<slug>`, so
   a campaign's leaders are usually already promotable targets.
 - Only predictors that declare `model_sae_args` in `registry.toml` are
-  analyzable — the MLP families with a Rust-/Python-reachable activation space.
-  `GET /api/interp/models` marks each with `supports_model_sae`; a model without
-  it returns `422` and is not an error, just unsupported.
+  analyzable — the sequence next-track families (`seq-nexttrack` GRU,
+  `seq-ann`), which expose a per-step hidden-activation space. `GET
+  /api/interp/models` marks each with `supports_model_sae`; a model without it
+  is not an error, just unsupported. Bidirectional GRUs have no per-step state
+  and are refused.
 - **Comparisons are only meaningful across models analyzed on the same dataset**
-  (same `n_cols`). Pass an explicit `dataset` so every model is read on identical
-  rows; otherwise each defaults to its own training dataset and the numbers are
-  not comparable.
+  (same `latent_dim` sequence artifact). Pass an explicit `dataset` so every
+  model is read on identical sessions; otherwise each defaults to its own
+  training dataset and the numbers are not comparable.
 - Percentage-style reads rendered as %; keep run/dataset ids verbatim.
 
 ## Workflow
@@ -140,34 +142,36 @@ the engine) → `done` (analysis JSON under `.result`) or `failed` (`.error`).
 
 ### 4. Distill the result
 
-The `.result` JSON has top-level `model_dir`, `dataset_id`, `hidden`,
-`activation`, `config`, `depth_linear_probe`, `layers[]` (each with `capacity`,
-`n_interpretable_concepts`, `probe`, `atoms_by_target_corr`, `segments`,
-`dropped_vs_embedding`), `concept_vs_decodability`, and `embedding_diff`. Pull
+The `.result` JSON has top-level `model_dir`, `dataset_id`, `predictor`,
+`hidden`, `latent_dim`, `config`, `model_recall_at_10`, `segment_field`,
+`layers[]` (each with `capacity`, `n_interpretable_concepts`,
+`next_item_decodability`, `atoms_by_concept`, `segments`,
+`dropped_vs_next_item`), `concept_vs_decodability`, and `embedding_diff`. Pull
 the per-layer capacity + concept counts and, per model, its best-layer
-utilization, total interpretable concepts, segments represented, and (if run)
-dropped-signal count.
+utilization, total interpretable concepts, concept classes represented, and
+dropped-concept count.
 
 ### 5. Present the comparison
 
 Build a side-by-side table, one row per model, and interpret it against
-recall@10 — not instead of it:
+holisticness@10 — not instead of it:
 
 ```
-| model | predictor | best-layer util | Σ concepts | segments repr. | dropped | peak linear R² | recall@10 |
+| model | predictor | best-layer util | Σ concepts | classes repr. | dropped | peak next-item AUC | recall@10 | holisticness@10 |
 ```
 
-Read it: does the leaderboard leader also capture the most structure, or is it
-winning while discarding next track-relevant signal a rival keeps? Where in
-depth do concepts form vs. where the target becomes decodable? Which rare
-segments does each model represent? Flag any model whose capacity looks
+Read it: does the leaderboard leader also capture the most next-item structure,
+or is it winning while dropping next-item concepts a rival keeps? Where in depth
+do concepts form vs. where the next item becomes decodable? Which rare concept
+classes does each model represent? Flag any model whose capacity looks
 degenerate (near-zero utilization, no interpretable concepts) — a likely
 mis-load or a collapsed layer, not a finding.
 
 ## Delegate to the information-capture-analyst agent
 
 The workflow above is for a quick, user-driven comparison of a handful of
-models. For a campaign write-up — many models, `compare_embedding` diffs, a
-ready-to-paste report section and a `experiments/PROJECT-FACTS.md` note — spawn the
-**information-capture-analyst** agent with the model set and shared dataset id.
-The experiment-runner spawns it automatically when a campaign trains MLP models.
+models. For a campaign write-up — many models, a ready-to-paste report section
+and a `experiments/PROJECT-FACTS.md` note — spawn the **information-capture-analyst** agent
+with the model set and shared dataset id. The experiment-runner spawns it
+automatically when a campaign trains next-track models with hidden activations
+(GRU / ANN).

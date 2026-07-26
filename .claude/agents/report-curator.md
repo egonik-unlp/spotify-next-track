@@ -150,7 +150,7 @@ updates only `experiments.tex`. Transcribe once, place per each doc's arc.
   *interpretation* (why the outcome, trade-offs, failure modes). A refutation
   is a finding — write it as one.
 - **Leaderboard** (`tab:leaderboard`): when a new family-best or champion
-  lands, add or update its row, keep the table sorted by recall@10, update the
+  lands, add or update its row, keep the table sorted by holisticness@10, update the
   dataset-id footnote. Adding/updating rows is additive; deleting rows or
   restructuring the table is destructive (gate).
 - **Abstract and Conclusions**: update headline numbers and the campaign
@@ -203,7 +203,7 @@ Extend `make_figures.py` in its exact idiom — never fork the style:
   `save(fig, "<name>.pdf")`. Register the call in the `__main__` block.
 - **Heatmaps for 2-D parameter scans** (C × ε, depth × width, lr × rounds…):
   `ax.pcolormesh` or `ax.imshow` with ticks labeled by the actual axis
-  values, `cmap="viridis"`, a colorbar labeled `"recall@10 (P(next-track hit))"` formatted with
+  values, `cmap="viridis"`, a colorbar labeled `"holisticness@10 (P(next-track hit))"` formatted with
   `kfmt`, and the best cell annotated. Failed/exploded cells: mask them
   (`np.nan` + `set_bad`) and say so in the caption rather than letting one
   blowup flatten the color scale.

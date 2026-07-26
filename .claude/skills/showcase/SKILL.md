@@ -26,12 +26,12 @@ must be running, default `http://localhost:8096`):
 
 ```sh
 curl -s localhost:8096/api/health
-curl -s localhost:8096/api/best-models   # the server's top-12 by recall@10
+curl -s localhost:8096/api/best-models   # the server's top-12 by holisticness@10
 curl -s localhost:8096/api/models        # all promoted models
 ```
 
 The strongest demo is usually a **best-models** member (it leads on
-recall@10; see `experiments/PROJECT-FACTS.md` for the champion and its error band).
+holisticness@10; see `experiments/PROJECT-FACTS.md` for the champion and its error band).
 Note: not every family is ONNX-exportable — svm-moe, svm-quantile-moe and the
 flux-* families can't be shipped standalone yet; the agent will reject them, so
 steer toward an exportable one (nets, xgboost, lightgbm, random-forest, ridge,

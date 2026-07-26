@@ -63,7 +63,7 @@ than burning the runs silently.
    indefinitely. The caller can re-invoke you to resume collection — re-read
    your interim file and the run list to rebuild state.
 4. **Collect & decide.** When no run is `running`, assemble the results table
-   sorted by recall@10 (mape/medape are fractions — render as %). Apply the
+   sorted by holisticness@10 (mape/medape are fractions — render as %). Apply the
    pre-agreed decision rule: if met, save the winner via
    `POST /api/definitions` named `<predictor>-<slug>`, and tag the
    dataset (PATCH `dataset_tags`). The rule is the whole authorization — a
@@ -72,7 +72,7 @@ than burning the runs silently.
    format exactly: Goal (with full baseline), **Outcome in one line**,
    Results table (run id in every row, winner bolded, best cell per metric
    bolded, failed runs included), Findings (interpret — why, trade-offs,
-   failure modes), Best-on-record-after-this-work table, Follow-ups. recall@10 in
+   failure modes), Best-on-record-after-this-work table, Follow-ups. holisticness@10 in
    raw next track units with thousands separators; reference prior reports by
    filename. Replace your INTERIM file if you wrote one.
 6. **Reconcile `experiments/PROJECT-FACTS.md`** — part of reporting, not a
@@ -83,7 +83,7 @@ than burning the runs silently.
    header line. Additive bookkeeping only — never rewrite history there.
 7. **Best-models handoff.** Every completed run already triggered the
    server's deterministic best-models recompute (top-12 by
-   recall@10, auto-promoting top runs), so the group is current
+   holisticness@10, auto-promoting top runs), so the group is current
    without you doing anything. But if this campaign **changed the champion**
    or produced a suspiciously good result, recommend in your return that the
    caller spawn the **best-model-selector** agent to re-curate the group
@@ -104,7 +104,7 @@ than burning the runs silently.
 
 # Ground rules
 
-- Respect the noise band in all claims: a single-split recall@10 win
+- Respect the noise band in all claims: a single-split holisticness@10 win
   inside the noise band is "at least equal, likely better — needs the 3-seed
   check", not "beats".
 - **Failures are data points** — an explosion or refutation gets the same

@@ -201,7 +201,7 @@ Keep markup semantic and class-named (`.showcase-*`), copy minimal and honest,
 numbers formatted with the domain's locale/symbol. This is a *functional
 default* — if the brief says the caller will run `/impeccable`, do not gold-plate
 the visuals; make them correct and easy to restyle. Frame predictions against
-the champion's recall@10 (see `experiments/PROJECT-FACTS.md`) — never imply a single
+the champion's holisticness@10 (see `experiments/PROJECT-FACTS.md`) — never imply a single
 prediction is exact.
 
 The feature fields the model consumes (for the live-input form; omit any the
@@ -289,7 +289,7 @@ Return a self-contained summary:
 - The showcase is a demo of a real model on real data: keep example items real
   (don't fabricate embeddings or targets), keep the predicted-vs-actual honest
   (test-split where you can), and never imply precision the model's
-  recall@10 doesn't support.
+  holisticness@10 doesn't support.
 - If the chosen model isn't ONNX-exportable, or the brief is internally
   inconsistent (e.g. `live` mode but no embedding key path), surface it and ask
   — don't ship something that won't run.

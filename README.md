@@ -128,14 +128,13 @@ git clone <repo> && cd spotify-predict-engagement
 zig build restore-instance -- ./instance-bundle          # R2: dir of files
 zig build restore-instance -- ./instance-bundle.tar      # Google Drive: single tarball
 # DUMP_BASE_URL=https://<r2-base>/ scripts/restore-instance.sh   # stream from HTTP
-zig build pathfinder-setup                               # one-time sidecar venv
 zig build serve -Dqdrant-url=http://localhost:6335       # corpus now lives in the local Qdrant
 ```
 
 `restore-instance` verifies checksums and refuses to clobber a populated
 instance or run underneath a lensing-server with live training runs (override
 with `FORCE=1`). Set `SPOTIFY_CLIENT_ID`/`SPOTIFY_CLIENT_SECRET` in `.env` only
-if you want the Pathfinder "Export to Spotify" button. The scripts and hosting
+for corpus enrich (Spotify Web API). The scripts and hosting
 choice are documented in `scripts/export-instance.sh` / `scripts/restore-instance.sh`.
 
 ## Dataset artifact format
