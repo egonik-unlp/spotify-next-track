@@ -367,6 +367,29 @@ width controls). Same config = 0 spread; neighbouring configs ≈ ±0.01.
   pre-encoded tower CI>0 (+0.0147) yet only TIES plain h256, i.e. the bare tower
   **RESCUES** what the rectifier destroyed (restores a direct un-rectified path to
   the readout) — a repair, not co-adaptation. `2026-07-26-nexttrack-pre-encoder-scan`.
+- **THE RECTIFIER MECHANISM IS NOW MEASURED, not inferred (B4 SAE read,
+  2026-07-26).** The decisive control was a counterfactual tap the SAE engine
+  cannot express — the model's OWN affine map with the ReLU deleted — now kept as
+  `tools/rectifier_control.py`. Next-item genre decodability at the same step, on
+  `seq-20260715-131139` (11,184 probe test rows, 25 classes, paired SE ≲0.0065):
+  `raw_latent` 0.4033/AUC 0.7609 → `pre_linear` 0.4084/0.7667 (**the affine map is
+  neutral, ~0.8σ**, exactly as `W_i·(Vx)=(W_iV)x` predicts) → `pre_relu`
+  0.3700/0.7508 (**the ReLU is the whole loss, ~5.9σ**). `frac_exact_zero` on the
+  rectified tap = **0.5327**, matching `pre_linear`'s `frac_negative_coords`
+  = 0.5327 to four digits — the rectifier deletes precisely the negative half,
+  leaving ~120 live units for 192 signed directions, i.e. FEWER live coordinates
+  than the input has dimensions. The damage survives the recurrence: within one
+  model, `tower_b` (fed rectified) 0.3929/0.7845 vs its identical twin `tower_a`
+  (fed raw) 0.4183/0.8004, ~3.9σ — and `tower_a` reproduces the standalone plain
+  GRU (0.4235/0.8006), which is what "the bare tower RESCUES" requires. Two
+  caveats: the SAE's OWN metrics were non-discriminating here (at `topk=32`
+  utilization pins ~100%, `n_interpretable_concepts` saturates at 428–474 of 512,
+  classes-represented 25/25 and 0/50 dropped for EVERY layer of every model — the
+  signal was `next_item_decodability` alone); and one unexplained counter-signal
+  runs the other way, top-atom concept PURITY being higher on rectified-fed states
+  (S1 `recurrent` 0.394 vs REF 0.343) — do not build on it. Operational: the
+  row-building phase thrashes if several `model-sae` runs go concurrently (3 at
+  once did not finish in 12 min; alone, under 60 s) — run them one at a time.
 - **CONFOUND STILL OPEN on the pre-MLP arms: they get GRU-INPUT dropout the bare
   arms lack (2026-07-26).** The pre-MLP ends in `Dropout` (`seq_dualgru.py:236`),
   whereas `seq_nexttrack` applies dropout to the RNN *output* only. So a pre-arm
