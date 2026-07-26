@@ -25,7 +25,6 @@ import DatasetsView from './views/DatasetsView'
 import DatasetDetailView from './views/DatasetDetailView'
 import NewDatasetView from './views/NewDatasetView'
 import PredictView from './views/PredictView'
-import PathfinderView from './views/PathfinderView'
 import RepresentationsView from './views/RepresentationsView'
 import RepresentationDetailView from './views/RepresentationDetailView'
 import NewRepresentationView from './views/NewRepresentationView'
@@ -55,7 +54,6 @@ const router = createBrowserRouter([
       { path: 'definitions', element: <DefinitionsView /> },
       { path: 'definitions/:name', element: <DefinitionDetailView /> },
       { path: 'predict', element: <PredictView /> },
-      { path: 'pathfinder', element: <PathfinderView /> },
       { path: 'listings', element: <ListingsView /> },
       { path: 'listings/new', element: <NewListingView /> },
       { path: 'listings/:id', element: <ListingDetailView /> },

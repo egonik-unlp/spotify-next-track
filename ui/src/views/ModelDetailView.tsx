@@ -116,18 +116,22 @@ export default function ModelDetailView() {
             <dt>Promoted</dt>
             <dd className="num">{fmtDateTime(record.created_at)}</dd>
           </div>
-          <div>
-            <dt>Target</dt>
-            <dd className="num">
-              {contract.target.field} ({contract.target.transform})
-            </dd>
-          </div>
-          <div>
-            <dt>Features</dt>
-            <dd className="num">
-              {contract.n_cols} cols · PCA {contract.pca_dims}
-            </dd>
-          </div>
+          {contract && (
+            <>
+              <div>
+                <dt>Target</dt>
+                <dd className="num">
+                  {contract.target.field} ({contract.target.transform})
+                </dd>
+              </div>
+              <div>
+                <dt>Features</dt>
+                <dd className="num">
+                  {contract.n_cols} cols · PCA {contract.pca_dims}
+                </dd>
+              </div>
+            </>
+          )}
           {record.notes && (
             <div className="run-hp">
               <dt>Notes</dt>
@@ -144,18 +148,31 @@ export default function ModelDetailView() {
         />
       </header>
 
-      {record.predictor === 'blend' ? (
-        <BlendModelPanel record={record} contract={contract} hyperparams={hyperparams} />
+      {/* Pointwise (regression/classification) models carry a featurization
+          contract → full arch/contract/playground panels. Ranking/sequence
+          models (seq-*) have no contract; the page still loads with a note. */}
+      {contract ? (
+        <>
+          {record.predictor === 'blend' ? (
+            <BlendModelPanel record={record} contract={contract} hyperparams={hyperparams} />
+          ) : (
+            <ArchViz
+              predictor={record.predictor}
+              hyperparams={hyperparams}
+              features={{ nCols: contract.n_cols, nPca: contract.pca_dims }}
+              fallbackUrl={api.modelVizUrl(record.name)}
+            />
+          )}
+          <ContractPanel contract={contract} />
+          <Playground name={record.name} contract={contract} />
+        </>
       ) : (
-        <ArchViz
-          predictor={record.predictor}
-          hyperparams={hyperparams}
-          features={{ nCols: contract.n_cols, nPca: contract.pca_dims }}
-          fallbackUrl={api.modelVizUrl(record.name)}
-        />
+        <p className="ranking-model-note">
+          Ranking / sequence model — no pointwise featurization contract or
+          feature-vector playground. Serve it with a session prefix (track ids)
+          via <code>POST /api/models/{record.name}/predict</code>.
+        </p>
       )}
-      <ContractPanel contract={contract} />
-      <Playground name={record.name} contract={contract} />
       </div>
     </section>
   )

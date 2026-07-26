@@ -140,6 +140,9 @@ fn meta_from_row(row: &tokio_postgres::Row) -> Result<RunMeta> {
         contract_version: row.get::<_, i32>("contract_version") as u32,
         has_checkpoint: row.get("has_checkpoint"),
         from_definition: row.get("from_definition"),
+        // `claimed_by` is set by a remote worker on claim (NULL for local runs).
+        // try_get so callers that don't SELECT the column still work.
+        claimed_by: row.try_get("claimed_by").ok().flatten(),
     })
 }
 

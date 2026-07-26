@@ -21,11 +21,6 @@ import type {
   Manifest,
   ModelDefinition,
   ModelRecord,
-  PathfinderPath,
-  PathfinderTrack,
-  SpotifyCandidate,
-  SpotifyExportResult,
-  SpotifyStatus,
   PredictResponse,
   Prediction,
   Predictor,
@@ -187,7 +182,9 @@ export const api = {
   getModel: (name: string) =>
     request<{
       record: ModelRecord
-      contract: ContractSummary
+      // null for ranking/sequence models — they have no pointwise
+      // featurization contract (they carry a sequence artifact instead).
+      contract: ContractSummary | null
       hyperparams: Record<string, unknown> | null
     }>(`/api/models/${name}`),
   deleteModel: (name: string) =>
@@ -266,34 +263,15 @@ export const api = {
     request<ModelDefinition>(`/api/definitions/${name}/clone`, post({ new_name })),
   deleteDefinition: (name: string) =>
     request<{ ok: boolean }>(`/api/definitions/${name}`, { method: 'DELETE' }),
-  // Playlist pathfinder (proxied to the Python sidecar). Track ids stay
-  // strings end to end so >2^53 point ids never round.
-  pathfinderSearch: (q: string) =>
-    request<PathfinderTrack[]>(`/api/pathfinder/search?q=${encodeURIComponent(q)}`),
-  // Spotify CATALOG search (any track), annotated with library membership.
-  pathfinderSpotifySearch: (q: string) =>
-    request<SpotifyCandidate[]>(`/api/pathfinder/spotify/search?q=${encodeURIComponent(q)}`),
-  pathfinderPath: (p: {
-    start: string
-    end: string
-    length: number
-    context: string
-    shuffle: string
-  }) => {
-    const qs = new URLSearchParams({
-      start: p.start,
-      end: p.end,
-      length: String(p.length),
-      context: p.context,
-      shuffle: p.shuffle,
-    })
-    return request<PathfinderPath>(`/api/pathfinder/path?${qs.toString()}`)
+  // Per-candidate musical-distance similarity to a reference track (the true
+  // next track), over `spotify_tracks_content_metric`. Returns cosines parallel
+  // to `ids`; null where a track has no vector. Works for any run (live compute).
+  musicScores: (ref: string, ids: string[], dial = 'balanced') => {
+    const qs = new URLSearchParams({ ref, ids: ids.join(','), dial })
+    return request<{ ref: string; dial: string; scores: (number | null)[] }>(
+      `/api/runs/music-scores?${qs.toString()}`,
+    )
   },
-  spotifyStatus: () => request<SpotifyStatus>('/api/pathfinder/spotify/status'),
-  spotifyLogin: () =>
-    request<{ authorize_url: string }>('/api/pathfinder/spotify/login'),
-  spotifyExport: (body: { name: string; uris: string[]; description?: string }) =>
-    request<SpotifyExportResult>('/api/pathfinder/spotify/export', post(body)),
 }
 
 /**

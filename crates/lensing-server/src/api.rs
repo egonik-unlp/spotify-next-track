@@ -1470,7 +1470,10 @@ pub async fn dataset_archive(
         return Err(bad_request("invalid dataset id".into()));
     }
     let dir = state.datasets_dir().join(&id);
-    if !dir.join("manifest.json").is_file() {
+    // Pointwise datasets carry `manifest.json`; sequence datasets carry
+    // `sequence-manifest.json`. Accept either so remote workers can fetch the
+    // sequence family too (distributed next-track training).
+    if !dir.join("manifest.json").is_file() && !dir.join("sequence-manifest.json").is_file() {
         return Err(not_found("dataset"));
     }
     let bytes = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
@@ -1599,14 +1602,18 @@ pub async fn get_model(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let dir = state.models_dir().join(&name);
     let record = models::read_record(&dir).map_err(|_| not_found("model"))?;
-    let contract = models::read_contract(&dir).map_err(anyhow::Error::from)?;
+    // Sequence/ranking models carry `sequence-manifest.json` and have NO
+    // pointwise featurization contract (only pointwise regression/classification
+    // models write contract.json). Make it optional so every model is viewable —
+    // otherwise get_model 500s for the whole next-track/sequence family.
+    let contract = models::read_contract(&dir).ok();
     // The training hyperparams, so the UI can clone them into a definition.
     let hyperparams: Option<serde_json::Value> = std::fs::read_to_string(dir.join("hyperparams.json"))
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok());
     Ok(Json(json!({
         "record": record,
-        "contract": contract_summary(&contract),
+        "contract": contract.as_ref().map(contract_summary),
         "hyperparams": hyperparams,
     })))
 }
@@ -1673,6 +1680,26 @@ pub async fn predict_model(
     Json(req): Json<models::PredictRequest>,
 ) -> Result<Json<models::PredictResponse>, ApiError> {
     match models::predict(state, name, req).await {
+        Ok(resp) => Ok(Json(resp)),
+        Err(models::PredictError::NotFound) => Err(not_found("model")),
+        Err(models::PredictError::BadInput(msg)) => Err(bad_request(msg)),
+        Err(models::PredictError::Internal(e)) => Err(e.into()),
+    }
+}
+
+/// Autoregressively EXTEND a seed session into a journey — the playlist lab's
+/// generation endpoint. Body = the extend params (`seed`, `steps`, plus the
+/// shared retrieval policy), passed through to the predictor verbatim; response =
+/// the journey report (stops + per-step intent + journey diagnostics).
+pub async fn extend_model(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Json(params): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if models::validate_name(&name).is_err() {
+        return Err(bad_request("invalid model name".into()));
+    }
+    match models::extend(state, name, params).await {
         Ok(resp) => Ok(Json(resp)),
         Err(models::PredictError::NotFound) => Err(not_found("model")),
         Err(models::PredictError::BadInput(msg)) => Err(bad_request(msg)),

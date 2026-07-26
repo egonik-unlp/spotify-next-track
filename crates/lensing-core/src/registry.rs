@@ -45,6 +45,19 @@ pub struct Predictor {
     /// into {output}. Absent means the predictor family cannot be exported.
     #[serde(default)]
     pub export_args: Option<Vec<String>>,
+    /// Extend-subcommand executable; defaults to `command` when absent.
+    #[serde(default)]
+    pub extend_command: Option<String>,
+    /// Autoregressive-extend args template ({model}/{output}/{params} tokens).
+    /// The subcommand reads a promoted ranking model dir plus a JSON params file
+    /// (seed prefix, step count, retrieval policy) and writes a journey report
+    /// into {output}: the generated stops, a per-step INTENT readout, and
+    /// journey-level diagnostics. Absent means the family cannot be run as a
+    /// session generator. One process generates the whole journey, which is the
+    /// point — `predict` re-loads the baked artifact per call (~3s), so N
+    /// single-step calls cost N x that.
+    #[serde(default)]
+    pub extend_args: Option<Vec<String>>,
     /// Probe-subcommand executable; defaults to `command` when absent.
     #[serde(default)]
     pub probe_command: Option<String>,
@@ -178,6 +191,19 @@ impl Predictor {
             .map(|args| (self.export_command.as_deref().unwrap_or(&self.command), args))
     }
 
+    /// Whether this predictor implements the optional `extend` subcommand
+    /// (autoregressive session generation from a seed prefix).
+    pub fn supports_extend(&self) -> bool {
+        self.extend_args.is_some()
+    }
+
+    /// Effective (command, args template) for an extend invocation.
+    pub fn extend_invocation(&self) -> Option<(&str, &[String])> {
+        self.extend_args
+            .as_deref()
+            .map(|args| (self.extend_command.as_deref().unwrap_or(&self.command), args))
+    }
+
     /// Whether this predictor implements the optional `layer-probe` subcommand
     /// (per-stage linear-probe interpretability analysis).
     pub fn supports_probe(&self) -> bool {
@@ -236,6 +262,8 @@ mod tests {
             predict_args: None,
             export_command: None,
             export_args: None,
+            extend_command: None,
+            extend_args: None,
             probe_command: None,
             probe_args: None,
             model_sae_command: None,

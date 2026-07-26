@@ -5,7 +5,7 @@ mod definitions;
 mod infer;
 mod interp;
 mod models;
-mod pathfinder;
+mod music;
 mod registry;
 mod representations;
 mod runs;
@@ -243,17 +243,6 @@ async fn main() -> Result<()> {
         eprintln!("[lensing-server] manual listings: embedding model {embedding_model}");
     }
 
-    // Spawn the playlist-pathfinder Python sidecar and keep the handle alive
-    // for the server's lifetime (dropping/orphaning it is prevented by the
-    // PDEATHSIG set in spawn_sidecar). Pointed at the same Qdrant + this
-    // server for habit-fit scoring. `_pf_sidecar` must outlive `serve`.
-    let _pf_sidecar = pathfinder::spawn_sidecar(&root, &cli.qdrant_url, &collection, cli.port);
-    // TODO: print edu, remover luego
-    println!(
-        "Sidecar:\nSpawned sidecar at port: {}\nResulting object: {:?}",
-        cli.port, _pf_sidecar
-    );
-
     // Auto-queue a per-model SAE analysis whenever a model is promoted; opt out
     // with LENSING_AUTO_MODEL_SAE=0 (or =false). PG_AUTO_MODEL_SAE is honored as
     // the legacy fallback, matching the other env knobs above.
@@ -287,6 +276,12 @@ async fn main() -> Result<()> {
 
     let ui_dist = root.join("ui/dist");
     let spa = ServeDir::new(&ui_dist).fallback(ServeFile::new(ui_dist.join("index.html")));
+    // The playlist lab (clients/playlist-lab) is a dev bench for infinite-playlist
+    // generators. Served SAME-ORIGIN under /lab so it can call /api/* without a
+    // CORS layer (the API deliberately has none) and without a second process.
+    // Kept out of ui/dist because that tree is a build artifact of the React UI.
+    let lab_dir = root.join("clients/playlist-lab/public");
+    let lab = ServeDir::new(&lab_dir).fallback(ServeFile::new(lab_dir.join("index.html")));
 
     let api = Router::new()
         .route("/health", get(api::health))
@@ -333,6 +328,7 @@ async fn main() -> Result<()> {
         .route("/representations/{id}", get(representations::get_representation))
         .route("/representations/{id}/encode", axum::routing::post(representations::encode_representation))
         .route("/runs", get(api::list_runs).post(api::start_run))
+        .route("/runs/music-scores", get(music::music_scores))
         .route("/runs/{id}", get(api::get_run).delete(api::delete_run))
         .route("/runs/{id}/predictions", get(api::get_predictions))
         .route("/blend", axum::routing::post(api::blend_runs))
@@ -352,6 +348,10 @@ async fn main() -> Result<()> {
         .route(
             "/models/{name}/predict",
             axum::routing::post(api::predict_model),
+        )
+        .route(
+            "/models/{name}/extend",
+            axum::routing::post(api::extend_model),
         )
         .route(
             "/models/{name}/rename",
@@ -411,31 +411,12 @@ async fn main() -> Result<()> {
             "/interp/analyses/{id}",
             get(interp::get_analysis).delete(interp::delete_analysis),
         )
-        // Playlist pathfinder: reverse-proxied to the Python sidecar.
-        .route("/pathfinder/search", get(pathfinder::proxy_search))
-        .route("/pathfinder/path", get(pathfinder::proxy_path))
-        .route(
-            "/pathfinder/spotify/search",
-            get(pathfinder::proxy_spotify_search),
-        )
-        .route(
-            "/pathfinder/spotify/status",
-            get(pathfinder::spotify_status),
-        )
-        .route("/pathfinder/spotify/login", get(pathfinder::spotify_login))
-        .route(
-            "/pathfinder/spotify/callback",
-            get(pathfinder::spotify_callback),
-        )
-        .route(
-            "/pathfinder/spotify/export",
-            axum::routing::post(pathfinder::spotify_export),
-        )
         .with_state(state);
 
     let app = Router::new()
         .nest("/api", api)
         .route("/docs", get(api::swagger_ui))
+        .nest_service("/lab", lab)
         .fallback_service(spa);
 
     let addr = format!("0.0.0.0:{}", cli.port);

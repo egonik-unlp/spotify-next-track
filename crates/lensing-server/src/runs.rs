@@ -112,6 +112,7 @@ pub async fn enqueue_run(
         contract_version: lensing_core::CONTRACT_VERSION,
         has_checkpoint: false,
         from_definition,
+        claimed_by: None,
     };
     lensing_db::queries::upsert_run(db, &meta).await?;
     Ok(run_id)
@@ -183,6 +184,7 @@ pub fn start_run(
         contract_version: lensing_core::CONTRACT_VERSION,
         has_checkpoint: false,
         from_definition,
+        claimed_by: None,
     };
     write_meta(&run_dir, &meta)?;
     if let Some(sink) = &state.db_sink {
@@ -414,6 +416,6 @@ pub fn read_progress(run_dir: &PathBuf) -> Vec<String> {
 
 /// A dataset directory is launchable if it carries either a pointwise
 /// `manifest.json` or a `sequence-manifest.json` (next-item/ranking family).
-fn dataset_dir_exists(dir: &std::path::Path) -> bool {
+pub(crate) fn dataset_dir_exists(dir: &std::path::Path) -> bool {
     dir.join("manifest.json").is_file() || dir.join("sequence-manifest.json").is_file()
 }

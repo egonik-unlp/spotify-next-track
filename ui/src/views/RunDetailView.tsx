@@ -1181,9 +1181,19 @@ interface RankRow {
   topK: number[]
   /** 1-based position of the true item in the top-K, or null when it's a miss. */
   hitRank: number | null
+  /** The query context: session-prefix item indices, oldest→newest (last = the
+   *  "current" track the model predicted from). Empty on older runs. */
+  prefixIds: number[]
+  /** True prefix length (may exceed prefixIds when older items were dropped). */
+  prefixLen: number
+  /** This row's music@k: best musical-distance cosine (0..1) of the top-K to the
+   *  truth. 1.0 for a hit; high for a sonically-close miss. Null when unavailable. */
+  musicSim: number | null
 }
 
-type RankSort = 'hit_rank' | 'row_id'
+type RankSort = 'hit_rank' | 'row_id' | 'music'
+/** Success filter for the ranked table: all queries, hits only, or misses only. */
+type RankOutcome = 'all' | 'hit' | 'miss'
 
 function RankingRun({ run, events }: { run: RunMeta; events: ReturnType<typeof useRunEvents> }) {
   const domain = useDomain()
@@ -1205,12 +1215,16 @@ function RankingRun({ run, events }: { run: RunMeta; events: ReturnType<typeof u
         const topK = p.top_k_ids ?? []
         const actualIdx = Math.round(p.actual)
         const pos = topK.indexOf(actualIdx)
+        const prefixIds = (p.prefix_ids ?? []).map((i) => Math.round(i))
         return {
           row_id: p.row_id,
           actualIdx,
           predictedIdx: Math.round(p.predicted),
           topK,
           hitRank: pos >= 0 ? pos + 1 : null,
+          prefixIds,
+          prefixLen: p.prefix_len ?? prefixIds.length,
+          musicSim: typeof p.music_sim === 'number' ? p.music_sim : null,
         }
       }),
     [preds.data],
@@ -1417,6 +1431,7 @@ function RankedPredictionsTable({
 }) {
   const domain = useDomain()
   const [filter, setFilter] = useState('')
+  const [outcome, setOutcome] = useState<RankOutcome>('all')
   const [limit, setLimit] = useState(RANK_PAGE)
   const [expanded, setExpanded] = useState<number | null>(null)
 
@@ -1425,22 +1440,35 @@ function RankedPredictionsTable({
     [items, domain],
   )
 
+  const hasMusic = useMemo(() => rows.some((r) => r.musicSim != null), [rows])
+
   const sorted = useMemo(() => {
     // Misses sort after every hit (rank K+1), so a hit_rank-ascending sort reads
-    // best calls first, misses last.
-    const val = (r: RankRow) => (sort.key === 'row_id' ? r.row_id : r.hitRank ?? kCut + 1)
+    // best calls first, misses last. For music, negate so dir=1 reads
+    // best-musical-match first and unavailable rows sink to the bottom.
+    const val = (r: RankRow) =>
+      sort.key === 'row_id'
+        ? r.row_id
+        : sort.key === 'music'
+          ? -(r.musicSim ?? -1)
+          : r.hitRank ?? kCut + 1
     const f = filter.trim().toLowerCase()
+    // Text match spans the query context (current track) AND the true next item,
+    // so you can search by either what was played or what came next.
     const match = (r: RankRow): boolean => {
-      const it = lookup(r.actualIdx)
-      if (!it) return String(r.row_id).includes(f)
-      return (
-        itemTitle(domain, it).toLowerCase().includes(f) ||
-        itemByline(domain, it).toLowerCase().includes(f)
-      )
+      const cands = [r.actualIdx, ...(r.prefixIds.length ? [r.prefixIds[r.prefixIds.length - 1]] : [])]
+      for (const idx of cands) {
+        const it = lookup(idx)
+        if (it && (itemTitle(domain, it).toLowerCase().includes(f) || itemByline(domain, it).toLowerCase().includes(f)))
+          return true
+      }
+      return String(r.row_id).includes(f)
     }
-    const filtered = f === '' ? rows : rows.filter(match)
+    const byOutcome = (r: RankRow) =>
+      outcome === 'all' || (outcome === 'hit' ? r.hitRank != null : r.hitRank == null)
+    const filtered = rows.filter((r) => byOutcome(r) && (f === '' || match(r)))
     return [...filtered].sort((a, b) => (val(a) - val(b)) * sort.dir)
-  }, [rows, sort, filter, lookup, domain, kCut])
+  }, [rows, sort, filter, outcome, lookup, domain, kCut])
 
   const visible = sorted.slice(0, limit)
 
@@ -1478,17 +1506,34 @@ function RankedPredictionsTable({
           Ranked predictions{' '}
           <span className="muted">({sorted.length.toLocaleString()} test queries, best rank first)</span>
         </h2>
-        <input
-          type="text"
-          className="mono-input pred-filter"
-          placeholder={`Filter by true next ${domain.project.entity_noun}…`}
-          aria-label={`Filter queries by the true next ${domain.project.entity_noun} or query id`}
-          value={filter}
-          onChange={(e) => {
-            setFilter(e.target.value)
-            setLimit(RANK_PAGE)
-          }}
-        />
+        <div className="pred-controls">
+          <div className="seg" role="group" aria-label="Filter by prediction outcome">
+            {(['all', 'hit', 'miss'] as RankOutcome[]).map((o) => (
+              <button
+                key={o}
+                className={`seg-btn${outcome === o ? ' is-active' : ''}`}
+                aria-pressed={outcome === o}
+                onClick={() => {
+                  setOutcome(o)
+                  setLimit(RANK_PAGE)
+                }}
+              >
+                {o === 'all' ? 'All' : o === 'hit' ? `Hits ≤${kCut}` : 'Misses'}
+              </button>
+            ))}
+          </div>
+          <input
+            type="text"
+            className="mono-input pred-filter"
+            placeholder={`Filter by ${domain.project.entity_noun}…`}
+            aria-label={`Filter queries by the current or true next ${domain.project.entity_noun}, or query id`}
+            value={filter}
+            onChange={(e) => {
+              setFilter(e.target.value)
+              setLimit(RANK_PAGE)
+            }}
+          />
+        </div>
       </div>
       {loading ? (
         <div className="skeleton skeleton-md" />
@@ -1496,9 +1541,10 @@ function RankedPredictionsTable({
         <table className="pred-table">
           <thead>
             <tr>
-              {th('row_id', 'Query', false)}
+              {th('row_id', 'Query (current track)', false)}
               <th>True next {domain.project.entity_noun}</th>
               <th>Top-1</th>
+              {hasMusic && th('music', 'music@10')}
               {th('hit_rank', `Hit rank ≤${kCut}`)}
               <th>
                 <span className="sr-only">Details</span>
@@ -1512,6 +1558,8 @@ function RankedPredictionsTable({
                 row={r}
                 kCut={kCut}
                 lookup={lookup}
+                items={items}
+                hasMusic={hasMusic}
                 expanded={expanded === r.row_id}
                 onToggle={() => setExpanded(expanded === r.row_id ? null : r.row_id)}
               />
@@ -1539,26 +1587,64 @@ function RankedRow({
   row,
   kCut,
   lookup,
+  items,
+  hasMusic,
   expanded,
   onToggle,
 }: {
   row: RankRow
   kCut: number
   lookup: (idx: number) => RankItem | null
+  items: Items | null
+  hasMusic: boolean
   expanded: boolean
   onToggle: () => void
 }) {
   const hit = row.hitRank != null
+  const hasPrefix = row.prefixIds.length > 0
+  const currentIdx = hasPrefix ? row.prefixIds[row.prefixIds.length - 1] : null
+  const earlier = row.prefixLen - 1 // prior tracks in the session before "current"
   return (
     <>
       <tr className="pred-row" onClick={onToggle} aria-expanded={expanded}>
-        <td className="num">{row.row_id}</td>
+        <td className="track-cell query-cell">
+          {currentIdx != null ? (
+            <>
+              <ItemIdentity item={lookup(currentIdx)} rowId={currentIdx} />
+              <span className="query-caption muted">
+                session #{row.row_id}
+                {earlier > 0 && ` · ${earlier} earlier`}
+              </span>
+            </>
+          ) : (
+            <span className="num muted" title="session index">
+              #{row.row_id}
+            </span>
+          )}
+        </td>
         <td className="track-cell">
           <ItemIdentity item={lookup(row.actualIdx)} rowId={row.actualIdx} />
         </td>
         <td className="track-cell">
           <ItemIdentity item={lookup(row.predictedIdx)} rowId={row.predictedIdx} />
         </td>
+        {hasMusic && (
+          <td className="num-col music-col">
+            {row.musicSim != null ? (
+              <span
+                className={`music-score${!hit && row.musicSim >= 0.4 ? ' is-close' : ''}`}
+                title="Best musical-distance cosine (0–1) between the top-10 and the true next track — how sonically close the model got. 1.0 = exact hit."
+              >
+                <span className="music-num">{row.musicSim.toFixed(2)}</span>
+                <span className="music-bar" aria-hidden>
+                  <span className="music-bar-fill" style={{ width: `${Math.round(row.musicSim * 100)}%` }} />
+                </span>
+              </span>
+            ) : (
+              <span className="muted">—</span>
+            )}
+          </td>
+        )}
         <td className="num-col">
           <span className={`rank-badge${hit ? '' : ' is-miss'}`}>{hit ? `#${row.hitRank}` : 'miss'}</span>
         </td>
@@ -1568,8 +1654,8 @@ function RankedRow({
       </tr>
       {expanded && (
         <tr className="pred-detail">
-          <td colSpan={5}>
-            <RankedList row={row} kCut={kCut} lookup={lookup} />
+          <td colSpan={hasMusic ? 6 : 5}>
+            <RankedList row={row} kCut={kCut} lookup={lookup} items={items} hasMusic={hasMusic} />
           </td>
         </tr>
       )}
@@ -1583,24 +1669,76 @@ function RankedList({
   row,
   kCut,
   lookup,
+  items,
+  hasMusic,
 }: {
   row: RankRow
   kCut: number
   lookup: (idx: number) => RankItem | null
+  items: Items | null
+  hasMusic: boolean
 }) {
   const n = row.topK.length || 1
+  const hiddenEarlier = row.prefixLen - row.prefixIds.length // dropped older items
+
+  // Per-candidate music@k vs the TRUE next track — the decomposition of the
+  // row's music@k (its max). Fetched live so it works for any run; only when the
+  // run recorded music@k and every id resolves to a URI.
+  const uriOf = (idx: number): string | null => {
+    const v = items?.[String(idx)]?.uri
+    return typeof v === 'string' ? v : null
+  }
+  const candScores = useAsync(async (): Promise<(number | null)[] | null> => {
+    if (!hasMusic) return null
+    const refUri = uriOf(row.actualIdx)
+    const candUris = row.topK.map(uriOf)
+    if (!refUri || candUris.some((u) => !u)) return null
+    const res = await api.musicScores(refUri, candUris as string[])
+    return res.scores
+  }, [row.row_id, hasMusic])
   return (
     <div className="rank-list-wrap">
+      {row.prefixIds.length > 0 && (
+        <div className="query-context">
+          <h4 className="query-context-title">
+            Query — session so far{hiddenEarlier > 0 && ` (+${hiddenEarlier} earlier not shown)`}
+          </h4>
+          <ol className="query-seq">
+            {row.prefixIds.map((idx, i) => {
+              const isCurrent = i === row.prefixIds.length - 1
+              return (
+                <li key={`q-${idx}-${i}`} className={`query-seq-item${isCurrent ? ' is-current' : ''}`}>
+                  <span className="rank-item-n num">{hiddenEarlier + i + 1}</span>
+                  <span className="rank-item-track">
+                    <ItemIdentity item={lookup(idx)} rowId={idx} />
+                  </span>
+                  {isCurrent && <span className="query-current-tag">current → predict next</span>}
+                </li>
+              )
+            })}
+          </ol>
+          <h4 className="query-context-title">Model&rsquo;s ranked next-track suggestions</h4>
+        </div>
+      )}
       <ol className="rank-list">
         {row.topK.map((idx, i) => {
           const isTruth = idx === row.actualIdx
           const w = Math.round(((n - i) / n) * 100)
+          const ms = candScores.data?.[i] ?? null
           return (
             <li key={`${idx}-${i}`} className={`rank-item${isTruth ? ' is-truth' : ''}`}>
               <span className="rank-item-n num">{i + 1}</span>
               <span className="rank-item-track">
                 <ItemIdentity item={lookup(idx)} rowId={idx} />
               </span>
+              {ms != null && !isTruth && (
+                <span
+                  className={`cand-music${ms >= 0.7 ? ' is-close' : ''}`}
+                  title="music@10 similarity to the true next track (1.0 = identical sound/vibe)"
+                >
+                  ≈{ms.toFixed(2)}
+                </span>
+              )}
               <span className="rank-bar" aria-hidden>
                 <span className="rank-bar-fill" style={{ width: `${w}%` }} />
               </span>

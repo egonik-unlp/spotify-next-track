@@ -179,6 +179,7 @@ export default function RunsView() {
           <EmptyRuns domain={domain} />
         ) : (
           <>
+      <div className="runs-table-scroll">
       <table
         ref={tableRef}
         className="runs-table"
@@ -246,6 +247,7 @@ export default function RunsView() {
               ))}
         </tbody>
       </table>
+      </div>
 
       {selected.length > 0 && (
         <div className="compare-bar" role="region" aria-label="Comparison selection">
@@ -317,6 +319,13 @@ function RunRow({
       <td>
         {/* Predictor has its own column; the tiny id avoids repeating it. */}
         <RunRef id={run.run_id} label={tinyRunId(run.run_id)} />
+        {/* Mark only remote runs (trained on a distributed worker); local runs
+            — the common case — stay unadorned. */}
+        {run.claimed_by ? (
+          <span className="worker-badge" title={`Trained on remote worker: ${run.claimed_by}`}>
+            remote
+          </span>
+        ) : null}
       </td>
       <td>
         <PredictorRef name={run.predictor} impl />

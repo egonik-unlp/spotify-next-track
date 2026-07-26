@@ -24,10 +24,11 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 dotenvy = "0.15"
 futures = "0.3"
 # Distributed roles: dataset-archive transport (worker downloads from the
-# hub) + tarball packing of dataset dirs.
-reqwest = { version = "0.13", default-features = false, features = ["blocking"] }
+# hub) + tarball packing of dataset dirs; `json` for the music-scores Qdrant
+# retrieve.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json"] }
 tar = "0.4"
 flate2 = "1"
-# Pathfinder sidecar supervision: PR_SET_PDEATHSIG so the Python child dies
-# with the server regardless of how the server is killed.
-libc = "0.2"
+# Stable u64 point ids: SHA-256(track URI)[..8] little-endian (mirrors
+# pipeline/corpus/ids.py) for the music-scores endpoint.
+sha2 = "0.10"

@@ -1,5 +1,26 @@
 /* Runs list. Row idioms (.run-row hover/selection/focus) live in base.css. */
 
+/* The leaderboard carries the full metric-column set (recall@10 … the
+   holisticness diagnostics), which can exceed the viewport width. It becomes
+   its own 2-axis scroll box: the columns scroll sideways and the rows scroll
+   vertically WITHIN the box, so the page layout never goes wide and the header
+   band stays pinned to the box top. Height tracks the viewport below the
+   topbar (minus the view header + a little breathing room). */
+.runs-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+  max-height: calc(100dvh - var(--topbar-h) - 8rem);
+  overscroll-behavior: contain;
+}
+
+/* Inside the scroll box the header pins to the BOX top (top: 0), not under the
+   page topbar — the --topbar-h offset from base.css only makes sense when the
+   page itself is the scroller. Without this override the offset pushes the
+   header down into the middle of the table. */
+.runs-table-scroll thead th {
+  top: 0;
+}
+
 .runs-table:focus-visible {
   outline-offset: -2px;
 }
@@ -7,6 +28,22 @@
 .dataset-cell {
   color: var(--ink-secondary);
   font-size: var(--text-label);
+}
+
+/* Marks a run trained on a REMOTE distributed worker (local runs are unmarked).
+   A quiet uppercase pill next to the run id; hover shows the worker id. */
+.worker-badge {
+  display: inline-block;
+  margin-left: 0.6ch;
+  padding: 0 0.5ch;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
+  border-radius: var(--radius-sm, 4px);
 }
 
 .live-cell {
@@ -56,19 +93,7 @@
   }
 }
 
-/* Laptop widths: RMSE and MAPE go first (MAE + R² + medAPE carry the story). */
-@media (max-width: 1319px) {
-  .runs-table th:nth-child(7),
-  .runs-table td:nth-child(7), /* RMSE */
-  .runs-table th:nth-child(9),
-  .runs-table td:nth-child(9) /* MAPE */ {
-    display: none;
-  }
-}
-
-@media (max-width: 900px) {
-  .runs-table th:nth-child(11),
-  .runs-table td:nth-child(11) /* Time */ {
-    display: none;
-  }
-}
+/* (Removed the old fixed nth-child column-hiding rules: they were indexed for
+   the regression-metric layout (RMSE/MAPE/Time at columns 7/9/11) and no longer
+   line up with the next-track ranking metric set. The .runs-table-scroll
+   wrapper now handles overflow uniformly, so no column is hidden.) */

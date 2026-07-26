@@ -84,9 +84,12 @@ async fn process(
         .with_context(|| format!("predictor {} is not in this worker's registry", meta.predictor))?
         .clone();
 
-    // Dataset: local dir wins; otherwise download the hub's archive.
+    // Dataset: local dir wins; otherwise download the hub's archive. Pointwise
+    // datasets carry `manifest.json`, sequence datasets `sequence-manifest.json`.
     let dataset_dir = root.join("data/datasets").join(&meta.dataset_id);
-    if !dataset_dir.join("manifest.json").is_file() {
+    let cached = dataset_dir.join("manifest.json").is_file()
+        || dataset_dir.join("sequence-manifest.json").is_file();
+    if !cached {
         fetch_dataset(hub_url, &meta.dataset_id, &dataset_dir).await?;
     }
 
@@ -216,8 +219,10 @@ async fn fetch_dataset(hub_url: &str, dataset_id: &str, dataset_dir: &Path) -> R
         // The archive's root entry is the dataset id, so unpacking into the
         // datasets dir yields exactly `dataset_dir`.
         archive.unpack(&parent).context("unpack dataset archive")?;
+        // Pointwise datasets ship `manifest.json`; sequence datasets ship
+        // `sequence-manifest.json`. Accept either.
         anyhow::ensure!(
-            dir.join("manifest.json").is_file(),
+            dir.join("manifest.json").is_file() || dir.join("sequence-manifest.json").is_file(),
             "archive did not contain a dataset manifest"
         );
         Ok(())

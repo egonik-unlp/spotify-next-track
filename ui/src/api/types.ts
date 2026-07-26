@@ -50,6 +50,31 @@ export interface Metrics {
   /** graded ranking: mean reciprocal rank of the first same-artist candidate.
    *  0..1, higher better. */
   artist_mrr?: number
+  /** graded ranking: mean best cosine (balanced musical-distance space) between
+   *  the held-out item and the top-K candidates — "sounds-alike" relevance,
+   *  a smooth superset of recall_at_k. 0..1, higher better. */
+  music_at_k?: number
+  /** holisticness: share of the top-K that parrots the SEED's artist. Present
+   *  only for sequence runs. 0..1, LOWER better (less "album-eager"). */
+  artist_adj_at_k?: number
+  /** holisticness: same on the (artist, album) key; present only when the
+   *  dataset's items.json carries an album field. 0..1, LOWER better. */
+  album_adj_at_k?: number
+  /** holisticness: mean cosine of the top-K to the prefix mood centroid in the
+   *  content-metric space. higher = stays in the sonic neighborhood. */
+  mood_coh_at_k?: number
+  /** composite crown: clamp(mood_coh,0)·ild·(1−artist_adj) — coherent AND
+   *  varied AND non-eager in one number. higher better. */
+  holisticness_at_k?: number
+  /** holisticness: intra-list diversity of the top-K (mean pairwise sonic
+   *  distance). higher = less duplicative. */
+  ild_at_k?: number
+  /** holisticness: fraction of a held-out multi-item continuation recovered in
+   *  the top-K (leave-last-m-out; on-demand harness). 0..1, higher better. */
+  suffix_recall_at_k?: number
+  /** holisticness: fraction of the top-K appearing anywhere in the true
+   *  continuation. 0..1, higher better. */
+  cont_prec_at_k?: number
   n_test: number
 }
 
@@ -68,6 +93,9 @@ export interface RunMeta {
   has_checkpoint: boolean
   /** Model definition this run was launched from, if any. */
   from_definition?: string | null
+  /** Which worker trained this run: null/absent = trained locally on the hub;
+   *  a string = the remote distributed worker's id that claimed it. */
+  claimed_by?: string | null
 }
 
 export interface Prediction {
@@ -86,6 +114,17 @@ export interface Prediction {
    *  Index into the dataset's `items.json`. `predicted` is `top_k_ids[0]`;
    *  `actual` is the held-out true next-item index. */
   top_k_ids?: number[]
+  /** Ranking only: the QUERY — the ordered session-prefix item indices the model
+   *  predicted FROM (oldest→newest; the last is the "current" track). Capped to
+   *  the most recent few; `prefix_len` is the true length. Absent on runs trained
+   *  before this was recorded. */
+  prefix_ids?: number[]
+  /** Ranking only: full length of the session prefix (may exceed `prefix_ids`). */
+  prefix_len?: number
+  /** Ranking only: this row's music@k — the best musical-distance cosine (0..1)
+   *  between the true next item and the top-K candidates. A hit is 1.0; a
+   *  sonically-close miss is still high. Absent when the metric index is off. */
+  music_sim?: number
 }
 
 export type ProgressEvent =
@@ -618,61 +657,6 @@ export interface CreateListingRequest extends Record<string, unknown> {
   sourceUrl?: string
 }
 
-/* ---------------- Pathfinder (playlist) ---------------- */
-
-/** One track on a traced playlist (or a search hit). Mirrors the JSON the
- *  pathfinder sidecar emits; `id` is a Qdrant point id shipped as a string to
- *  survive JSON Number rounding. `fit` is the habit-fit score in [0,1], null
- *  for sparse-play (non-learned) endpoints. */
-export interface PathfinderTrack {
-  id: string
-  name: string
-  artist: string
-  genre: string
-  plays: number
-  learned: boolean
-  uri: string
-  spotify_url: string
-  fit: number | null
-}
-
-/** A Spotify catalog search hit, annotated with whether it's in the user's
- *  corpus (and its corpus point id, usable directly as a path endpoint). */
-export interface SpotifyCandidate {
-  spotify_id: string
-  uri: string
-  name: string
-  artist: string
-  album: string | null
-  art: string | null
-  in_library: boolean
-  id: string | null
-  plays: number
-  spotify_url: string
-}
-
-/** Result of a path trace. `error` is set (with empty `tracks`) when no path
- *  exists between the chosen endpoints. */
-export interface PathfinderPath {
-  tracks: PathfinderTrack[]
-  context: string | null
-  error?: string
-}
-
-/** Spotify export auth state (drives the export button). */
-export interface SpotifyStatus {
-  configured: boolean
-  authorized: boolean
-  user: string | null
-}
-
-/** Result of creating a playlist. */
-export interface SpotifyExportResult {
-  url: string
-  name: string
-  n: number
-}
-
 /* ---------------- interpretability ---------------- */
 
 /** A model the layer probe can analyze (a native burn net). */
@@ -843,7 +827,8 @@ export interface ModelSaeCapacity {
   var_explained: number
 }
 
-/** One one-hot segment and whether the model built dedicated atoms for it. */
+/** One next-item concept segment (e.g. `genre=rock`) and whether the model
+ *  built dedicated atoms for it. */
 export interface ModelSaeSegment {
   segment: string
   n_rows: number
@@ -851,65 +836,92 @@ export interface ModelSaeSegment {
   top_atoms: { atom: number; separation: number; freq: number }[]
 }
 
-/** Target-relevant embedding concepts this layer drops (correlation diff). It's
- *  computed for every analyzed layer, so the layer to read is chosen post-hoc. */
+/** Frequent next-item concept classes that NO atom at this layer represents —
+ *  next-track structure the model leaves on the table. */
 export interface LayerDroppedSignal {
   n_checked: number
   n_dropped: number
   dropped: {
-    dataset_atom: number
-    target_corr: number
-    label?: string | null
-    best_match_corr: number
+    concept_field: string
+    concept_value: string
+    freq: number
+    best_atom_sep: number
   }[]
 }
 
-/** The per-model SAE analysis of one hidden layer. */
+/** One SAE atom's strongest next-item concept association. */
+export interface ModelSaeAtom {
+  atom: number
+  concept_field: string | null
+  concept_value: string | null
+  /** Mean-activation separation of the associated concept class, in SDs. */
+  assoc: number
+  freq: number
+  /** Correlation with next-track sonic continuity (cos(next, seed)). */
+  mood_corr: number
+  label?: string | null
+  top_items: { name: string | null; artist: string | null; genre: string | null }[]
+}
+
+/** Linear decodability of the next item's segment (genre) class from a layer. */
+export interface NextItemDecodability {
+  acc: number | null
+  auc: number | null
+  baseline_acc: number | null
+  n_classes: number
+}
+
+/** The per-model SAE analysis of one hidden layer (ranking / next-track). */
 export interface ModelSaeLayer {
   layer: number
+  name: string
   dim: number
   capacity: ModelSaeCapacity
   n_interpretable_concepts: number
-  /** Two ridge probes: the raw layer (`hidden_k:raw`) vs its SAE code (`:sae`). */
-  probe: LayerProbeStage[]
-  atoms_by_target_corr: SaeAtom[]
+  next_item_decodability: NextItemDecodability
+  atoms_by_concept: ModelSaeAtom[]
   segments: ModelSaeSegment[]
-  /** Dropped-signal diff at THIS layer; null unless the embedding diff ran. */
-  dropped_vs_embedding: LayerDroppedSignal | null
+  /** Dropped next-item concepts at THIS layer; null unless the read ran. */
+  dropped_vs_next_item: LayerDroppedSignal | null
 }
 
-/** Where the target becomes decodable vs where interpretable concepts form. */
+/** Where the next item becomes decodable vs where interpretable concepts form. */
 export interface ConceptVsDecodability {
   layer: number
-  linear_r2_target: number | null
-  linear_r2_log: number | null
+  genre_auc: number | null
+  genre_acc: number | null
   n_interpretable_concepts: number
 }
 
-/** Parameters + status of the embedding (dropped-signal) diff, if it ran. */
+/** Parameters + status of the dropped-signal (next-item concept) read. */
 export interface EmbeddingDiff {
   ran: boolean
-  match_corr_threshold?: number
-  n_target_atoms?: number
-  n_missing_codes?: number
+  method?: string
+  sep_threshold?: number
 }
 
 /** Result of a per-model SAE analysis (`POST /api/interp/model-sae`). */
 export interface ModelSaeReport {
   tool: string
+  task?: string
   method: string
   model_dir: string
   dataset_id: string
-  n_train: number
-  n_test: number
+  predictor?: string | null
+  n_rows: number
+  n_train_rows: number
+  n_test_rows: number
   hidden: number[]
-  activation: string
+  latent_dim: number
   config: { n_atoms: number; l1: number; epochs: number; lr: number; seed: number }
-  /** Linear decodability at every stage (input → hidden layers → model output). */
-  depth_linear_probe: LayerProbeStage[]
+  concept_fields: string[]
+  segment_field: string
+  /** The model's own retrieval recall@10 — the decodability anchor. */
+  model_recall_at_10: number | null
   layers: ModelSaeLayer[]
   concept_vs_decodability: ConceptVsDecodability[]
   embedding_diff: EmbeddingDiff
+  mood_available?: boolean
 }
 
 /* -------- persisted interpretability analyses -------- */

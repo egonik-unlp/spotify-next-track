@@ -422,6 +422,152 @@
   display: inline-flex;
 }
 
+/* Ranked-table controls: outcome segmented filter + text filter, side by side. */
+.pred-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--hairline-strong, var(--hairline));
+  border-radius: var(--radius-sm, 4px);
+  overflow: hidden;
+}
+
+.seg-btn {
+  appearance: none;
+  border: 0;
+  border-left: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--ink-secondary);
+  padding: 0.25em 0.7em;
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.seg-btn:first-child {
+  border-left: 0;
+}
+.seg-btn:hover {
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+.seg-btn.is-active {
+  background: var(--accent-soft, color-mix(in srgb, var(--accent) 12%, transparent));
+  color: var(--accent, var(--ink));
+  font-weight: 560;
+}
+
+/* Query column: the current track sits on top, a muted session/earlier caption
+   below it, so the cell reads "what was playing" at a glance. */
+.query-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15em;
+}
+.query-caption {
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Expanded detail: the session-so-far (query context) above the suggestions. */
+.query-context {
+  display: grid;
+  gap: var(--sp-2);
+}
+.query-context-title {
+  margin: 0;
+  font-size: var(--text-label);
+  font-weight: 560;
+  color: var(--ink-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.query-seq {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.query-seq-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+}
+/* The last prefix item — the track the model actually predicts from. */
+.query-seq-item.is-current {
+  border-color: var(--hairline-strong, var(--hairline));
+  background: var(--surface-sunken);
+}
+.query-current-tag {
+  flex: none;
+  font-size: var(--text-label);
+  font-weight: 560;
+  color: var(--ink-secondary);
+}
+
+/* Per-row music@k: a number over a magnitude bar. Reads "how sonically close the
+   model got" — so a miss with a high bar is visibly "not such a miss". */
+.music-col {
+  min-width: 4.5rem;
+}
+.music-score {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+.music-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-secondary);
+  line-height: 1.2;
+}
+.music-bar {
+  display: block;
+  width: 3.5rem;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.music-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--ink-faint);
+}
+/* A MISS that is musically close: accent the score so the eye catches that the
+   exact-track miss was a sonic near-hit. */
+.music-score.is-close .music-num {
+  color: var(--accent, var(--ink));
+  font-weight: 560;
+}
+.music-score.is-close .music-bar-fill {
+  background: var(--accent, var(--series-a));
+}
+
+/* Per-candidate music@k inside the expanded detail: each suggestion's sonic
+   similarity to the true next track (decomposes the row's music@k). */
+.cand-music {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-label);
+  color: var(--ink-faint);
+  min-width: 3.2em;
+  text-align: right;
+}
+.cand-music.is-close {
+  color: var(--accent, var(--ink));
+  font-weight: 560;
+}
+
 /* "Save as definition" inline control next to the hyperparameter chips. */
 .save-def {
   display: inline-flex;

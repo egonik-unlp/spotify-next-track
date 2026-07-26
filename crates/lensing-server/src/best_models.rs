@@ -396,6 +396,10 @@ pub async fn predict_group(
             let member_req = PredictRequest {
                 items: req.items.clone(),
                 point_ids: req.point_ids.clone(),
+                // The best-models group predict is pointwise-only (ranking has
+                // no scalar consensus); ranking fields stay empty here.
+                prefix: Vec::new(),
+                k: None,
             };
             async move { (name.clone(), rank, models::predict(st, name, member_req).await) }
         })
