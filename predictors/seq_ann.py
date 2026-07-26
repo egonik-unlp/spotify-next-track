@@ -50,6 +50,7 @@ from seq_common import (
     eval_from_scores,
     load_artifact,
     make_fixture,
+    predict_ranking,
     training_pairs,
     write_outputs,
 )
@@ -254,6 +255,58 @@ def ann_score_fn(model: AnnNextLatent, latents: np.ndarray):
     return score_fn
 
 
+def load_model(model_dir: Path, art, hp: dict) -> "AnnNextLatent":
+    """Reconstruct the trained pooled-MLP from a promoted dir's model.pt."""
+    model = AnnNextLatent(art.latent_dim, hp["hidden"], hp["dropout"])
+    model.load_state_dict(torch.load(model_dir / "model.pt", map_location="cpu"))
+    model.eval()
+    return model
+
+
+def predict(model_dir: Path, input_dir: Path, output: Path) -> None:
+    """Serving-time ranking: reload the ANN and rank the vocab for the caller's
+    session prefix (see seq_common.predict_ranking)."""
+    hp = load_hp(str(model_dir / "hyperparams.json"))
+    art = load_artifact(model_dir)
+    model = load_model(model_dir, art, hp)
+    predict_ranking(art, ann_score_fn(model, art.item_latents), input_dir, output, k=hp["k"])
+    emit({"kind": "done"})
+
+
+def _capture(model: "AnnNextLatent"):
+    """Per-model-SAE activation tap: the two post-ReLU hidden layers of the
+    bag-of-prefix MLP. Returns (layer_names, step_acts_fn) for seq_model_sae."""
+    net = model.net  # [Lin1, ReLU, Drop, Lin2, ReLU, Drop, Lin3]
+
+    def step_acts_fn(seq_latents: np.ndarray):
+        x = torch.from_numpy(seq_latents[None, :, :].astype(np.float32))  # (1,L,D)
+        with torch.no_grad():
+            pooled = model._pool_steps(x)[0]           # (L, 2D)
+            h1 = torch.relu(net[0](pooled))            # (L, hidden)
+            h2 = torch.relu(net[3](h1))                # (L, hidden); Drop=identity (eval)
+        # Steps 0..L-2 have a next item; the last step has none.
+        return [h1[:-1].numpy(), h2[:-1].numpy()]
+
+    return ["hidden_1", "hidden_2"], step_acts_fn
+
+
+def model_sae(model_dir: Path, dataset: Path, output: Path, *, layers, n_atoms,
+              l1, epochs, cache_dir, label_atoms, dataset_sae, topk=0) -> None:
+    """Per-model SAE: dictionary-learn the ANN's hidden activations and relate
+    the atoms to next-item concepts (see seq_model_sae). ``topk>0`` uses a top-k
+    SAE (l0==topk) instead of L1-induced sparsity."""
+    import seq_model_sae
+    hp = load_hp(str(model_dir / "hyperparams.json"))
+    art = load_artifact(dataset)
+    model = load_model(model_dir, art, hp)
+    seq_model_sae.run(
+        model_dir, dataset, output,
+        capture=lambda _art: _capture(model),
+        meta={"predictor": "seq-ann", "hidden": [hp["hidden"], hp["hidden"]]},
+        layers=layers, n_atoms=n_atoms, l1=l1, epochs=epochs,
+        cache_dir=cache_dir, label_atoms=label_atoms, dropped=True, topk=topk)
+
+
 def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
     hp = load_hp(hp_spec)
     art = load_artifact(dataset)
@@ -284,15 +337,40 @@ def main() -> None:
     tr.add_argument("--dataset", required=True, type=Path)
     tr.add_argument("--output", required=True, type=Path)
     tr.add_argument("--hyperparams", required=True)  # file path or inline JSON
+    pr = sub.add_parser("predict", help="rank the next track for a session prefix")
+    pr.add_argument("--model", required=True, type=Path)
+    pr.add_argument("--input", required=True, type=Path)
+    pr.add_argument("--output", required=True, type=Path)
     fx = sub.add_parser("fixture", help="write a synthetic SEQUENCE artifact")
     fx.add_argument("--output", required=True, type=Path)
     fx.add_argument("--n-items", type=int, default=20)
     fx.add_argument("--n-sessions", type=int, default=40)
+    ms = sub.add_parser("model-sae", help="per-model SAE over the ANN's hidden activations")
+    ms.add_argument("--model", required=True, type=Path)
+    ms.add_argument("--dataset", required=True, type=Path)
+    ms.add_argument("--output", required=True, type=Path)
+    ms.add_argument("--layers", default="")  # "1,2"; empty = every hidden layer
+    ms.add_argument("--n-atoms", type=int, default=0)
+    ms.add_argument("--l1", type=float, default=0.0015)
+    ms.add_argument("--epochs", type=int, default=40)
+    ms.add_argument("--topk", type=int, default=0,
+                    help="top-k SAE: hard-cap active atoms per row to K (l0==K); 0 = L1-only")
+    ms.add_argument("--cache-dir", type=Path, default=None)
+    ms.add_argument("--label-atoms", action="store_true")
+    ms.add_argument("--dataset-sae", type=Path, default=None)
     args = ap.parse_args()
 
     torch.set_num_threads(max(1, (os.cpu_count() or 2) - 1))
     if args.cmd == "train":
         train(args.dataset, args.output, args.hyperparams)
+    elif args.cmd == "predict":
+        predict(args.model, args.input, args.output)
+    elif args.cmd == "model-sae":
+        layers = [int(x) for x in args.layers.split(",") if x.strip()]
+        model_sae(args.model, args.dataset, args.output, layers=layers,
+                  n_atoms=args.n_atoms, l1=args.l1, epochs=args.epochs,
+                  cache_dir=args.cache_dir, label_atoms=args.label_atoms,
+                  dataset_sae=args.dataset_sae, topk=args.topk)
     else:
         make_fixture(args.output, n_items=args.n_items, n_sessions=args.n_sessions)
 

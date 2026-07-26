@@ -1,18 +1,26 @@
 [[definitions]]
 name = "markov-baseline"
 predictor = "seq-markov"
-dataset_tags = ["seq-20260713-014226"]
+dataset_tags = [
+    "seq-20260713-014226",
+    "seq-20260715-131139",
+]
 notes = "First-order co-listening Markov (transit.rs affinity), train-only. The bar: R@10 0.107 / MRR 0.069 (2026-07-13 sweep)."
 created_at = "2026-07-13T18:38:08.095420562+00:00"
+updated_at = "2026-07-22T16:53:45.765606423+00:00"
 
 [definitions.hyperparams]
 
 [[definitions]]
 name = "popularity-baseline"
 predictor = "seq-popularity"
-dataset_tags = ["seq-20260713-014226"]
+dataset_tags = [
+    "seq-20260713-014226",
+    "seq-20260715-131139",
+]
 notes = "Context-free popularity floor (R@10 ~0.001)."
 created_at = "2026-07-13T18:38:08.109545323+00:00"
+updated_at = "2026-07-22T16:53:45.768970776+00:00"
 
 [definitions.hyperparams]
 
@@ -50,10 +58,18 @@ dataset_tags = [
     "seq-20260715-131139",
     "seq-20260715-131145",
     "seq-20260715-131150",
+    "seq-20260718-222742",
+    "seq-20260718-222754",
+    "seq-20260718-222807",
+    "seq-20260718-222820",
+    "seq-20260718-222834",
+    "seq-20260718-222848",
+    "seq-20260718-222901",
+    "seq-20260718-222905",
 ]
 notes = "Topology best (width h256). R@10 0.096 — marginal best model, still a tie vs the bar."
 created_at = "2026-07-13T18:38:34.250741657+00:00"
-updated_at = "2026-07-15T13:12:40.156916786+00:00"
+updated_at = "2026-07-18T23:55:40.940874881+00:00"
 
 [definitions.hyperparams]
 arch = "gru"
@@ -76,10 +92,11 @@ dataset_tags = [
     "seq-20260713-014226",
     "seq-20260715-030509",
     "seq-20260715-131139",
+    "seq-20260718-211238",
 ]
 notes = "CHAMPION: z-blend of GRU-infonce + train-only Markov (alpha 0.5). R@10 0.173 / MRR 0.096 — beats the Markov bar (0.107/0.069) beyond CI. First model to beat the bar."
 created_at = "2026-07-14T14:17:22.024219157+00:00"
-updated_at = "2026-07-15T14:24:40.644713823+00:00"
+updated_at = "2026-07-18T21:41:14.458267229+00:00"
 
 [definitions.hyperparams]
 alpha = 0.5
@@ -92,3 +109,81 @@ loss = "infonce"
 lr = 0.001
 patience = 6
 seed = 1337
+
+[[definitions]]
+name = "blend-gru-markov-content"
+predictor = "seq-blend"
+dataset_tags = [
+    "seq-20260715-131139",
+    "seq-20260718-211238",
+]
+notes = "R+M+C champion: equal-thirds z-blend of GRU-infonce x train-only Markov x content-kNN(max), on the rich PCA-192 space. Best-on-record R@10 ~0.186 / MRR ~0.103 (2026-07-15c); +0.013 paired-delta over the 2-leg R+M anchor. Content leg is leak-free (content only)."
+created_at = "2026-07-18T12:37:24.837489293+00:00"
+updated_at = "2026-07-18T21:31:56.718235051+00:00"
+
+[definitions.hyperparams]
+alpha = 0.5
+arch = "gru"
+batch_size = 128
+content = true
+content_agg = "max"
+epochs = 40
+hidden = 256
+k = 10
+loss = "infonce"
+lr = 0.001
+patience = 6
+seed = 1337
+
+[[definitions]]
+name = "blend-gru-markov-content-proj"
+predictor = "seq-blend"
+dataset_tags = [
+    "seq-20260715-131139",
+    "seq-20260718-211238",
+    "seq-20260718-222742",
+    "seq-20260718-222754",
+    "seq-20260718-222807",
+    "seq-20260718-222820",
+    "seq-20260718-222834",
+    "seq-20260718-222848",
+    "seq-20260718-222901",
+    "seq-20260718-222905",
+]
+notes = "R'+M+C' learned content projection (InfoNCE metric map over train consecutive pairs, full rank, tau 0.07); the 2026-07-18 lit-fit best-on-record. projection=true implies content=true. Verified R@10 ~0.2117 on PCA-192."
+created_at = "2026-07-18T19:15:32.628497412+00:00"
+updated_at = "2026-07-18T23:50:10.890666727+00:00"
+
+[definitions.hyperparams]
+alpha = 0.5
+arch = "gru"
+batch_size = 128
+content = false
+content_agg = "max"
+epochs = 40
+hidden = 256
+k = 10
+loss = "infonce"
+lr = 0.001
+patience = 6
+projection = true
+projection_epochs = 40
+projection_lr = 0.001
+projection_objective = "infonce"
+projection_rank = 0
+projection_tau = 0.07
+seed = 1337
+
+[[definitions]]
+name = "mood-session"
+predictor = "seq-mood"
+dataset_tags = ["seq-20260715-131139"]
+notes = "Mood-coherent session generator (content-metric centroid + anti-artist). Optimizes mood_coh/ild/low-artist_adj, not recall."
+created_at = "2026-07-23T01:23:11.342392601+00:00"
+updated_at = "2026-07-23T01:23:11.351979040+00:00"
+
+[definitions.hyperparams]
+artist_penalty = 0.5
+k = 10
+mmr_lambda = 1.0
+mmr_pool = 100

@@ -65,6 +65,7 @@ from seq_common import (
     eval_from_scores,
     load_artifact,
     make_fixture,
+    predict_ranking,
     training_pairs,
     write_outputs,
 )
@@ -75,6 +76,11 @@ DEFAULTS = {
     "num_layers": 1,        # stacked recurrent layers (topology)
     "bidirectional": False, # bidirectional encoder -> last-item objective (topology)
     "residual": False,      # inter-layer residuals in a manual stack (topology)
+    # Optional per-step MLP in front of the recurrence ("MLP -> GRU"). 0 = none,
+    # which is byte-identical to the historical network (see the bit-identity
+    # contract in SeqNextLatent.__init__).
+    "pre_hidden": 0,
+    "pre_layers": 1,
     "dropout": 0.1,
     "loss": "cosine",       # "cosine" | "infonce"
     "tau": 0.07,            # InfoNCE temperature
@@ -84,6 +90,11 @@ DEFAULTS = {
     "patience": 5,          # early-stop patience (epochs; 0 = off)
     "val_fraction": 0.15,   # held-out slice of TRAIN sessions
     "k": 10,                # Recall@k reported in metrics.recall_at_k
+    # Phase-2 anti-eager knobs (default OFF = byte-identical to before):
+    "eager_beta": 0.0,      # weight of the anti-eager regularizer (0 = off)
+    "eager_margin": 0.0,    # cos(pred, current) above this is penalized
+    "mmr_lambda": None,     # MMR re-rank λ at eval (None/1.0 = off; <1 diversifies)
+    "mmr_pool": 200,        # candidate pool the MMR re-rank operates over
 }
 SEED = 1337
 
@@ -100,6 +111,10 @@ def load_hp(spec: str) -> dict:
     if "num_layers" not in user and "layers" in user:
         hp["num_layers"] = int(user["layers"])
     hp["num_layers"] = int(hp["num_layers"])
+    hp["pre_hidden"] = int(hp.get("pre_hidden", 0))
+    hp["pre_layers"] = int(hp.get("pre_layers", 1))
+    assert hp["pre_hidden"] >= 0, "pre_hidden must be >= 0"
+    assert hp["pre_layers"] >= 1, "pre_layers must be >= 1"
     hp["bidirectional"] = bool(hp["bidirectional"])
     hp["residual"] = bool(hp["residual"])
     assert hp["arch"] in ("gru", "lstm"), "arch must be gru|lstm"
@@ -142,7 +157,8 @@ class SeqNextLatent(nn.Module):
 
     def __init__(self, latent_dim: int, hidden: int, arch: str,
                  num_layers: int, dropout: float,
-                 bidirectional: bool = False, residual: bool = False):
+                 bidirectional: bool = False, residual: bool = False,
+                 pre_hidden: int = 0, pre_layers: int = 1):
         super().__init__()
         self.latent_dim = latent_dim
         self.hidden = hidden
@@ -159,26 +175,58 @@ class SeqNextLatent(nn.Module):
         rnn_cls = nn.GRU if arch == "gru" else nn.LSTM
         self.drop = nn.Dropout(dropout)
 
+        # PRE-ENCODER (optional): a per-step nonlinear re-embedding in front of the
+        # recurrence, making this an "MLP -> GRU" tower. A GRU's own input
+        # transform is linear (W_i·x per gate), so this is a genuine expressivity
+        # change — and, note, only because of the ReLU: a purely linear
+        # pre-encoder at pre_hidden >= latent_dim would be exactly as expressive
+        # as the bare GRU (W_i·(Vx) = (W_iV)x, no rank constraint).
+        #
+        # BIT-IDENTITY CONTRACT: at pre_hidden == 0 this constructs NO module at
+        # all, so no parameters are drawn from the seeded RNG stream and the init
+        # order of rnn/head is untouched. That keeps the family's on-record
+        # baseline (recall@10 0.12299091544 for h256 infonce) reproducible to the
+        # last digit — this predictor is the reference every campaign gates on, so
+        # perturbing its default path would silently move the whole record.
+        self.pre = None
+        if pre_hidden and pre_hidden > 0:
+            mods: list[nn.Module] = []
+            d_in = latent_dim
+            for _ in range(max(1, int(pre_layers))):
+                mods += [nn.Linear(d_in, pre_hidden), nn.ReLU(), nn.Dropout(dropout)]
+                d_in = pre_hidden
+            self.pre = nn.Sequential(*mods)
+        self.pre_hidden = int(pre_hidden or 0)
+        in_size = self.pre_hidden if self.pre is not None else latent_dim
+
         if self.bidirectional:
             self.rnn = rnn_cls(
-                input_size=latent_dim, hidden_size=hidden,
+                input_size=in_size, hidden_size=hidden,
                 num_layers=num_layers, batch_first=True,
                 dropout=dropout if num_layers > 1 else 0.0,
                 bidirectional=True)
             self.head = nn.Linear(2 * hidden, latent_dim)
         elif self.manual_stack:
             self.cells = nn.ModuleList([
-                rnn_cls(input_size=(latent_dim if li == 0 else hidden),
+                rnn_cls(input_size=(in_size if li == 0 else hidden),
                         hidden_size=hidden, num_layers=1, batch_first=True)
                 for li in range(num_layers)
             ])
             self.head = nn.Linear(hidden, latent_dim)
         else:
             self.rnn = rnn_cls(
-                input_size=latent_dim, hidden_size=hidden,
+                input_size=in_size, hidden_size=hidden,
                 num_layers=num_layers, batch_first=True,
                 dropout=dropout if num_layers > 1 else 0.0)
             self.head = nn.Linear(hidden, latent_dim)
+
+    def _pre_encode(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply the pre-encoder per TIMESTEP (never across time — a pre-MLP that
+        mixed timesteps would leak the teacher-forcing target)."""
+        if self.pre is None:
+            return x
+        B, T, _ = x.shape
+        return self.pre(x.reshape(B * T, -1)).reshape(B, T, -1)
 
     @staticmethod
     def _run(cell, x, lengths):
@@ -194,6 +242,7 @@ class SeqNextLatent(nn.Module):
 
     def _encode_seq(self, x: torch.Tensor, lengths: torch.Tensor | None):
         """Per-step encoder output (B, T, hidden) for the unidirectional paths."""
+        x = self._pre_encode(x)
         if self.manual_stack:
             h = x
             for li, cell in enumerate(self.cells):
@@ -225,7 +274,7 @@ class SeqNextLatent(nn.Module):
     def predict_next(self, x: torch.Tensor, lengths: torch.Tensor | None = None):
         """Final predicted next-latent (B, latent_dim) for a prefix batch."""
         if self.bidirectional:
-            _, state = self._run(self.rnn, x, lengths)
+            _, state = self._run(self.rnn, self._pre_encode(x), lengths)
             h_n = state[0] if self.arch == "lstm" else state
             # h_n: (num_layers*2, B, hidden). Last layer's forward = -2, its
             # backward = -1; concat both directions -> (B, 2*hidden).
@@ -277,8 +326,17 @@ def make_batches(seqs: list[np.ndarray], item_latents: np.ndarray,
 
 
 def step_loss(pred: torch.Tensor, y: torch.Tensor, mask: torch.Tensor,
-              loss_kind: str, tau: float) -> torch.Tensor:
-    """Masked loss over all valid teacher-forcing steps."""
+              loss_kind: str, tau: float,
+              x: torch.Tensor | None = None,
+              eager_beta: float = 0.0, eager_margin: float = 0.0) -> torch.Tensor:
+    """Masked loss over all valid teacher-forcing steps.
+
+    Optional ANTI-EAGER regularizer (Phase 2): when `eager_beta > 0` and the
+    input latents `x` are supplied, add `beta * mean(relu(cos(pred, x_current) -
+    margin))`. This penalizes the model for predicting a near-copy of the
+    CURRENT track's latent — the album-eager failure mode (next-album-track /
+    same-artist) — while leaving the cosine/InfoNCE match to the true next
+    latent intact. beta=0 (default) is byte-identical to the original loss."""
     m = mask.reshape(-1)                       # (B*T,)
     p = pred.reshape(-1, pred.shape[-1])[m]    # (N, D)
     t = y.reshape(-1, y.shape[-1])[m]          # (N, D)
@@ -287,21 +345,31 @@ def step_loss(pred: torch.Tensor, y: torch.Tensor, mask: torch.Tensor,
     p = torch.nn.functional.normalize(p, dim=1)
     t = torch.nn.functional.normalize(t, dim=1)
     if loss_kind == "cosine":
-        return (1.0 - (p * t).sum(dim=1)).mean()
-    # InfoNCE: each row's positive is its own target; every step's target in
-    # the batch (including the positive) serves as the candidate bank.
-    logits = (p @ t.t()) / tau                 # (N, N)
-    labels = torch.arange(p.shape[0], device=p.device)
-    return torch.nn.functional.cross_entropy(logits, labels)
+        base = (1.0 - (p * t).sum(dim=1)).mean()
+    else:
+        # InfoNCE: each row's positive is its own target; every step's target in
+        # the batch (including the positive) serves as the candidate bank.
+        logits = (p @ t.t()) / tau             # (N, N)
+        labels = torch.arange(p.shape[0], device=p.device)
+        base = torch.nn.functional.cross_entropy(logits, labels)
+    if eager_beta and x is not None:
+        xc = torch.nn.functional.normalize(x.reshape(-1, x.shape[-1])[m], dim=1)
+        eager = torch.nn.functional.relu((p * xc).sum(dim=1) - eager_margin).mean()
+        base = base + eager_beta * eager
+    return base
 
 
 def last_item_loss(pred: torch.Tensor, y: torch.Tensor,
-                   loss_kind: str, tau: float) -> torch.Tensor:
+                   loss_kind: str, tau: float,
+                   x: torch.Tensor | None = None,
+                   eager_beta: float = 0.0, eager_margin: float = 0.0) -> torch.Tensor:
     """Leak-free last-item loss for the bidirectional path: one (pred, target)
-    pair per session. Reuses the exact cosine / in-batch-InfoNCE objective as
-    the per-step loss (a full-True mask over a single step)."""
+    pair per session. Reuses the exact cosine / in-batch-InfoNCE objective (and
+    optional anti-eager regularizer) as the per-step loss over a single step."""
     mask = torch.ones(pred.shape[0], 1, dtype=torch.bool, device=pred.device)
-    return step_loss(pred.unsqueeze(1), y.unsqueeze(1), mask, loss_kind, tau)
+    xx = x.unsqueeze(1) if x is not None else None
+    return step_loss(pred.unsqueeze(1), y.unsqueeze(1), mask, loss_kind, tau,
+                     x=xx, eager_beta=eager_beta, eager_margin=eager_margin)
 
 
 # --------------------------------------------------------------------------- #
@@ -354,20 +422,27 @@ def fit(art, hp: dict, seed: int = SEED, model: "SeqNextLatent | None" = None):
     if model is None:
         model = SeqNextLatent(D, hp["hidden"], hp["arch"], hp["num_layers"],
                               hp["dropout"], bidirectional=hp["bidirectional"],
-                              residual=hp["residual"])
+                              residual=hp["residual"],
+                              pre_hidden=hp.get("pre_hidden", 0),
+                              pre_layers=hp.get("pre_layers", 1))
     opt = torch.optim.Adam(model.parameters(), lr=hp["lr"])
 
     def batch_loss(x, y, mask, lengths):
         """Loss for one padded batch + its sample weight, branching on the
         training objective: per-step teacher forcing (unidirectional) or the
         leak-free last-item objective (bidirectional)."""
+        beta = float(hp.get("eager_beta", 0.0))
+        margin = float(hp.get("eager_margin", 0.0))
         if model.last_item_only:
             pred = model.predict_next(x, lengths)          # (B, D)
             idx = (lengths - 1).clamp(min=0)
             y_last = y[torch.arange(y.shape[0]), idx]      # (B, D) last-item latent
-            return last_item_loss(pred, y_last, hp["loss"], hp["tau"]), y.shape[0]
+            x_last = x[torch.arange(x.shape[0]), idx]      # (B, D) current-item latent
+            return last_item_loss(pred, y_last, hp["loss"], hp["tau"],
+                                  x=x_last, eager_beta=beta, eager_margin=margin), y.shape[0]
         pred = model(x, lengths)                           # (B, T, D)
-        return step_loss(pred, y, mask, hp["loss"], hp["tau"]), int(mask.sum())
+        return step_loss(pred, y, mask, hp["loss"], hp["tau"],
+                         x=x, eager_beta=beta, eager_margin=margin), int(mask.sum())
 
     def val_loss() -> float:
         model.eval()
@@ -415,16 +490,10 @@ def fit(art, hp: dict, seed: int = SEED, model: "SeqNextLatent | None" = None):
     return model
 
 
-def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
-    hp = load_hp(hp_spec)
-    art = load_artifact(dataset)
-    latents = art.item_latents
-
-    model = fit(art, hp)
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    # Retrieval eval on TEST sessions. Precompute normalized item latents once;
-    # the model's predicted next-latent for a prefix -> cosine over the vocab.
+def build_score_fn(model: "SeqNextLatent", latents: np.ndarray):
+    """Full-vocab cosine score_fn(prefix) for a trained GRU/LSTM: the model's
+    predicted next-latent for a prefix, cosine over the (pre-normalized) vocab.
+    SHARED by train and predict so serving ranks byte-identically to eval."""
     item_norm = torch.nn.functional.normalize(torch.from_numpy(latents), dim=1)
 
     def score_fn(prefix: np.ndarray) -> np.ndarray:
@@ -434,8 +503,81 @@ def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
             pred = torch.nn.functional.normalize(pred, dim=1)
             scores = (pred @ item_norm.t()).squeeze(0)      # (n_items,)
         return scores.numpy()
+    return score_fn
 
-    metrics, predictions = eval_from_scores(art, score_fn, k=hp["k"])
+
+def load_model(model_dir: Path, art, hp: dict) -> "SeqNextLatent":
+    """Reconstruct the trained model from a promoted dir's model.pt."""
+    model = SeqNextLatent(art.latent_dim, hp["hidden"], hp["arch"], hp["num_layers"],
+                          hp["dropout"], bidirectional=hp["bidirectional"],
+                          residual=hp["residual"],
+                          pre_hidden=hp.get("pre_hidden", 0),
+                          pre_layers=hp.get("pre_layers", 1))
+    model.load_state_dict(torch.load(model_dir / "model.pt", map_location="cpu"))
+    model.eval()
+    return model
+
+
+def predict(model_dir: Path, input_dir: Path, output: Path) -> None:
+    """Serving-time ranking: reload the GRU/LSTM and rank the vocab for the
+    caller's session prefix (see seq_common.predict_ranking)."""
+    hp = load_hp(str(model_dir / "hyperparams.json"))
+    art = load_artifact(model_dir)
+    model = load_model(model_dir, art, hp)
+    predict_ranking(art, build_score_fn(model, art.item_latents), input_dir, output, k=hp["k"])
+    emit({"kind": "done"})
+
+
+def _capture(model: "SeqNextLatent"):
+    """Per-model-SAE activation tap: the recurrent encoder's per-step hidden
+    state. Returns (layer_names, step_acts_fn) for seq_model_sae."""
+    def step_acts_fn(seq_latents: np.ndarray):
+        x = torch.from_numpy(seq_latents[None, :, :].astype(np.float32))  # (1,L,D)
+        with torch.no_grad():
+            acts = []
+            if model.pre is not None:
+                acts.append(model._pre_encode(x)[0, :-1].numpy())
+            out = model._encode_seq(x, None)           # (1, L, hidden)
+            acts.append(out[0, :-1].numpy())           # steps 0..L-2
+        return acts
+
+    names = (["pre"] if model.pre is not None else []) + ["recurrent"]
+    return names, step_acts_fn
+
+
+def model_sae(model_dir: Path, dataset: Path, output: Path, *, layers, n_atoms,
+              l1, epochs, cache_dir, label_atoms, dataset_sae, topk=0) -> None:
+    """Per-model SAE: dictionary-learn the GRU/LSTM's per-step hidden state and
+    relate the atoms to next-item concepts (see seq_model_sae). ``topk>0`` uses a
+    top-k SAE (l0==topk) instead of L1-induced sparsity."""
+    import seq_model_sae
+    hp = load_hp(str(model_dir / "hyperparams.json"))
+    art = load_artifact(dataset)
+    model = load_model(model_dir, art, hp)
+    if model.bidirectional:
+        raise SystemExit("model-sae: bidirectional models expose no per-step "
+                         "hidden state (last-item objective); not supported")
+    seq_model_sae.run(
+        model_dir, dataset, output,
+        capture=lambda _art: _capture(model),
+        meta={"predictor": "seq-nexttrack",
+              "hidden": ([hp["pre_hidden"]] if hp["pre_hidden"] > 0 else []) + [hp["hidden"]]},
+        layers=layers, n_atoms=n_atoms, l1=l1, epochs=epochs,
+        cache_dir=cache_dir, label_atoms=label_atoms, dropped=True, topk=topk)
+
+
+def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
+    hp = load_hp(hp_spec)
+    art = load_artifact(dataset)
+    latents = art.item_latents
+
+    model = fit(art, hp)
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    score_fn = build_score_fn(model, latents)
+    metrics, predictions = eval_from_scores(
+        art, score_fn, k=hp["k"],
+        mmr_lambda=hp.get("mmr_lambda"), mmr_pool=int(hp.get("mmr_pool", 200)))
     write_outputs(run_dir, metrics, predictions)
 
     # Save weights + hyperparams so the run is reproducible.
@@ -457,15 +599,40 @@ def main() -> None:
     tr.add_argument("--dataset", required=True, type=Path)
     tr.add_argument("--output", required=True, type=Path)
     tr.add_argument("--hyperparams", required=True)  # file path or inline JSON
+    pr = sub.add_parser("predict", help="rank the next track for a session prefix")
+    pr.add_argument("--model", required=True, type=Path)
+    pr.add_argument("--input", required=True, type=Path)
+    pr.add_argument("--output", required=True, type=Path)
     fx = sub.add_parser("fixture", help="write a synthetic SEQUENCE artifact")
     fx.add_argument("--output", required=True, type=Path)
     fx.add_argument("--n-items", type=int, default=20)
     fx.add_argument("--n-sessions", type=int, default=40)
+    ms = sub.add_parser("model-sae", help="per-model SAE over the recurrent hidden state")
+    ms.add_argument("--model", required=True, type=Path)
+    ms.add_argument("--dataset", required=True, type=Path)
+    ms.add_argument("--output", required=True, type=Path)
+    ms.add_argument("--layers", default="")  # "1"; empty = every hidden layer
+    ms.add_argument("--n-atoms", type=int, default=0)
+    ms.add_argument("--l1", type=float, default=0.0015)
+    ms.add_argument("--epochs", type=int, default=40)
+    ms.add_argument("--topk", type=int, default=0,
+                    help="top-k SAE: hard-cap active atoms per row to K (l0==K); 0 = L1-only")
+    ms.add_argument("--cache-dir", type=Path, default=None)
+    ms.add_argument("--label-atoms", action="store_true")
+    ms.add_argument("--dataset-sae", type=Path, default=None)
     args = ap.parse_args()
 
     torch.set_num_threads(max(1, (os.cpu_count() or 2) - 1))
     if args.cmd == "train":
         train(args.dataset, args.output, args.hyperparams)
+    elif args.cmd == "predict":
+        predict(args.model, args.input, args.output)
+    elif args.cmd == "model-sae":
+        layers = [int(x) for x in args.layers.split(",") if x.strip()]
+        model_sae(args.model, args.dataset, args.output, layers=layers,
+                  n_atoms=args.n_atoms, l1=args.l1, epochs=args.epochs,
+                  cache_dir=args.cache_dir, label_atoms=args.label_atoms,
+                  dataset_sae=args.dataset_sae, topk=args.topk)
     else:
         make_fixture(args.output, n_items=args.n_items, n_sessions=args.n_sessions)
 

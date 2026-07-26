@@ -1712,6 +1712,9 @@ framework = "PyTorch"
 description = "GRU/LSTM over session prefix latents -> predicted next-track latent; cosine retrieval over the vocab. Reads a SEQUENCE artifact. Python, CPU."
 command = "predictors/.venv/bin/python"
 args = ["predictors/seq_nexttrack.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/seq_nexttrack.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+extend_args = ["predictors/seq_extend.py", "extend", "--model", "{model}", "--predictor", "seq-nexttrack", "--output", "{output}", "--params", "{params}"]
+model_sae_args = ["predictors/seq_nexttrack.py", "model-sae", "--model", "{model}", "--dataset", "{dataset}", "--output", "{output}"]
 
 [[predictors.params]]
 name = "hidden"
@@ -1790,6 +1793,22 @@ min = 1
 max = 8
 
 [[predictors.params]]
+name = "pre_hidden"
+label = "per-step MLP width in front of the recurrence (0 = bare GRU; >0 makes this an MLP->GRU tower)"
+type = "int"
+default = 0
+min = 0
+max = 2048
+
+[[predictors.params]]
+name = "pre_layers"
+label = "pre-MLP hidden layers (ignored when pre_hidden is 0)"
+type = "int"
+default = 1
+min = 1
+max = 4
+
+[[predictors.params]]
 name = "bidirectional"
 label = "bidirectional encoder (switches to leak-free last-item objective)"
 type = "bool"
@@ -1801,14 +1820,48 @@ label = "inter-layer residual connections (needs num_layers>1)"
 type = "bool"
 default = false
 
+[[predictors.params]]
+name = "eager_beta"
+label = "anti-eager regularizer weight (0 = off; penalizes predicting a near-copy of the current track)"
+type = "float"
+default = 0.0
+min = 0.0
+max = 100.0
+
+[[predictors.params]]
+name = "eager_margin"
+label = "anti-eager margin: cos(pred, current) above this is penalized"
+type = "float"
+default = 0.0
+min = -1.0
+max = 1.0
+
+[[predictors.params]]
+name = "mmr_lambda"
+label = "MMR re-rank lambda at eval (1.0 = off/identity; <1 trades recall for mood diversity)"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1.0
+
+[[predictors.params]]
+name = "mmr_pool"
+label = "candidate pool size the MMR re-rank operates over"
+type = "int"
+default = 200
+min = 1
+max = 5000
+
 [[predictors]]
 name = "seq-blend"
 display_name = "Next-track GRU x Markov blend (sequence)"
 language = "Python"
 framework = "PyTorch"
-description = "Blend predictor: z-normalized GRU-infonce next-latent cosine scores combined with the train-only first-order Markov (track bigram + artist/genre back-off) affinity, alpha*z(gru)+(1-alpha)*z(markov) over the candidates, then cosine/retrieval eval. One run trains the GRU + builds the Markov scorer + blends. Reads a SEQUENCE artifact. Python, CPU."
+description = "Blend predictor: z-normalized GRU-infonce next-latent cosine scores combined with the train-only first-order Markov (track bigram + artist/genre back-off) affinity, alpha*z(gru)+(1-alpha)*z(markov) over the candidates, then cosine/retrieval eval. With content=true adds a third leak-free content-kNN leg (cosine of each candidate's latent to the prefix, max/mean-agg) and blends the EQUAL-THIRDS z-average z(gru)+z(markov)+z(content) (the R+M+C best-on-record recipe; alpha ignored). One run trains the GRU + builds the Markov scorer + blends. Reads a SEQUENCE artifact. Python, CPU."
 command = "predictors/.venv/bin/python"
 args = ["predictors/seq_blend.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/seq_blend.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+extend_args = ["predictors/seq_extend.py", "extend", "--model", "{model}", "--predictor", "seq-blend", "--output", "{output}", "--params", "{params}"]
 
 [[predictors.params]]
 name = "hidden"
@@ -1864,11 +1917,24 @@ max = 1000000
 
 [[predictors.params]]
 name = "alpha"
-label = "blend weight on the GRU leg (1-alpha on Markov)"
+label = "blend weight on the GRU leg (1-alpha on Markov); ignored when content=true"
 type = "float"
 default = 0.5
 min = 0.0
 max = 1.0
+
+[[predictors.params]]
+name = "content"
+label = "add the content-kNN third leg (R+M+C equal-thirds z-blend; ignores alpha)"
+type = "bool"
+default = false
+
+[[predictors.params]]
+name = "content_agg"
+label = "content-kNN prefix aggregation"
+type = "enum"
+default = "max"
+options = ["max", "mean"]
 
 [[predictors.params]]
 name = "k"
@@ -1886,6 +1952,67 @@ default = 128
 min = 1
 max = 8192
 
+[[predictors.params]]
+name = "projection"
+label = "learned content projection (R'+M+C'): fit a linear metric map of the item latents toward next-track adjacency; GRU + content-kNN retrieve in the projected space (implies content=true)"
+type = "bool"
+default = false
+
+[[predictors.params]]
+name = "projection_rank"
+label = "projection output rank (0 = full rank = latent_dim)"
+type = "int"
+default = 0
+min = 0
+max = 1024
+
+[[predictors.params]]
+name = "projection_objective"
+label = "projection training objective"
+type = "enum"
+default = "infonce"
+options = ["infonce", "bpr"]
+
+[[predictors.params]]
+name = "projection_tau"
+label = "InfoNCE temperature for the projection fit"
+type = "float"
+default = 0.07
+min = 0.001
+max = 1.0
+
+[[predictors.params]]
+name = "projection_epochs"
+label = "projection training epochs"
+type = "int"
+default = 40
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "projection_lr"
+label = "projection learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "mmr_lambda"
+label = "MMR re-rank lambda at eval (1.0 = off/identity; <1 trades recall for mood diversity)"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1.0
+
+[[predictors.params]]
+name = "mmr_pool"
+label = "candidate pool size the MMR re-rank operates over"
+type = "int"
+default = 200
+min = 1
+max = 5000
+
 [[predictors]]
 name = "seq-ann"
 display_name = "Next-track ANN (feed-forward, sequence)"
@@ -1894,6 +2021,9 @@ framework = "PyTorch"
 description = "The GRU's NON-recurrent feed-forward twin (the ensemble's A leg): pools each session prefix (mean-pool ++ last-item latent -> 128-d) through a 2-hidden-layer MLP to predict the next-track latent; cosine retrieval over the vocab. Same InfoNCE + per-step teacher forcing + early stopping as seq-nexttrack, no recurrence. Reads a SEQUENCE artifact. Python, CPU."
 command = "predictors/.venv/bin/python"
 args = ["predictors/seq_ann.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/seq_ann.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+extend_args = ["predictors/seq_extend.py", "extend", "--model", "{model}", "--predictor", "seq-ann", "--output", "{output}", "--params", "{params}"]
+model_sae_args = ["predictors/seq_ann.py", "model-sae", "--model", "{model}", "--dataset", "{dataset}", "--output", "{output}"]
 
 [[predictors.params]]
 name = "hidden"
@@ -1947,6 +2077,236 @@ default = 10
 min = 1
 max = 1000
 
+# --------------------------------------------------------------------------- #
+# Dual-tower sequence next-track predictor: TWO INDEPENDENT recurrent towers   #
+# (separate weights, optionally different causal input views of the prefix)    #
+# read the session prefix in parallel; their per-step hidden states are        #
+# concatenated and fused by ONE MLP head that emits the next-track latent.     #
+# Trained JOINTLY end-to-end (the combiner sees representations, not scores —  #
+# unlike seq-blend / seq-stacker), on the family's exact per-step teacher       #
+# forcing + cosine/InfoNCE objective. predictors/seq_dualgru.py.               #
+# --------------------------------------------------------------------------- #
+[[predictors]]
+name = "seq-dualgru"
+display_name = "Next-track dual-tower GRU -> MLP (sequence)"
+language = "Python"
+framework = "PyTorch"
+description = "Two INDEPENDENT recurrent towers (own weights; each on a configurable causal view of the prefix — raw latents / deltas / causal mean) run over the session prefix in parallel, their per-step hidden states are concatenated and fused by a single MLP head that predicts the next track's latent; cosine retrieval over the vocab. Trained jointly end-to-end with the family's per-step teacher forcing + cosine/InfoNCE loss, so the towers co-adapt (unlike the post-hoc seq-blend / seq-stacker combiners). Reads a SEQUENCE artifact. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/seq_dualgru.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/seq_dualgru.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+extend_args = ["predictors/seq_extend.py", "extend", "--model", "{model}", "--predictor", "seq-dualgru", "--output", "{output}", "--params", "{params}"]
+model_sae_args = ["predictors/seq_dualgru.py", "model-sae", "--model", "{model}", "--dataset", "{dataset}", "--output", "{output}"]
+
+[[predictors.params]]
+name = "hidden_a"
+label = "tower A recurrent width"
+type = "int"
+default = 256
+min = 8
+max = 1024
+
+[[predictors.params]]
+name = "hidden_b"
+label = "tower B recurrent width"
+type = "int"
+default = 256
+min = 8
+max = 1024
+
+[[predictors.params]]
+name = "arch_a"
+label = "tower A recurrent cell"
+type = "enum"
+default = "gru"
+options = ["gru", "lstm"]
+
+[[predictors.params]]
+name = "arch_b"
+label = "tower B recurrent cell"
+type = "enum"
+default = "gru"
+options = ["gru", "lstm"]
+
+[[predictors.params]]
+name = "view_a"
+label = "tower A input view (latent = raw prefix latents, delta = step-to-step movement, cummean = causal session centroid)"
+type = "enum"
+default = "latent"
+options = ["latent", "delta", "cummean"]
+
+[[predictors.params]]
+name = "view_b"
+label = "tower B input view (same view as A = two independent same-input towers)"
+type = "enum"
+default = "latent"
+options = ["latent", "delta", "cummean"]
+
+[[predictors.params]]
+name = "layers_a"
+label = "stacked recurrent layers in tower A"
+type = "int"
+default = 1
+min = 1
+max = 8
+
+[[predictors.params]]
+name = "layers_b"
+label = "stacked recurrent layers in tower B"
+type = "int"
+default = 1
+min = 1
+max = 8
+
+[[predictors.params]]
+name = "pre_hidden_a"
+label = "tower A pre-MLP width in front of the recurrence (0 = bare GRU)"
+type = "int"
+default = 0
+min = 0
+max = 2048
+
+[[predictors.params]]
+name = "pre_hidden_b"
+label = "tower B pre-MLP width in front of the recurrence (0 = bare GRU; >0 makes B an MLP->GRU tower)"
+type = "int"
+default = 0
+min = 0
+max = 2048
+
+[[predictors.params]]
+name = "pre_layers_a"
+label = "tower A pre-MLP hidden layers (ignored when its width is 0)"
+type = "int"
+default = 1
+min = 1
+max = 4
+
+[[predictors.params]]
+name = "pre_layers_b"
+label = "tower B pre-MLP hidden layers (ignored when its width is 0)"
+type = "int"
+default = 1
+min = 1
+max = 4
+
+[[predictors.params]]
+name = "fusion_hidden"
+label = "fusion MLP hidden width"
+type = "int"
+default = 256
+min = 8
+max = 2048
+
+[[predictors.params]]
+name = "fusion_layers"
+label = "fusion MLP hidden layers (0 = linear head over the concatenated towers)"
+type = "int"
+default = 1
+min = 0
+max = 4
+
+[[predictors.params]]
+name = "loss"
+label = "training objective"
+type = "enum"
+default = "infonce"
+options = ["cosine", "infonce"]
+
+[[predictors.params]]
+name = "tau"
+label = "InfoNCE temperature"
+type = "float"
+default = 0.07
+min = 0.001
+max = 1.0
+
+[[predictors.params]]
+name = "epochs"
+type = "int"
+default = 40
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "lr"
+label = "learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "dropout"
+label = "dropout (towers' inter-layer + fusion MLP)"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors.params]]
+name = "batch_size"
+label = "batch size (sessions)"
+type = "int"
+default = 128
+min = 1
+max = 8192
+
+[[predictors.params]]
+name = "patience"
+label = "early-stop patience (epochs, 0 = off)"
+type = "int"
+default = 6
+min = 0
+max = 10000
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 1337
+min = 0
+max = 1000000
+
+[[predictors.params]]
+name = "k"
+label = "Recall@k reported in metrics.recall_at_k"
+type = "int"
+default = 10
+min = 1
+max = 1000
+
+[[predictors.params]]
+name = "eager_beta"
+label = "anti-eager regularizer weight (0 = off; penalizes predicting a near-copy of the current track)"
+type = "float"
+default = 0.0
+min = 0.0
+max = 100.0
+
+[[predictors.params]]
+name = "eager_margin"
+label = "anti-eager margin: cos(pred, current) above this is penalized"
+type = "float"
+default = 0.0
+min = -1.0
+max = 1.0
+
+[[predictors.params]]
+name = "mmr_lambda"
+label = "MMR re-rank lambda at eval (1.0 = off/identity; <1 trades recall for mood diversity)"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1.0
+
+[[predictors.params]]
+name = "mmr_pool"
+label = "candidate pool size the MMR re-rank operates over"
+type = "int"
+default = 200
+min = 1
+max = 5000
+
 [[predictors]]
 name = "seq-stacker"
 display_name = "Next-track XGBoost stacker (meta-learner, sequence)"
@@ -1955,6 +2315,7 @@ framework = "XGBoost"
 description = "The ensemble meta-learner (X leg): an xgboost binary:logistic reranker that LEARNS to combine the base-leg full-vocab scores (Markov / GRU / ANN, configurable via `legs`) with candidate features [log1p(play_count), recency-in-prefix, artist-match, genre-match]. Trained on true-next (positive) + popularity-sampled negatives per TRAIN session; at eval it scores all vocab items -> full-vocab vector -> the shared leave-last-out retrieval eval. One run trains any requested base GRU/ANN legs + builds the Markov leg + trains the stacker. Reads a SEQUENCE artifact. Python, CPU."
 command = "predictors/.venv/bin/python"
 args = ["predictors/seq_stacker.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/seq_stacker.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
 
 [[predictors.params]]
 name = "legs"
@@ -2041,6 +2402,7 @@ framework = "none"
 description = "First-order co-listening Markov (track bigram + artist/genre back-off), train-only. The bar the sequence model must beat. Reads a SEQUENCE artifact."
 command = "predictors/.venv/bin/python"
 args = ["predictors/seq_baselines.py", "--dataset", "{dataset}", "--output", "{run_dir}", "--mode", "markov"]
+predict_args = ["predictors/seq_baselines.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}", "--mode", "markov"]
 
 [[predictors]]
 name = "seq-popularity"
@@ -2050,3 +2412,46 @@ framework = "none"
 description = "Context-free popularity floor over the sequence artifact."
 command = "predictors/.venv/bin/python"
 args = ["predictors/seq_baselines.py", "--dataset", "{dataset}", "--output", "{run_dir}", "--mode", "popularity"]
+predict_args = ["predictors/seq_baselines.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}", "--mode", "popularity"]
+
+[[predictors]]
+name = "seq-mood"
+display_name = "Mood-coherent session (content-metric)"
+language = "Python"
+framework = "numpy"
+description = "Generates a session that HOLDS THE SEED'S VIBE rather than guessing the true next track: ranks candidates by cosine to the prefix mood centroid in the intrinsic content-metric space (spotify_tracks_content_metric), minus a penalty on tracks sharing the seed's artist (anti-eager). Optimizes mood_coh@10 (high) + artist_adj@10 (low) + ild@10, NOT recall. Deterministic (no weights); rebuilds from the baked sequence artifact at serve time; needs the content-metric Qdrant collection (QDRANT_URL)."
+command = "predictors/.venv/bin/python"
+args = ["predictors/seq_mood.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/seq_mood.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+
+[[predictors.params]]
+name = "artist_penalty"
+label = "penalty subtracted from tracks sharing the seed's artist (anti-eager; 0 = off)"
+type = "float"
+default = 0.5
+min = 0.0
+max = 5.0
+
+[[predictors.params]]
+name = "k"
+label = "top-k reported / served"
+type = "int"
+default = 10
+min = 1
+max = 1000
+
+[[predictors.params]]
+name = "mmr_lambda"
+label = "optional light spread at rank time (1.0 = off; <1 diversifies)"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1.0
+
+[[predictors.params]]
+name = "mmr_pool"
+label = "candidate pool size the optional spread operates over"
+type = "int"
+default = 100
+min = 1
+max = 5000

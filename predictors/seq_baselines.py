@@ -41,6 +41,7 @@ from seq_common import (
     emit,
     eval_from_scores,
     load_artifact,
+    predict_ranking,
     write_outputs,
 )
 
@@ -225,14 +226,37 @@ def run(dataset: Path, run_dir: Path, mode: str, k: int) -> None:
     emit({"kind": "done"})
 
 
+def predict(model_dir: Path, input_dir: Path, output: Path, mode: str) -> None:
+    """Serving-time ranking: rebuild the train-only baseline scorer for `mode`
+    from the baked sequence artifact and rank the vocab for the caller's session
+    prefix (see seq_common.predict_ranking). No checkpoint — the statistics are
+    reconstructed from the snapshotted train sessions."""
+    art = load_artifact(model_dir)
+    predict_ranking(art, SCORERS[mode](art), input_dir, output)
+    emit({"kind": "done"})
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", required=True, type=Path)
-    ap.add_argument("--output", required=True, type=Path)
-    ap.add_argument("--mode", required=True, choices=list(SCORERS))
+    # Back-compat: the historical flat form (no subcommand) IS the run form, so
+    # accept `--dataset/--output/--mode` at the top level and default cmd=run.
+    ap.add_argument("--dataset", type=Path)
+    ap.add_argument("--output", type=Path)
+    ap.add_argument("--mode", choices=list(SCORERS))
     ap.add_argument("--hyperparams", default="{}")  # file path or inline JSON
+    sub = ap.add_subparsers(dest="cmd")
+    pr = sub.add_parser("predict", help="rank the next track for a session prefix")
+    pr.add_argument("--model", required=True, type=Path)
+    pr.add_argument("--input", required=True, type=Path)
+    pr.add_argument("--output", required=True, type=Path)
+    pr.add_argument("--mode", required=True, choices=list(SCORERS))
     args = ap.parse_args()
 
+    if args.cmd == "predict":
+        predict(args.model, args.input, args.output, args.mode)
+        return
+    assert args.dataset and args.output and args.mode, \
+        "run mode needs --dataset, --output, --mode"
     p = Path(args.hyperparams)
     hp = json.loads(p.read_text() if p.exists() else args.hyperparams)
     k = int(hp.get("k", 10))

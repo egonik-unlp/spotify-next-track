@@ -65,12 +65,17 @@ from seq_common import (
     eval_from_scores,
     load_artifact,
     make_fixture,
+    predict_ranking,
     write_outputs,
 )
 from seq_baselines import markov_scorer, train_play_counts
-from seq_nexttrack import DEFAULTS as GRU_DEFAULTS, SEED, fit as gru_fit
+from seq_nexttrack import (
+    DEFAULTS as GRU_DEFAULTS, SEED, SeqNextLatent, fit as gru_fit,
+)
 from seq_blend import gru_score_fn
-from seq_ann import DEFAULTS as ANN_DEFAULTS, fit as ann_fit, ann_score_fn
+from seq_ann import (
+    DEFAULTS as ANN_DEFAULTS, AnnNextLatent, ann_score_fn, fit as ann_fit,
+)
 
 # Canonical leg order -> its feature-column name. Only legs listed in `legs`
 # contribute a column, but always in THIS order so the feature matrix is stable.
@@ -229,22 +234,52 @@ def _ann_hp(hp: dict) -> dict:
     return d
 
 
-def build_leg_scorers(art, legs: list[str], hp: dict) -> dict:
+def build_leg_scorers(art, legs: list[str], hp: dict,
+                      ckpt_dir: Path | None = None, save: bool = False) -> dict:
     """Train / build the requested base legs and return {leg: score_fn(prefix)
     -> full-vocab vector}. Reuses seq_nexttrack.fit and seq_ann.fit verbatim, so
     the base learners are byte-identical to their standalone runs at the same
-    hyperparameters + seed."""
+    hyperparameters + seed.
+
+    Neural base legs (GRU/ANN) are snapshotted so a promoted stacker serves
+    without retraining: with `save=True` their weights are written under
+    `ckpt_dir` (`base_gru.pt` / `base_ann.pt`); at predict, if those checkpoints
+    exist under `ckpt_dir` they are LOADED instead of retrained. The Markov leg
+    is a cheap train-only stat, always rebuilt from the artifact."""
     scorers: dict = {}
     if "markov" in legs:
         scorers["markov"] = markov_scorer(art)
         emit({"kind": "log", "msg": "built train-only Markov scorer (M leg)"})
     if "gru" in legs:
-        emit({"kind": "log", "msg": "training GRU base leg (R)"})
-        gru_model = gru_fit(art, _gru_hp(hp), seed=hp["seed"])
+        ghp = _gru_hp(hp)
+        gp = (ckpt_dir / "base_gru.pt") if ckpt_dir else None
+        if gp and gp.exists():
+            gru_model = SeqNextLatent(art.latent_dim, ghp["hidden"], ghp["arch"],
+                                      ghp["num_layers"], ghp["dropout"],
+                                      bidirectional=ghp["bidirectional"],
+                                      residual=ghp["residual"])
+            gru_model.load_state_dict(torch.load(gp, map_location="cpu"))
+            gru_model.eval()
+            emit({"kind": "log", "msg": "loaded GRU base leg (R) from checkpoint"})
+        else:
+            emit({"kind": "log", "msg": "training GRU base leg (R)"})
+            gru_model = gru_fit(art, ghp, seed=hp["seed"])
+            if save and gp:
+                torch.save(gru_model.state_dict(), gp)
         scorers["gru"] = gru_score_fn(gru_model, art.item_latents)
     if "ann" in legs:
-        emit({"kind": "log", "msg": "training ANN base leg (A)"})
-        ann_model = ann_fit(art, _ann_hp(hp), seed=hp["seed"])
+        ahp = _ann_hp(hp)
+        ap = (ckpt_dir / "base_ann.pt") if ckpt_dir else None
+        if ap and ap.exists():
+            ann_model = AnnNextLatent(art.latent_dim, ahp["hidden"], ahp["dropout"])
+            ann_model.load_state_dict(torch.load(ap, map_location="cpu"))
+            ann_model.eval()
+            emit({"kind": "log", "msg": "loaded ANN base leg (A) from checkpoint"})
+        else:
+            emit({"kind": "log", "msg": "training ANN base leg (A)"})
+            ann_model = ann_fit(art, ahp, seed=hp["seed"])
+            if save and ap:
+                torch.save(ann_model.state_dict(), ap)
         scorers["ann"] = ann_score_fn(ann_model, art.item_latents)
     return scorers
 
@@ -379,8 +414,11 @@ def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
           f"{int(art.test_sessions.size)} test sessions; stacker legs "
           f"{'+'.join(legs)} + candidate features"})
 
+    run_dir.mkdir(parents=True, exist_ok=True)
     ia = build_item_arrays(art)
-    leg_scorers = build_leg_scorers(art, legs, hp)
+    # Snapshot the neural base legs into the run dir so a promoted stacker
+    # serves without retraining them.
+    leg_scorers = build_leg_scorers(art, legs, hp, ckpt_dir=run_dir, save=True)
     booster = train_stacker(art, legs, leg_scorers, hp, ia)
     score_fn = stacker_score_fn(booster, art, legs, leg_scorers, ia)
 
@@ -388,7 +426,6 @@ def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
     metrics["legs"] = legs
     metrics["features"] = feature_names(legs)
 
-    run_dir.mkdir(parents=True, exist_ok=True)
     write_outputs(run_dir, metrics, predictions)
     booster.save_model(str(run_dir / "stacker.json"))
     (run_dir / "hyperparams.json").write_text(json.dumps(hp))
@@ -401,6 +438,22 @@ def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
     emit({"kind": "done"})
 
 
+def predict(model_dir: Path, input_dir: Path, output: Path) -> None:
+    """Serving-time ranking: reload the XGB booster + the snapshotted base legs
+    and rank the vocab for the caller's session prefix (see
+    seq_common.predict_ranking). Base-leg checkpoints (base_gru.pt/base_ann.pt)
+    baked at promote mean no retraining here."""
+    hp = load_hp(str(model_dir / "hyperparams.json"))
+    art = load_artifact(model_dir)
+    legs = hp["legs"]
+    booster = xgb.Booster()
+    booster.load_model(str(model_dir / "stacker.json"))
+    leg_scorers = build_leg_scorers(art, legs, hp, ckpt_dir=model_dir)
+    score_fn = stacker_score_fn(booster, art, legs, leg_scorers)
+    predict_ranking(art, score_fn, input_dir, output, k=hp["k"])
+    emit({"kind": "done"})
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -408,6 +461,10 @@ def main() -> None:
     tr.add_argument("--dataset", required=True, type=Path)
     tr.add_argument("--output", required=True, type=Path)
     tr.add_argument("--hyperparams", required=True)  # file path or inline JSON
+    pr = sub.add_parser("predict", help="rank the next track for a session prefix")
+    pr.add_argument("--model", required=True, type=Path)
+    pr.add_argument("--input", required=True, type=Path)
+    pr.add_argument("--output", required=True, type=Path)
     fx = sub.add_parser("fixture", help="write a synthetic SEQUENCE artifact")
     fx.add_argument("--output", required=True, type=Path)
     fx.add_argument("--n-items", type=int, default=20)
@@ -417,6 +474,8 @@ def main() -> None:
     torch.set_num_threads(max(1, (os.cpu_count() or 2) - 1))
     if args.cmd == "train":
         train(args.dataset, args.output, args.hyperparams)
+    elif args.cmd == "predict":
+        predict(args.model, args.input, args.output)
     else:
         make_fixture(args.output, n_items=args.n_items, n_sessions=args.n_sessions)
 
