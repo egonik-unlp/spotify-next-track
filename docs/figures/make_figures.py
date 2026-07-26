@@ -1206,6 +1206,307 @@ def fig_nexttrack_mmr_tradeoff():
     save(fig, "nexttrack_mmr_tradeoff.pdf")
 
 
+# Fig 25: the dual-tower view-pairing matrix. The complete upper triangle of the
+# {latent, delta, cummean}^2 view matrix at fusion_layers=1, six cells, one run
+# each. EVERY cell sits below the single-GRU h256 baseline (0.12299), and the
+# ordering is monotone in "how much raw latent is in the pair": both-latent is
+# best, both-delta is worst. The lower triangle was never run (the pairing is
+# symmetric by construction) and is masked rather than mirrored. The read: a GRU
+# over raw latents already integrates step-to-step movement (delta) and the
+# running mean (cummean) internally, so pairing it with an explicit computation of
+# either is redundant -- while two impoverished views ARE mutually complementary
+# (delta/cummean beats both its parents CI>0) at a hopeless absolute level.
+# (2026-07-25-nexttrack-dual-tower-fusion-scan.md, Results + Rule 4.)
+def fig_nexttrack_dualtower_matrix():
+    views = ["latent", "delta", "cummean"]
+    nan = np.nan
+    # rows = view_a, cols = view_b; upper triangle only (i <= j).
+    recall = np.array([
+        [0.10273, 0.09154, 0.09713],  # latent / {latent, delta, cummean}
+        [nan, 0.05800, 0.08665],      # delta  / {delta, cummean}
+        [nan, nan, 0.06639],          # cummean / cummean
+    ])
+    baseline = 0.12299  # C0 single GRU h256, the single-model bar
+    best = (0, 0)  # latent/latent, the best dual cell -- still only a TIE with C0
+
+    cmap = matplotlib.colormaps["viridis"].copy()
+    cmap.set_bad("#e5e7eb")  # never-run cells: grey, not a low-value colour
+
+    fig, ax = plt.subplots(figsize=(5.4, 3.8))
+    im = ax.pcolormesh(
+        np.arange(len(views) + 1), np.arange(len(views) + 1),
+        np.ma.masked_invalid(recall), cmap=cmap, shading="flat",
+    )
+    ax.set_xticks(np.arange(len(views)) + 0.5)
+    ax.set_xticklabels(views)
+    ax.set_yticks(np.arange(len(views)) + 0.5)
+    ax.set_yticklabels(views)
+    ax.set_xlabel("tower B causal view")
+    ax.set_ylabel("tower A causal view")
+    ax.invert_yaxis()
+    ax.grid(False)
+    for i in range(len(views)):
+        for j in range(len(views)):
+            v = recall[i, j]
+            if np.isnan(v):
+                ax.text(j + 0.5, i + 0.5, "not run\n(symmetric)", ha="center",
+                        va="center", fontsize=6.4, color="#6b7280")
+                continue
+            is_best = (i, j) == best
+            ax.text(
+                j + 0.5, i + 0.5, f"{v:.4f}", ha="center", va="center", fontsize=8.4,
+                color="white" if v < 0.088 else "black",
+                fontweight="bold" if is_best else "normal",
+            )
+            if is_best:
+                ax.add_patch(plt.Rectangle((j, i), 1, 1, fill=False, edgecolor=BAD, lw=2.2))
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label("recall@10 (P(next-track hit))")
+    cbar.formatter = afmt
+    cbar.update_ticks()
+    ax.set_title(
+        "The raw latent view subsumes the others: every dual cell sits below the\n"
+        f"single-GRU baseline ({baseline:.3f}), and the more 'latent' a pair, the better"
+    )
+    save(fig, "nexttrack_dualtower_matrix.pdf")
+
+
+# Fig 26: holisticness and recall are ANTI-CORRELATED across the dual-tower
+# batch, which is why the crown rule needs a hard recall floor. Every arm that
+# lifts 3-factor holisticness@10 does so by retreating from exact prediction: the
+# H-ranked order runs almost exactly backwards along recall. Five arms clear the
+# paired-DeltaH CI>0 leg (green) and ALL FIVE fail the pre-registered +/-0.015
+# recall floor, so Rule 6 never fired and the crown was untouched -- the floor
+# caught exactly the `mood-session` degenerate mode it was written for (shown as
+# the open marker: H 0.2332 at recall 0.0238 = 34 of 1,431). NB all H values here
+# are the 3-FACTOR generation; see fig_nexttrack_power for the generation caveat.
+# (2026-07-25-nexttrack-dual-tower-fusion-scan.md, Rule 6 + Finding 5.)
+def fig_nexttrack_holisticness_antiwin():
+    # (label, recall@10, 3-factor H, DeltaH CI>0?)
+    # (label, recall, H, DeltaH CI>0, label dx, dy in points, ha)
+    arms = [
+        ("C0 h256", 0.12299, 0.14172, None, 11, 7, "left"),
+        ("C1 h425", 0.12089, 0.13850, False, 11, -6, "left"),
+        ("D-LL-f0", 0.11880, 0.13774, False, -8, 7, "right"),
+        ("D-LC-f0", 0.11740, 0.13648, False, -6, -14, "right"),
+        ("D-LL", 0.10273, 0.14635, True, 0, 8, "center"),
+        ("D-LC", 0.09713, 0.15000, True, 0, 8, "center"),
+        ("D-LD", 0.09154, 0.14673, True, 0, 8, "center"),
+        ("D-DC", 0.08665, 0.16340, True, 0, 8, "center"),
+        ("D-CC", 0.06639, 0.19715, True, 0, 8, "center"),
+        ("D-DD", 0.05800, 0.13335, False, 0, 8, "center"),
+    ]
+    floor = 0.12299 - 0.015  # Rule 6 anti-degenerate recall floor
+
+    fig, ax = plt.subplots(figsize=(6.6, 4.2))
+    ax.axvspan(0.015, floor, color=BAD, alpha=0.07)
+    ax.axvline(floor, color=BAD, ls="--", lw=1.4,
+               label=f"Rule 6 recall floor ({floor:.3f})")
+    ax.axvline(0.12299, color=ACCENT, ls=":", lw=1.2, label="C0 baseline recall")
+
+    for label, r, h, win, dx, dy, ha in arms:
+        if win is None:
+            c, m, s = ACCENT, "*", 190
+        elif win:
+            c, m, s = GOOD, "o", 62
+        else:
+            c, m, s = MUTED, "o", 62
+        ax.scatter([r], [h], color=c, marker=m, s=s, zorder=5,
+                   edgecolor="white", linewidth=0.6)
+        ax.annotate(label, xy=(r, h), xytext=(dx, dy), textcoords="offset points",
+                    ha=ha, fontsize=6.6, color="#374151")
+    # the degenerate incumbent the floor exists to block
+    ax.scatter([0.0238], [0.2332], facecolor="none", edgecolor=BAD, marker="s",
+               s=80, lw=1.6, zorder=5)
+    ax.annotate("mood-session\n(degenerate: 34 of 1,431)", xy=(0.0238, 0.2332),
+                xytext=(0.040, 0.221), fontsize=6.6, color=BAD,
+                arrowprops=dict(arrowstyle="->", color=BAD, lw=0.8))
+
+    ax.set_xlabel("recall@10 (P(next-track hit))")
+    ax.set_ylabel("holisticness@10 (3-factor generation)")
+    ax.xaxis.set_major_formatter(afmt)
+    ax.yaxis.set_major_formatter(afmt)
+    ax.set_xlim(0.015, 0.145)
+    ax.set_ylim(0.128, 0.246)
+    handles, labels = ax.get_legend_handles_labels()
+    handles += [
+        plt.Line2D([], [], color=GOOD, marker="o", ls="", label="$\\Delta$H CI$>$0 (clears the H leg)"),
+        plt.Line2D([], [], color=MUTED, marker="o", ls="", label="$\\Delta$H straddles / CI$<$0"),
+    ]
+    ax.legend(handles=handles, loc="upper right", fontsize=6.6)
+    ax.set_title("Unconstrained holisticness is maximized by predicting WORSE: all five\n"
+                 "$\\Delta$H winners fall below the recall floor, so no crown changed hands")
+    save(fig, "nexttrack_holisticness_antiwin.pdf")
+
+
+# Fig 27: the pre-encoder verdict as a forest plot. Paired per-session bootstrap
+# Delta recall@10 against the reproduced C0 baseline (2,000 resamples, rng 1337,
+# n=1,431), one row per arm. NOT ONE of the six pre-MLP arms reaches CI>0: five
+# lose outright and one ties. The decisive row is S1 (MLP256->GRU256, the only arm
+# whose result is unambiguously attributable to the pre-encoder), which does not
+# merely tie -- it LOSES, 156 hits against 176. Because a LINEAR pre-encoder at
+# pre_hidden >= latent_dim is provably expressivity-neutral (W_i(Vx) = (W_iV)x),
+# the ReLU is the only expressivity change, so the rectifier itself is the cause.
+# (2026-07-26-nexttrack-pre-encoder-scan.md, Results + Rules 1/7.)
+def fig_nexttrack_preencoder_forest():
+    # (label, delta, lo, hi, kind) sorted by delta descending
+    rows = [
+        ("C2 h454 (capacity ctrl)", +0.00210, -0.00699, +0.01118, "ctrl"),
+        ("T1-f0 dual A0/B256 f0", +0.00070, -0.01188, +0.01328, "tie"),
+        ("C1 h297 (capacity ctrl)", -0.00978, -0.01747, -0.00280, "ctrl"),
+        ("S1 MLP256$\\to$GRU256", -0.01398, -0.02657, -0.00140, "key"),
+        ("C3 bare dual f1", -0.02027, -0.03494, -0.00697, "ctrl"),
+        ("T2 dual A0/B128 f1", -0.02306, -0.03704, -0.00908, "pre"),
+        ("T3 dual A0/B384 f1", -0.02306, -0.03704, -0.00908, "pre"),
+        ("T4 dual A256/B256 f1", -0.02516, -0.03913, -0.01118, "pre"),
+        ("T1 dual A0/B256 f1", -0.02586, -0.03985, -0.01258, "pre"),
+    ]
+    colour = {"ctrl": ACCENT, "tie": MUTED, "pre": BAD, "key": BAD}
+    y = np.arange(len(rows))[::-1]
+
+    fig, ax = plt.subplots(figsize=(6.6, 4.0))
+    ax.axvspan(-0.015, 0.015, color=MUTED, alpha=0.14,
+               label="$\\pm0.015$ practical tie band")
+    ax.axvline(0, color="black", lw=1.1)
+    for yi, (label, d, lo, hi, kind) in zip(y, rows):
+        c = colour[kind]
+        lw = 2.6 if kind == "key" else 1.5
+        ax.plot([lo, hi], [yi, yi], color=c, lw=lw, solid_capstyle="butt")
+        ax.plot([d], [yi], "o", color=c, ms=7 if kind == "key" else 5, zorder=5)
+    ax.set_yticks(y)
+    ax.set_yticklabels([r[0] for r in rows], fontsize=7.4)
+    ax.set_xlabel("paired $\\Delta$ recall@10 vs C0 (single GRU h256) [95% CI]")
+    ax.xaxis.set_major_formatter(afmt)
+    ax.set_xlim(-0.050, 0.028)
+    ax.set_ylim(-0.85, len(rows) - 0.35)
+    ax.grid(axis="y", visible=False)
+    ax.text(0.0018, y[3], "the decisive ablation:\nLOSES, 156 vs 176 hits",
+            ha="left", va="center", fontsize=6.8, color=BAD)
+    handles, labels = ax.get_legend_handles_labels()
+    handles += [
+        plt.Line2D([], [], color=BAD, marker="o", lw=1.5, label="pre-encoder arm"),
+        plt.Line2D([], [], color=ACCENT, marker="o", lw=1.5, label="control (no pre-encoder)"),
+    ]
+    ax.legend(handles=handles, loc="lower right", fontsize=6.6)
+    ax.set_title("No pre-encoder arm wins, and the single-tower ablation loses outright:\n"
+                 "the ReLU is the only expressivity change, so the rectifier is the cause")
+    save(fig, "nexttrack_preencoder_forest.pdf")
+
+
+# Fig 28: the rectifier mechanism MEASURED, not inferred. The B4 follow-up read
+# next-item genre decodability off the taps of the pre-encoded models, plus one
+# counterfactual tap the SAE engine cannot express -- the model's OWN affine map
+# with the ReLU deleted (tools/rectifier_control.py). Input side: the affine map
+# is NEUTRAL (~0.8 sigma, exactly as W_i(Vx) = (W_iV)x predicts) and the ReLU is
+# the WHOLE loss (~5.9 sigma). frac_exact_zero on the rectified tap is 0.5327,
+# matching pre_linear's frac_negative_coords 0.5327 to four digits: the rectifier
+# deletes precisely the negative half, leaving ~120 live units for 192 signed
+# directions. The damage SURVIVES the recurrence (tower_b fed rectified vs its
+# identical twin tower_a fed raw, ~3.9 sigma), and tower_a reproduces the
+# standalone plain GRU -- which is what "the bare tower RESCUES" requires.
+# 11,184 probe test rows, 25 classes, paired SE <= 0.0065.
+# (2026-07-26-nexttrack-pre-encoder-scan.md, Phase B4 / PROJECT-FACTS.md.)
+def fig_nexttrack_rectifier():
+    labels = ["raw\nlatent", "pre_linear\n(ReLU deleted)", "pre_relu\n(as trained)",
+              "tower_a\n(fed raw)", "tower_b\n(fed rectified)", "plain GRU\n(standalone)"]
+    acc = [0.4033, 0.4084, 0.3700, 0.4183, 0.3929, 0.4235]
+    auc = [0.7609, 0.7667, 0.7508, 0.8004, 0.7845, 0.8006]
+    cols = [MUTED, GOOD, BAD, GOOD, BAD, ACCENT]
+    x = np.arange(len(labels))
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.2))
+    ax.axvline(2.5, color="#9ca3af", lw=1.0, ls="-")
+    ax.bar(x, acc, 0.62, color=cols, edgecolor="white", linewidth=0.8)
+    for xi, (a, u) in enumerate(zip(acc, auc)):
+        ax.text(xi, a + 0.0030, f"{a:.4f}", ha="center", fontsize=7.2)
+        ax.text(xi, 0.3555, f"AUC\n{u:.4f}", ha="center", va="center",
+                fontsize=6.5, color="white")
+    ax.set_ylim(0.345, 0.4530)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=6.9)
+    ax.set_ylabel("next-item genre decodability (accuracy)")
+    ax.set_xlabel("representation tap")
+    ax.text(1.0, 0.4505, "input side (before the recurrence)", ha="center",
+            fontsize=7.0, color="#374151", style="italic")
+    ax.text(4.0, 0.4505, "after the recurrence", ha="center",
+            fontsize=7.0, color="#374151", style="italic")
+    # the two decisive contrasts
+    ax.annotate("", xy=(0, 0.4140), xytext=(1, 0.4140),
+                arrowprops=dict(arrowstyle="<->", color=GOOD, lw=1.1))
+    ax.text(0.5, 0.4152, "affine map NEUTRAL\n$\\sim$0.8$\\sigma$", ha="center",
+            va="bottom", fontsize=6.6, color=GOOD)
+    ax.annotate("", xy=(1, 0.4290), xytext=(2, 0.4290),
+                arrowprops=dict(arrowstyle="<->", color=BAD, lw=1.4))
+    ax.text(1.5, 0.4302, "the ReLU is the WHOLE loss\n$\\sim$5.9$\\sigma$", ha="center",
+            va="bottom", fontsize=6.9, color=BAD, fontweight="bold")
+    ax.annotate("", xy=(3, 0.4252), xytext=(4, 0.4252),
+                arrowprops=dict(arrowstyle="<->", color=BAD, lw=1.1))
+    ax.text(3.5, 0.4264, "damage survives\nthe recurrence $\\sim$3.9$\\sigma$",
+            ha="center", va="bottom", fontsize=6.6, color=BAD)
+    ax.grid(axis="x", visible=False)
+    ax.set_title("The rectifier mechanism, measured: the affine map is free and the ReLU\n"
+                 "is the entire cost -- half-wave rectification of a zero-centred latent")
+    save(fig, "nexttrack_rectifier.pdf")
+
+
+# Fig 29: the measured statistical POWER of this test split, which reframes the
+# architecture nulls. The paired-bootstrap CI half-width scales as 1/sqrt(n): at
+# the split's n=1,431 it is ~0.0124 on recall@10 (the mean over the nine
+# comparisons of the pre-encoder batch; 0.0128 over the nine of the dual-tower
+# batch). An architecture family's ENTIRE spread is ~0.028 recall -- about 2.3
+# resolution widths, so of eight adjacent arms only ~2 tiers are separable, and a
+# 0.005 difference would need ~8,800 test sessions. The honest reading of the five
+# architecture nulls: LARGE HARMS were detected reliably (five arms lose CI<0),
+# while MODERATE WINS were never detectable at all. That is a different claim from
+# "these architectures do not work".
+# (2026-07-25-nexttrack-dual-tower-fusion-scan.md +
+#  2026-07-26-nexttrack-pre-encoder-scan.md, paired-Delta tables.)
+def fig_nexttrack_power():
+    n0, hw0 = 1431, 0.0124  # measured anchor: this split, mean recall@10 half-width
+    n = np.logspace(np.log10(500), np.log10(30000), 400)
+    hw = hw0 * np.sqrt(n0 / n)
+    spread = 0.028   # whole spread of an architecture family on recall@10
+    target = 0.005   # the difference worth resolving
+    n_needed = n0 * (hw0 / target) ** 2  # ~8,800
+
+    fig, ax = plt.subplots(figsize=(6.6, 4.0))
+    ax.plot(n, hw, "-", color=ACCENT, lw=2.0,
+            label="paired-bootstrap CI half-width $\\propto 1/\\sqrt{n}$")
+    ax.axhline(spread, color=MUTED, ls="--", lw=1.3,
+               label=f"whole spread of an architecture family ({spread:.3f})")
+    ax.axhline(target, color=GOOD, ls=":", lw=1.6,
+               label=f"a difference worth resolving ({target:.3f})")
+
+    ax.plot([n0], [hw0], "o", color=BAD, ms=9, zorder=6)
+    ax.annotate(f"this split\nn={n0:,}, half-width {hw0:.4f}", xy=(n0, hw0),
+                xytext=(1750, 0.0200), fontsize=7.0, color=BAD,
+                arrowprops=dict(arrowstyle="->", color=BAD, lw=0.9))
+    ax.plot([n_needed], [target], "o", color=GOOD, ms=8, zorder=6)
+    ax.annotate(f"n $\\approx$ {round(n_needed, -2):,.0f} sessions needed",
+                xy=(n_needed, target), xytext=(5200, 0.0098), fontsize=7.0, color=GOOD,
+                arrowprops=dict(arrowstyle="->", color=GOOD, lw=0.9))
+    ax.vlines([n0, n_needed], 0, [hw0, target], color=MUTED, lw=0.8, ls=":")
+
+    # the resolvable-tier band: spread / half-width at n0
+    ax.text(
+        560, 0.0387,
+        f"spread / resolution = {spread / hw0:.1f}\n"
+        "$\\Rightarrow$ of 8 adjacent arms only $\\sim$2 tiers are\n"
+        "separable on recall@10 ($\\sim$1 on holisticness)",
+        fontsize=6.9, color="#374151", ha="left", va="top",
+        bbox=dict(boxstyle="round,pad=0.35", fc="#f9fafb", ec="#d1d5db", lw=0.7),
+    )
+    ax.set_xscale("log")
+    ax.set_xlim(500, 30000)
+    ax.set_ylim(0, 0.039)
+    ax.set_xlabel("test sessions $n$")
+    ax.set_ylabel("resolvable $\\Delta$ recall@10 (CI half-width)")
+    ax.yaxis.set_major_formatter(afmt)
+    ax.legend(loc="center right", fontsize=6.8)
+    ax.set_title("The architecture nulls are power-limited: at n=1,431 large harms are\n"
+                 "reliably detected but moderate wins were never detectable")
+    save(fig, "nexttrack_power.pdf")
+
 
 if __name__ == "__main__":
     fig_ae_latent_knn()
@@ -1232,3 +1533,8 @@ if __name__ == "__main__":
     fig_nexttrack_evr_budget()
     fig_nexttrack_representation()
     fig_nexttrack_mmr_tradeoff()
+    fig_nexttrack_dualtower_matrix()
+    fig_nexttrack_holisticness_antiwin()
+    fig_nexttrack_preencoder_forest()
+    fig_nexttrack_rectifier()
+    fig_nexttrack_power()

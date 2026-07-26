@@ -4,6 +4,7 @@
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{siunitx}
+\sisetup{group-digits=integer}
 \usepackage{amsmath}
 \usepackage{hyperref}
 \usepackage{seqsplit}
@@ -70,6 +71,25 @@ su pata de bigrama de Markov, no de la RNN, y la GRU y la LSTM estadísticamente
 empatadas --- y encuentra que un re-ranqueo MMR en evaluación ($\lambda\approx\num{0.9}$)
 es una palanca de holisticidad casi gratis, mientras que un regularizador anti-eager de
 entrenamiento es débil; no se promueve nada y la métrica principal sigue siendo Recall@10.
+Dos campañas finales de arquitectura cierran después los ejes de arquitectura que
+quedaban, y ambas son nulos: una GRU de \emph{torre doble} entrenada
+conjuntamente sobre pares de vistas causales del prefijo no logra superar a una
+torre única emparejada en parámetros --- el cuarto nulo independiente de
+combinador aprendido, y el que responde a la objeción de «entrenad la fusión de
+extremo a extremo» --- y un \emph{pre-codificador} por paso aprendido delante de
+la recurrencia no solo es inútil sino activamente \emph{perjudicial} en una torre
+única ($-\num{0.0140}$ de Recall@10, con el IC por debajo de cero), pérdida que
+una lectura contrafactual de interpretabilidad rastrea hasta la rectificación de
+media onda de un latente centrado en cero, que borra exactamente su mitad
+negativa (\texttt{frac\_exact\_zero} \num{0.5327} $=$
+\texttt{frac\_negative\_coords} \num{0.5327}). Por último, un análisis de
+potencia medido reencuadra los cinco nulos de arquitectura: con $n=\num{1431}$ el
+semiancho del IC de bootstrap pareado es \num{0.0124} en Recall@10 mientras una
+familia de arquitectura completa abarca solo \num{0.028}, así que los daños
+grandes se detectaron con fiabilidad mientras las victorias moderadas nunca
+fueron detectables --- y \emph{holisticness@10} existe en tres generaciones de
+código mutuamente no comparables, razón por la cual esta síntesis mantiene su
+tablero denominado en Recall@10.
 \end{abstract}
 
 \section{Introducción}
@@ -217,6 +237,28 @@ informes.
   ordenada por varianza y --- como el contenido es el único canal con alcance a
   ítems fríos --- eleva \emph{ambas} ramas que comparten el espacio, siendo el
   campeón actual (Sección~\ref{sec:projection}).
+  \item[Fusión recurrente de torre doble (\texttt{seq-dualgru}).] Dos torres
+  recurrentes \emph{independientes} (pesos separados) leen el prefijo en paralelo
+  sobre \emph{vistas} estrictamente causales configurables de él ---
+  \texttt{latent} (el vector de ítem crudo), \texttt{delta} (la diferencia entre
+  pasos) o \texttt{cummean} (el centroide acumulado de la sesión) --- y sus
+  estados ocultos por paso, concatenados, los lee una cabeza de fusión
+  (\texttt{fusion\_layers}${}=0$ para una lectura puramente lineal, ${}=1$ para un
+  MLP de anchura 256). Reutiliza literalmente el objetivo, el batching, la parada
+  temprana y la evaluación de \texttt{seq-nexttrack}, de modo que aísla la
+  arquitectura como única variable. La idea motivadora es que dos torres solo
+  deberían ayudar si ven información genuinamente distinta; la
+  Sección~\ref{sec:dualtower} lo pone a prueba y lo refuta.
+  \item[Pre-codificador por paso.] Una re-incrustación no lineal colocada
+  \emph{delante de} la recurrencia --- $[\,\text{Linear},\ \text{ReLU},\
+  \text{Dropout}\,]$ aplicada en cada paso temporal, expuesta como
+  \texttt{pre\_hidden}\,/\,\texttt{pre\_layers}. Es un objeto de prueba
+  inusualmente nítido: la propia transformación de entrada de una GRU \emph{ya} es
+  lineal, así que un pre-codificador lineal con anchura $\ge$ la dimensión de
+  entrada es exactamente igual de expresivo que no tener pre-codificador, y el
+  \emph{rectificador} es el único cambio --- lo que hace que el nulo de la
+  Sección~\ref{sec:preencoder} sea atribuible mecanísticamente y no solo
+  negativo.
 \end{description}
 
 \paragraph{Espacios de latentes de ítems: song-AE frente a PCA, y la trampa de
@@ -261,7 +303,15 @@ leak-safe (Sección~\ref{sec:background}). Desde 2026-07-22 la evaluación tambi
 lleva una suite \emph{solo de visualización} de holisticidad de sesión (artist\_adj@10 /
 mood\_coh@10 / ild@10; Sección~\ref{sec:holisticness}); no reordena este tablero (la
 métrica principal sigue siendo Recall@10), pero toma la huella del campeón como la fila
-más artist-eager.
+más artist-eager. Desde 2026-07-25 el tablero lleva además tres puntos de dato de
+arquitectura \emph{refutados}: el control de capacidad de GRU única más ancho, la
+mejor rama de torre doble y la mejor rama de pre-codificador en torre única
+(Secciones~\ref{sec:dualtower}--\ref{sec:preencoder}). Se listan porque
+\emph{acotan} sus ejes, no porque sean candidatos: ninguno supera la línea base de
+GRU única según el estadístico pareado y ninguno se registró. Sobre la métrica
+principal efectiva en el servidor, y sobre por qué este tablero sigue denominado
+en Recall@10 a lo largo de tres generaciones de holisticidad, véase la
+Sección~\ref{sec:power-generations}.
 
 \begin{table}[ht]
   \centering
@@ -271,7 +321,11 @@ más artist-eager.
   alto; el modelo de Markov de primer orden es la barra de referencia incumbente.
   Los valores de music@10 son el backfill offline (Sección~\ref{sec:music}); las
   filas sin un run mapeado se dejan en blanco. Fila campeona y campeones previos en
-  negrita; mejor celda por métrica en negrita.}
+  negrita; mejor celda por métrica en negrita. Las tres filas de arquitectura
+  refutada añadidas el 2026-07-25/26 se muestran para \emph{acotar} sus ejes y
+  quedan excluidas del resaltado de mejor celda; no llevan IC marginal, solo un
+  $\Delta$ pareado contra la línea base de GRU única (Tablas~\ref{tab:dualtower}
+  y~\ref{tab:preencoder}).}
   \label{tab:lb}
   {\footnotesize\setlength{\tabcolsep}{3.2pt}\begin{tabular}{lcccccl}
     \toprule
@@ -286,9 +340,12 @@ más artist-eager.
     R+M, PCA-128                          & 0.1670 [0.148, 0.187] & 0.0920 & 0.329 & 0.398 & 0.444 & ganancia GRU no traslada \\
     R+A+M, AE-64                          & 0.1684 & 0.0943 & --- & --- & --- & rama ANN redundante \\
     LSTM single, PCA-128                  & 0.1272 [0.110, 0.145] & 0.0495 & 0.335 & \best{0.458} & 0.451 & mejor único; $\ll$ blend \\
+    GRU única h454, PCA-192           & 0.1251 & 0.0539 & 0.338 & 0.454 & 0.457 & anchura cerrada \\
     GRU single, PCA-192                   & 0.1230 [0.106, 0.140] & 0.0534 & \best{0.338} & 0.450 & 0.456 & óptimo puntual de dim \\
+    torre doble GRU f0, PCA-192       & 0.1188 & 0.0563 & 0.337 & 0.456 & 0.455 & torre doble: refutada \\
     GRU single, PCA-128 (base)            & 0.1146 [0.099, 0.132] & 0.0489 & 0.333 & 0.452 & \best{0.457} & espacio base confirmado \\
     GRU single, PCA-256                   & 0.1167 [0.101, 0.134] & 0.0502 & 0.338 & 0.458 & 0.456 & pasado el pico de dim \\
+    pre-MLP$\to$GRU, PCA-192          & 0.1090 & 0.0446 & 0.324 & 0.469 & 0.450 & pre-codif.\ perjudicial \\
     B2 Markov de primer orden (barra)     & 0.1069 [0.092, 0.124] & 0.0694 & 0.298 & 0.389 & 0.407 & incumbente de la app \\
     GRU single, AE-64 (control)           & 0.0957 [0.081, 0.111] & 0.0411 & 0.294 & 0.450 & 0.432 & control del bake-off \\
     ANN pooled-MLP, PCA-128               & 0.0901 [0.076, 0.105] & 0.0394 & 0.299 & 0.435 & 0.426 & pierde ante la GRU \\
@@ -1370,9 +1427,662 @@ usuario más una confirmación de 3 semillas / run nativo. El regularizador $\be
 recomienda como palanca en estos ajustes.
 \emph{Fuente: \texttt{2026-07-22-session-holisticness-and-antieager-levers.md}.}
 
+\section{Fusión de torre doble refutada: el cuarto nulo de combinador}
+\label{sec:dualtower}
+\emph{Motivación.} Para el 2026-07-25 el registro ya tenía tres nulos
+independientes de \emph{combinador aprendido}: el stacker XGB
+(\numrange{0.080}{0.087}, \emph{por debajo} de su propia rama GRU base;
+Sección~\ref{sec:phase2}), la fusión de rangos recíprocos ($-\num{0.029}$) e
+incluso pesos de blend ajustados en test de forma \emph{oracular}
+($+\num{0.004}$, con el IC cruzando cero; Sección~\ref{sec:projection}). Los
+tres eran combinadores \textbf{post-hoc, a nivel de puntuación}, lo que dejaba en
+pie una objeción obvia: \emph{por supuesto} que falla un combinador atornillado
+encima --- hay que entrenar la fusión de extremo a extremo para que las partes se
+co-adapten. Esta campaña ejecuta exactamente esa objeción, a nivel de
+\emph{representación}, de forma conjunta y desde cero.
+
+El vehículo es un predictor nuevo, \texttt{seq-dualgru}: dos torres recurrentes
+\emph{independientes} (pesos separados) leen el prefijo en paralelo sobre
+\emph{vistas causales} configurables, sus estados ocultos por paso se concatenan
+y una cabeza MLP los fusiona en el latente predicho de la siguiente pista. Se
+exponen tres vistas, todas estrictamente causales en el paso $t$:
+\texttt{latent} (el vector de ítem crudo), \texttt{delta} (la diferencia entre
+pasos, con $x_{-1}=0$) y \texttt{cummean} (el centroide acumulado de la sesión
+--- la cantidad a partir de la cual se construyó la rama MLP agrupada
+\texttt{seq-ann}). Es crucial que reutiliza \texttt{seq\_nexttrack.make\_batches}
+y \texttt{step\_loss} literalmente, de modo que objetivo, batching, parada
+temprana y evaluación son byte a byte los de la familia, y no incorpora modo
+bidireccional (una pasada hacia atrás filtraría el objetivo de
+\emph{teacher forcing}).
+
+La hipótesis era nítida: dos torres deberían superar a una \emph{solo si ven
+información genuinamente distinta}; dos torres sobre la misma vista
+\texttt{latent} deberían reducirse a un efecto de capacidad o de ensamblado
+implícito que una GRU única más ancha compra más barato. El diseño cruza por
+tanto el \emph{triángulo superior completo} de la matriz de vistas
+$\{\texttt{latent},\texttt{delta},\texttt{cummean}\}^2$ (seis celdas con
+\texttt{fusion\_layers}${}=1$) con un eje de \emph{profundidad de fusión} (dos
+celdas con \texttt{fusion\_layers}${}=0$, una lectura puramente lineal de los
+estados concatenados) y --- el eje que le faltaba al escaneo de topología previo
+(Sección~\ref{sec:topology}) --- un \textbf{control de capacidad de GRU única
+emparejado en parámetros}. Los recuentos de parámetros se re-midieron
+instanciando las clases reales con \texttt{latent\_dim}${}=192$: el control C1
+(h425, \num{871017} parámetros) coincide con las seis ramas duales de
+\texttt{fusion\_layers}${}=1$ (\num{871872}) al \SI{0.098}{\percent}, y es un
+\SI{10}{\percent} \emph{mayor} que las ramas de \texttt{fusion\_layers}${}=0$
+(\num{789696}) --- deliberadamente generoso con la torre única.
+
+\paragraph{La barra honesta.} Se pre-registraron dos tableros por
+\emph{separado}, para que el veredicto científico y el evento de tablero no
+pudieran intercambiarse a posteriori. En \textbf{Recall@10} la barra para un
+modelo único autónomo es el tablero de modelo único \num{0.123}, \emph{no} el
+blend campeón de tres ramas \num{0.212} --- comparar un modelo entrenado contra
+una fusión de tres ramas sería un error de categoría, y usar la torre doble como
+rama \Rp{} exige un cambio de código en \texttt{seq-blend}, explícitamente fuera
+de alcance. En \textbf{holisticness@10} la regla de corona lleva un piso de
+recall anti-degenerado (véase más abajo). Las diez ejecuciones corren sobre la
+partición canónica \dsid{seq-20260715-131139} con semilla 1337, ejecutadas de una
+en una en un único worker remoto, y la línea base C0 reprodujo su Recall@10 de
+registro \num{0.12299} (\num{176} de \num{1431}) \emph{exactamente}.
+
+\emph{Resultados.} La Tabla~\ref{tab:dualtower} es el lote. \textbf{Ninguna rama
+va en negrita como ganadora porque no hay ganadora}: la línea base de GRU única
+mantiene el mejor Recall@10 del lote, y ni una de las ocho ramas duales la supera
+con el IC del $\Delta$ pareado enteramente por encima de cero --- seis pierden
+sin ambigüedad y dos (el par con \texttt{fusion\_layers}${}=0$) empatan. La regla
+de refutación pre-registrada se activó.
+
+\begin{table}[ht]
+  \centering
+  \caption{Escaneo de emparejamiento de vistas $\times$ profundidad de fusión en
+  torre doble, diez ejecuciones sobre \dsid{seq-20260715-131139} (\num{1431}
+  sesiones de prueba), ordenadas por Recall@10. Todas las ramas comparten el
+  prefijo de run-id \protect\runid{run-20260725-143502-}; C0 es
+  \protect\runid{run-20260725-143143-97c1e}. El $\Delta$ pareado es un bootstrap
+  pareado por sesión contra C0 (\num{2000} remuestreos, rng 1337). Recall@10 en
+  crudo $=$ aciertos de \num{1431}; los límites del IC se dan con tres decimales,
+  y un IC que cruza cero es un \emph{empate}. Los códigos de rama llevan el par
+  de vistas (lat\,$=$\,\texttt{latent}, del\,$=$\,\texttt{delta},
+  cum\,$=$\,\texttt{cummean}) y la profundidad de fusión (\texttt{-f0} $=$
+  lectura lineal; en otro caso, una cabeza MLP de 256). R@10, MRR, mus@10, ild@10
+  mejor cuanto más alto; \textbf{artadj@10 mejor cuanto más bajo}; H es la
+  generación \emph{de 3 factores} de holisticidad (Sección~\ref{sec:power}).
+  Mejor celda por métrica en negrita. \textsuperscript{\dag}~El artadj@10 / H
+  extremos de D-CC \emph{no} son una corona real: se compran con \num{95} de
+  \num{1431} aciertos, \num{0.0566} por debajo de la línea base, incumpliendo el
+  piso de recall de $\pm\num{0.015}$ por $3.8\times$.}
+  \label{tab:dualtower}
+  {\scriptsize\setlength{\tabcolsep}{1.7pt}\begin{tabular}{llrrlccccc}
+    \toprule
+    Rama & id & params & R@10 (crudo) & $\Delta$ vs C0 [IC 95\%] & MRR & mus@10 & artadj\,$\downarrow$ & ild\,$\uparrow$ & H\,$\uparrow$ \\
+    \midrule
+    C0 h256 \emph{base} & \texttt{97c1e} & \num{394944} & \best{0.12299 (176)} & --- & 0.05341 & 0.4558 & 0.3474 & 0.4536 & 0.14172 \\
+    C1 h425 \emph{ctrl} & \texttt{be11b} & \num{871017} & 0.12089 (173) & $-0.0021$ [$-.011$, $+.006$] & 0.05215 & \best{0.4597} & 0.3640 & 0.4506 & 0.13850 \\
+    D-LL-f0 \emph{lat/lat} & \texttt{18b4a} & \num{789696} & 0.11880 (170) & $-0.0042$ [$-.013$, $+.004$] & \best{0.05631} & 0.4553 & 0.3630 & 0.4506 & 0.13774 \\
+    D-LC-f0 \emph{lat/cum} & \texttt{3e5d4} & \num{789696} & 0.11740 (168) & $-0.0056$ [$-.017$, $+.005$] & 0.05087 & 0.4458 & 0.3557 & 0.4630 & 0.13648 \\
+    D-LL \emph{lat/lat} & \texttt{12fe6} & \num{871872} & 0.10273 (147) & $-0.0203$ [$-.035$, $-.007$] & 0.04235 & 0.4446 & 0.3092 & 0.4873 & 0.14635 \\
+    D-LC \emph{lat/cum} & \texttt{a95c5} & \num{871872} & 0.09713 (139) & $-0.0259$ [$-.039$, $-.013$] & 0.03901 & 0.4380 & 0.2997 & 0.4913 & 0.15000 \\
+    D-LD \emph{lat/del} & \texttt{8d214} & \num{871872} & 0.09154 (131) & $-0.0315$ [$-.045$, $-.018$] & 0.04029 & 0.4385 & 0.2999 & 0.4988 & 0.14673 \\
+    D-DC \emph{del/cum} & \texttt{e9cfb} & \num{871872} & 0.08665 (124) & $-0.0363$ [$-.050$, $-.022$] & 0.03379 & 0.4125 & 0.2319 & 0.5413 & 0.16340 \\
+    D-CC \emph{cum/cum} & \texttt{88a4c} & \num{871872} & 0.06639 (95) & $-0.0566$ [$-.072$, $-.041$] & 0.02664 & 0.3935 & \best{0.1899}\textsuperscript{\dag} & 0.5235 & \best{0.19715}\textsuperscript{\dag} \\
+    D-DD \emph{del/del} & \texttt{4324f} & \num{871872} & 0.05800 (83) & $-0.0650$ [$-.082$, $-.049$] & 0.02819 & 0.4016 & 0.2363 & \best{0.5457} & 0.13335 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{La capacidad tampoco era la palanca omitida.} El control emparejado en
+parámetros C1 (h425, \num{871017} parámetros --- $2.2\times$ C0) obtiene
+\num{0.12089} frente al \num{0.12299} de C0, con un $\Delta$ pareado de
+$-\num{0.0021}$ que cruza cero. Esto cubre un hueco real: la \emph{anchura} de
+GRU única solo se había escaneado sobre el espacio AE de 64 dimensiones
+(Sección~\ref{sec:topology}), y el espacio rico PCA-192 estaba sin probar. Se
+comporta igual, así que \textbf{la anchura de GRU única queda ahora cerrada
+también en PCA-192, como ya lo estaba en AE-64}. Como C1 es una coincidencia
+genuina al \SI{0.098}{\percent} en parámetros con las ramas de
+\texttt{fusion\_layers}${}=1$, el nulo no puede reatribuirse a «la capacidad
+habría ayudado»: demostrablemente no lo habría hecho.
+
+\emph{Atribución de vistas: la complementariedad es real, pero cae en el par
+equivocado.} El triángulo completo de vistas es lo que vuelve esto decidible
+mecánicamente en lugar de un juicio de valor, y la respuesta es genuinamente
+sorprendente (Tabla~\ref{tab:dualtower-views},
+Figura~\ref{fig:nexttrack-dualtower-matrix}). El par que el diseño nominó como su
+mejor esperanza --- \texttt{latent} $+$ \texttt{cummean} --- \emph{no} es
+complementario: empata con su padre latent/latent y solo supera al padre de solo
+centroide, es decir, la torre de latentes crudos carga con la celda entera y la
+torre de centroide es peso muerto. Lo mismo ocurre con \texttt{latent} $+$
+\texttt{delta}. Pero \texttt{delta} $+$ \texttt{cummean} \emph{sí} es
+complementario: supera a \emph{ambos} padres con IC por encima de cero. Leído en
+conjunto: el mecanismo de co-adaptación que proponía la hipótesis
+\textbf{funciona} de verdad; simplemente ocurre que \textbf{la vista
+\texttt{latent} cruda ya subsume todo lo que llevan las otras dos}. Una GRU sobre
+latentes crudos integra internamente el movimiento entre pasos y la media
+acumulada, de modo que emparejarla con un cálculo explícito de cualquiera de los
+dos es redundante --- mientras que dos vistas \emph{empobrecidas} sí tienen
+información no solapada que agrupar, a un nivel absoluto desesperado
+(\num{0.08665}). Esa es una explicación mecanicista limpia del nulo, no una mera
+ausencia de efecto.
+
+\begin{table}[ht]
+  \centering
+  \caption{Atribución de vistas: cada celda mixta contra \emph{ambos} de sus
+  padres de vista única ($\Delta$ pareado de Recall@10, \num{1431} sesiones).
+  Solo uno de los tres pares mixtos es genuinamente complementario --- y es
+  precisamente el que no tiene torre de latentes crudos.}
+  \label{tab:dualtower-views}
+  {\scriptsize\setlength{\tabcolsep}{3.4pt}\begin{tabular}{llll}
+    \toprule
+    Celda mixta & vs padre 1 & vs padre 2 & Veredicto \\
+    \midrule
+    D-LC \emph{lat/cum} & D-LL: $-0.0056$ [$-.018$, $+.007$] & D-CC: $+0.0308$ [$+.018$, $+.045$] & \emph{no} complementario \\
+    D-LD \emph{lat/del} & D-LL: $-0.0112$ [$-.023$, $+.001$] & D-DD: $+0.0335$ [$+.020$, $+.047$] & \emph{no} complementario \\
+    \best{D-DC \emph{del/cum}} & D-DD: $+0.0287$ [$+.015$, $+.043$] & D-CC: $+0.0203$ [$+.008$, $+.034$] & \best{complementario: ambos IC$>$0} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_dualtower_matrix}
+  \caption{La matriz completa de emparejamiento de vistas con
+  \texttt{fusion\_layers}${}=1$, una ejecución por celda. Toda celda dual queda
+  \emph{por debajo} de la línea base de GRU única (\num{0.12299}), y el orden es
+  monótono en cuánta vista \texttt{latent} cruda contiene el par: ambas-latent es
+  la mejor, ambas-delta la peor. El triángulo inferior nunca se ejecutó (el
+  emparejamiento es simétrico por construcción) y se enmascara en gris en lugar
+  de reflejarse, de modo que la escala de color refleja solo celdas medidas. El
+  gradiente es el hallazgo: una torre recurrente sobre latentes crudos ya calcula
+  lo que \texttt{delta} y \texttt{cummean} hacen explícito.}
+  \label{fig:nexttrack-dualtower-matrix}
+\end{figure}
+
+\emph{La cabeza MLP de fusión es activamente perjudicial, no solo inútil.} Ambas
+ramas con \texttt{fusion\_layers}${}=0$ superan a sus gemelas de
+\texttt{fusion\_layers}${}=1$ con el IC del $\Delta$ pareado por encima de cero
+($+\num{0.0161}$ en latent/latent, $+\num{0.0203}$ en latent/cummean) con un
+\SI{10}{\percent} \emph{menos} de parámetros --- así que quitar la cabeza vuelve
+el modelo medible\-mente mejor en \emph{ambos} regímenes de vista.
+Mecanísticamente esto encaja con todo el arco de la familia: el objetivo es
+recuperación coseno/InfoNCE \emph{en} el espacio latente de ítems, así que el
+trabajo de la cabeza es aterrizar \emph{en} esa geometría, y una capa no lineal
+extra de anchura 256 entre el estado recurrente y una lectura métrica solo añade
+una deformación que la pérdida debe después deshacer. El intercambio corre al
+revés en holisticidad (ambas ramas f0 tienen H \emph{menor}, con el IC de
+$\Delta$H por debajo de cero): la deformación extra de las ramas f1 difunde el
+top-diez (más ild, menos artist\_adj) a costa de los aciertos exactos. La regla
+adoptada es \textbf{\texttt{fusion\_layers}${}=0$ por defecto}, confirmada luego
+una tercera vez (Tabla~\ref{tab:fusion-depth}).
+
+\emph{Holisticidad y recall están anticorrelacionados, y el piso de recall se
+ganó su lugar.} Cinco ramas elevan holisticness@10 con el IC del $\Delta$H por
+encima de cero, culminando en el \num{0.19715} de D-CC ($+\num{0.055}$) --- que
+en la métrica de corona desnuda habría quedado segundo en todo el tablero. Pero
+D-CC aterriza \num{95} de \num{1431} aciertos exactos frente a los \num{176} de
+la línea base. El orden del lote por H es casi el \emph{inverso} de su orden por
+recall (Figura~\ref{fig:nexttrack-holisticness-antiwin}), de modo que
+\textbf{las cinco ganadoras en $\Delta$H incumplen el piso de recall
+pre-registrado de $\pm\num{0.015}$} y la regla de corona nunca se activó. Sin ese
+piso la campaña habría «ganado la corona» con un modelo un \SI{46}{\percent} peor
+en su trabajo real --- precisamente el modo de fallo degenerado de
+\texttt{mood-session} (H \num{0.2332} con Recall@10 \num{0.0238}) que el piso se
+escribió para bloquear. Con la evidencia actual, \textbf{la holisticidad sin
+restricciones se maximiza prediciendo peor}, así que cualquier objetivo futuro de
+holisticidad en este corpus debe ser uno \emph{restringido}.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_holisticness_antiwin}
+  \caption{Por qué la regla de corona necesita un piso de recall duro. A lo largo
+  de las diez ramas, holisticness@10 corre casi exactamente \emph{al revés} que
+  Recall@10: las cinco ramas que superan el tramo de $\Delta$H con IC por encima
+  de cero (verde) son las cinco más \emph{alejadas por debajo} de la línea base
+  en recall exacto, y las cinco caen fuera del piso de $\pm\num{0.015}$
+  (sombreado). El cuadrado hueco es el modelo incumbente \texttt{mood-session}
+  que motivó el piso: la mayor holisticidad del registro con \num{34} de
+  \num{1431} pistas siguientes correctas. Los valores de H son de la generación
+  de 3 factores (Sección~\ref{sec:power}).}
+  \label{fig:nexttrack-holisticness-antiwin}
+\end{figure}
+
+\emph{Interpretación.} No se registró nada ni se promovió nada; el campeón, la
+tabla de clasificación y los pines quedan intactos. Lo que compra la campaña es
+un \emph{cierre}: el nulo de combinador es ahora robusto en todo el espacio de
+diseño de combinadores en este corpus --- post-hoc a nivel de puntuación (de tres
+formas) \emph{y} a nivel de representación entrenado conjuntamente con un control
+emparejado en parámetros --- lo que consolida materialmente que «el z-blend fijo
+de tercios iguales es el combinador de referencia». Dos sub-hallazgos genuinos
+sobreviven al nulo (la cabeza MLP de fusión perjudicial, y la complementariedad
+\texttt{delta}$+$\texttt{cummean}), y la maquinaria en sí es sólida: 10 de 10
+ejecuciones exitosas, el nuevo predictor entrena, converge y evalúa con paridad
+exacta respecto a la familia, y D-LL-f0 incluso obtiene el mejor MRR del lote
+(\num{0.05631} frente al \num{0.05341} de C0) --- la única métrica en la que
+lidera una rama dual. Según la disciplina de la banda de ruido eso es «al menos
+igual, probablemente ni mejor ni peor», no una victoria.
+
+\paragraph{Un hallazgo de procedencia que revisa dos números previos.} Antes del
+lote se descubrió que el directorio del worker remoto en vivo estaba
+\emph{obsoleto}: su \texttt{seq\_common.py} no tenía \texttt{holisticness\_at\_k}
+en absoluto, \texttt{seq\_nexttrack.py} difería del hub por md5 y faltaban por
+completo tres módulos \texttt{seq\_*.py}. Tras refrescar y verificar que toda la
+familia era md5-idéntica al hub, C0 devolvió \num{0.12299}, idéntico bit a bit al
+valor de registro del hub --- y \emph{no} el \num{0.1201957} que habían devuelto
+dos ejecuciones remotas anteriores (\runid{run-20260723-002044-af11a},
+\texttt{-17cf8}). El «desplazamiento de $-\num{0.0028}$ por orden de reducción
+entre hosts» que aquellas ejecuciones sugerían queda por tanto
+\textbf{retirado: era una diferencia de código, no un efecto de host}. Sus
+números de recall pertenecen a un estado de código superado y no son comparables
+en código con lotes posteriores; siguen siendo válidos como las mediciones de
+eagerness $\beta$ para las que se tomaron (Tabla~\ref{tab:eager-beta}), ya que
+esas conclusiones descansan en comparaciones intra-lote. La lección general ---
+un checkout remoto divergente produce un \emph{número equivocado}, no una caída
+--- es ahora una comprobación previa permanente.
+\emph{Fuente: \texttt{2026-07-25-nexttrack-dual-tower-fusion-scan.md}.}
+
+\section{El pre-codificador por paso refutado, y el mecanismo del rectificador}
+\label{sec:preencoder}
+\emph{Motivación.} El nulo de torre doble cerró la asimetría de vistas
+\emph{deterministas}: \texttt{delta} y \texttt{cummean} son funciones con pérdida
+de lo que una torre de latentes crudos ya posee, así que emparejarlas no compra
+nada. Esta campaña plantea la versión estrictamente más fuerte: ¿una
+re-incrustación \textbf{aprendida} por paso, que \emph{no} es función de
+información que la torre ya tenga, amplía útilmente el espacio de hipótesis? El
+eje es una re-incrustación no lineal delante de la recurrencia,
+$[\,\text{Linear}(d_{\text{in}},w),\ \text{ReLU},\ \text{Dropout}\,]\times
+\texttt{pre\_layers}$, aplicada por paso temporal (estrictamente causal), con el
+\texttt{input\_size} de la GRU pasando a ser $w$.
+
+La hipótesis tiene un filo analítico inusualmente nítido. La propia
+transformación de entrada de una GRU \emph{ya es lineal} ($W_i x$ por compuerta),
+y un pre-codificador \emph{lineal} con $w \ge d_{\text{in}}$ es exactamente igual
+de expresivo que una GRU desnuda, puesto que $W_i(Vx) = (W_iV)x$ sin restricción
+de rango. \textbf{La ReLU es por tanto el único cambio de expresividad}, lo que
+significa que no hace falta una ejecución de control con pre-codificador lineal y
+que un nulo no puede despacharse como «el pre-codificador era redundante por
+construcción». El movimiento decisivo del diseño es la \textbf{ablación de torre
+única} S1 --- un \texttt{MLP256}$\to$\texttt{GRU256} contra una GRU simple
+emparejada en parámetros --- porque sin ella cualquier resultado de torre doble
+es ininterpretable: ¿pre-codificador, o segunda torre?
+
+Diez ejecuciones, la misma partición canónica, el mismo worker remoto único, cero
+fallos. Dos puertas de reproducción pasaron \emph{bit a bit}: C0 devolvió
+Recall@10 \num{0.12299091544374564} (\num{176} de \num{1431}, idéntico hasta el
+último dígito, una séptima reproducción), confirmando que la edición de
+\texttt{pre\_hidden} no perturbó la ruta de código por defecto de la familia; y
+C3, la rama de torre doble desnuda, devolvió \num{0.10272536687631029},
+exactamente su valor de registro, validando todos los veredictos duales.
+
+\emph{Resultados.} La Tabla~\ref{tab:preencoder} es el lote y la
+Figura~\ref{fig:nexttrack-preencoder-forest} el veredicto de un vistazo. Ni una
+de las seis ramas con pre-MLP supera la línea base con el IC del $\Delta$ pareado
+por encima de cero: cinco pierden sin ambigüedad, una empata. \textbf{Y la
+ablación decisiva no solo empata: pierde}: S1 en \num{0.10901} frente al
+\num{0.12299} de C0, con $\Delta$ $-\num{0.0140}$ y el IC enteramente por debajo
+de cero, \num{156} aciertos contra \num{176}. Puesto que aquí un
+pre-codificador lineal es demostrablemente neutro en expresividad, \textbf{la
+re-incrustación con ReLU está destruyendo información del prefijo que la propia
+transformación de entrada lineal con compuertas de la GRU preservaba}.
+
+\begin{table}[ht]
+  \centering
+  \caption{Presencia $\times$ colocación $\times$ dosis del pre-codificador, diez
+  ejecuciones sobre \dsid{seq-20260715-131139} (\num{1431} sesiones de prueba),
+  ordenadas por Recall@10. Todas las ramas comparten el prefijo
+  \protect\runid{run-20260726-161801-}; C0 es
+  \protect\runid{run-20260726-161429-bdcbc}. El $\Delta$ pareado es un bootstrap
+  pareado por sesión contra C0 (\num{2000} remuestreos, rng 1337); los límites
+  del IC se dan con tres decimales, y un IC que cruza cero es un \emph{empate}.
+  Los códigos de rama dual dan las anchuras de pre-codificador de las dos torres
+  (A0/B256 $=$ torre A desnuda, torre B rectificada con anchura 256) y la
+  profundidad de fusión. Aquí H es la generación \emph{de 4 factores} (anclada) de
+  holisticidad y \textbf{no} es comparable con la columna de 3 factores de la
+  Tabla~\ref{tab:dualtower} (Sección~\ref{sec:power}). Mejor celda por métrica en
+  negrita; \textbf{artadj@10 mejor cuanto más bajo}.
+  \textsuperscript{\dag}~El artadj mínimo de T4 y el ild máximo de T1 son el
+  familiar intercambio de des-eagerizar-prediciendo-peor: ambos quedan
+  $\sim$\num{0.025} por debajo de C0 en recall.}
+  \label{tab:preencoder}
+  {\scriptsize\setlength{\tabcolsep}{1.7pt}\begin{tabular}{llrrlccccc}
+    \toprule
+    Rama & id & params & R@10 (crudo) & $\Delta$ vs C0 [IC 95\%] & MRR & mus@10 & artadj\,$\downarrow$ & ild\,$\uparrow$ & H\,$\uparrow$ \\
+    \midrule
+    C2 h454 \emph{ctrl} & \texttt{7646d} & \num{969936} & \best{0.12509 (179)} & $+0.0021$ [$-.007$, $+.011$] & 0.05389 & 0.4572 & 0.3668 & 0.4466 & 0.045765 \\
+    T1-f0 \emph{A0/B256, f0} & \texttt{a6423} & \num{888256} & 0.12369 (177) & $+0.0007$ [$-.012$, $+.013$] & \best{0.05470} & \best{0.4575} & 0.3627 & 0.4616 & 0.044541 \\
+    C0 h256 \emph{base} & \texttt{bdcbc} & \num{394944} & 0.12299 (176) & --- & 0.05341 & 0.4558 & 0.3474 & 0.4536 & 0.047086 \\
+    C1 h297 \emph{ctrl} & \texttt{7bab3} & \num{494697} & 0.11321 (162) & $-0.0098$ [$-.017$, $-.003$] & 0.05199 & 0.4513 & 0.3602 & 0.4474 & 0.045285 \\
+    \best{S1 \emph{preMLP256}} & \texttt{ad53f} & \num{493504} & 0.10901 (156) & $\mathbf{-0.0140}$ [$-.027$, $-.001$] & 0.04463 & 0.4499 & 0.3240 & 0.4815 & \best{0.047132} \\
+    C3 \emph{dual desn.} & \texttt{0df6f} & \num{871872} & 0.10273 (147) & $-0.0203$ [$-.035$, $-.007$] & 0.04235 & 0.4446 & 0.3092 & 0.4873 & 0.046612 \\
+    T2 \emph{A0/B128, f1} & \texttt{dc7d2} & \num{847424} & 0.09993 (143) & $-0.0231$ [$-.037$, $-.009$] & 0.04490 & 0.4415 & 0.3039 & 0.4939 & 0.046431 \\
+    T3 \emph{A0/B384, f1} & \texttt{ca0b8} & \num{1093440} & 0.09993 (143) & $-0.0231$ [$-.037$, $-.009$] & 0.04333 & 0.4441 & 0.3068 & 0.4961 & 0.045895 \\
+    T4 \emph{A256/B256, f1} & \texttt{bd5b5} & \num{1068992} & 0.09783 (140) & $-0.0252$ [$-.039$, $-.011$] & 0.03829 & 0.4343 & \best{0.2845}\textsuperscript{\dag} & 0.4986 & 0.043985 \\
+    T1 \emph{A0/B256, f1} & \texttt{9450b} & \num{970432} & 0.09713 (139) & $-0.0259$ [$-.040$, $-.013$] & 0.04176 & 0.4369 & 0.2962 & \best{0.5016}\textsuperscript{\dag} & 0.045769 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_preencoder_forest}
+  \caption{El veredicto del pre-codificador. $\Delta$ Recall@10 de bootstrap
+  pareado por sesión contra la línea base reproducida, una fila por rama; la
+  franja sombreada es la banda práctica de empate de $\pm\num{0.015}$. Ni una
+  rama con pre-codificador alcanza un IC enteramente por encima de cero. La fila
+  decisiva es S1 --- la torre única, la única rama cuyo resultado es atribuible
+  sin ambigüedad al pre-codificador --- que pierde sin paliativos. Como un
+  pre-codificador \emph{lineal} a esta anchura es demostrablemente neutro en
+  expresividad, el rectificador es la única causa candidata.}
+  \label{fig:nexttrack-preencoder-forest}
+\end{figure}
+
+\emph{La curva de dosis es plana, y la colocación es irrelevante.} Barriendo
+\texttt{pre\_hidden\_b} por $\{0,128,256,384\}$ con
+\texttt{fusion\_layers}${}=1$ (Tabla~\ref{tab:preencoder-dose}), todo par
+adyacente cruza cero y también lo hacen los extremos --- un eje \textbf{plano},
+lo que por la cláusula pre-registrada habría bloqueado el registro incluso si
+alguna regla de victoria se hubiera activado. Nótese, sin embargo, que el orden
+\emph{nominal} es descendente-y-luego-plano, nunca ascendente: toda rama dosada
+queda por debajo de la dual desnuda. Junto con la pérdida significativa de S1, el
+signo de este eje es consistentemente negativo en ambas torres y en las cuatro
+anchuras, así que no hay pico interior que perseguir. La simetría es igualmente
+un no-factor: T1 (asimétrica, una torre desnuda) contra T4 (ambas torres
+rectificadas) cruza cero en recall, así que mantener desnuda la torre A no es
+determinante a esta dosis.
+
+\begin{table}[ht]
+  \centering
+  \caption{La curva de dosis, tal como se midió: $\Delta$ Recall@10 pareado
+  contra la rama de torre doble desnuda C3 con
+  \texttt{fusion\_layers}${}=1$. Plana según la prueba pre-registrada --- pero
+  nominalmente descendente, nunca ascendente.}
+  \label{tab:preencoder-dose}
+  {\footnotesize\setlength{\tabcolsep}{6pt}\begin{tabular}{rlll}
+    \toprule
+    \texttt{pre\_hidden\_b} & Rama & R@10 (crudo) & $\Delta$ vs C3 (desnuda) \\
+    \midrule
+    0 & C3 & 0.10273 (147) & --- \\
+    128 & T2 & 0.09993 (143) & $-0.0028$ [$-.015$, $+.009$] cruza cero \\
+    256 & T1 & 0.09713 (139) & $-0.0056$ [$-.019$, $+.008$] cruza cero \\
+    384 & T3 & 0.09993 (143) & $-0.0028$ [$-.015$, $+.011$] cruza cero \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{El único positivo sólido: la regresión de profundidad de fusión, medida por
+tercera vez y mayor.} T1-f0 supera a T1 por $+\num{0.0266}$ con el IC por encima
+de cero, frente al $+\num{0.016}$ y $+\num{0.020}$ medidos en los dos regímenes de
+vista de torre doble (Tabla~\ref{tab:fusion-depth}). El mecanismo se sostiene y
+se afila: cada capa no lineal extra entre el estado recurrente y la lectura
+métrica añade una deformación que la pérdida InfoNCE debe deshacer, y \emph{cuanta
+más no linealidad se haya añadido ya en el lado de entrada, más cuesta la
+deformación del lado de salida}. Nótese además que T1-f0 --- la única rama con
+pre-codificador que empata con la línea base --- es exactamente la rama que tiene
+\emph{a la vez} una torre A desnuda \emph{y} \texttt{fusion\_layers}${}=0$: la
+ruta más corta y sin deformar desde los latentes crudos hasta la lectura.
+\texttt{fusion\_layers}${}=0$ es el valor por defecto de la familia, punto.
+
+\begin{table}[ht]
+  \centering
+  \caption{La regresión de \texttt{fusion\_layers}, tres mediciones
+  independientes. $\Delta$ Recall@10 pareado de la rama de lectura lineal menos su
+  gemela con cabeza MLP; positivo significa que quitar el MLP de fusión
+  \emph{ayuda}. La columna $\Delta$H solo está disponible para los dos pares de 3
+  factores del mismo lote. \emph{Fuentes:
+  \texttt{2026-07-25-nexttrack-dual-tower-fusion-scan.md} (filas 1--2),
+  \texttt{2026-07-26-nexttrack-pre-encoder-scan.md} (fila 3).}}
+  \label{tab:fusion-depth}
+  {\scriptsize\setlength{\tabcolsep}{4pt}\begin{tabular}{llll}
+    \toprule
+    Par (f0 $-$ f1) & Régimen & $\Delta$ R@10 [IC 95\%] & $\Delta$H [IC 95\%] \\
+    \midrule
+    D-LL-f0 $-$ D-LL & vistas redundantes, sin pre-codificador & $+0.0161$ [$+0.0021$, $+0.0301$] & $-0.0086$ [$-0.0116$, $-0.0055$] \\
+    D-LC-f0 $-$ D-LC & vistas complementarias, sin pre-codificador & $+0.0203$ [$+0.0063$, $+0.0335$] & $-0.0135$ [$-0.0171$, $-0.0100$] \\
+    \best{T1-f0 $-$ T1} & \best{con pre-codificador por paso} & \best{$+0.0266$ [$+0.0140$, $+0.0391$]} & --- \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{El mecanismo, medido en lugar de inferido.} El argumento analítico señalaba
+al rectificador como única causa candidata; una lectura de interpretabilidad
+posterior lo \emph{midió}
+(Figura~\ref{fig:nexttrack-rectifier}). El control decisivo fue un tap
+contrafactual que el motor de autoencoder disperso no puede expresar: el
+\emph{propio} mapa afín del modelo con la ReLU eliminada. Leyendo la
+decodificabilidad de género de la siguiente pista en el mismo paso (\num{11184}
+filas de prueba de sonda, 25 clases, error estándar pareado
+$\le\num{0.0065}$): el latente crudo puntúa \num{0.4033}, el mapa afín
+\num{0.4084} (\textbf{neutro, ${\sim}0.8\sigma$}, exactamente como predice
+$W_i(Vx)=(W_iV)x$) y el tap rectificado \num{0.3700}
+(\textbf{${\sim}5.9\sigma$: la ReLU es toda la pérdida}). La prueba definitiva es
+aritmética: \texttt{frac\_exact\_zero} en el tap rectificado es \num{0.5327}, que
+coincide con el \texttt{frac\_negative\_coords} del tap afín, \num{0.5327}, hasta
+cuatro dígitos. El rectificador borra \emph{precisamente} la mitad negativa,
+dejando ${\sim}120$ unidades vivas para 192 direcciones con signo --- \emph{menos
+coordenadas vivas que dimensiones tiene la entrada}. Los latentes PCA-192 están
+centrados en cero y son casi simétricos por construcción, y con $w=256$ (solo
+$1.33\times$ la dimensión de entrada) no hay ni de lejos suficiente
+sobrecompletitud para re-codificar el semiespacio descartado, a diferencia de los
+embeddings anchos donde viven normalmente los MLP con ReLU. El daño sobrevive a
+la recurrencia: dentro de un mismo modelo, \texttt{tower\_b} (alimentada
+rectificada) puntúa \num{0.3929} frente a su \emph{gemela idéntica}
+\texttt{tower\_a} (alimentada cruda) con \num{0.4183}, ${\sim}3.9\sigma$ --- y
+\texttt{tower\_a} reproduce la GRU simple autónoma (\num{0.4235}), que es
+exactamente lo que exige «la torre desnuda \emph{rescata}».
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_rectifier}
+  \caption{El mecanismo del rectificador, medido. Decodificabilidad de género de
+  la siguiente pista en cada tap de representación, incluido uno contrafactual
+  que el motor de interpretabilidad no puede expresar: el propio mapa afín del
+  modelo con la ReLU eliminada. En el lado de entrada el mapa afín es
+  \emph{gratis} (${\sim}0.8\sigma$) y la ReLU es el coste \emph{entero}
+  (${\sim}5.9\sigma$); tras la recurrencia el daño persiste (${\sim}3.9\sigma$
+  entre dos torres idénticas que solo difieren en si su entrada fue rectificada),
+  mientras que la torre alimentada en crudo reproduce la GRU simple autónoma.
+  \texttt{frac\_exact\_zero} en el tap rectificado (\num{0.5327}) coincide con el
+  \texttt{frac\_negative\_coords} del tap afín (\num{0.5327}) hasta cuatro
+  dígitos: la rectificación de media onda de un latente centrado en cero borra
+  exactamente la mitad negativa, dejando ${\sim}120$ unidades vivas para 192
+  direcciones con signo.}
+  \label{fig:nexttrack-rectifier}
+\end{figure}
+
+\emph{Interpretación, y una salvedad honesta sobre los controles.} Este es el
+quinto nulo consecutivo de arquitectura, y cierra el \emph{lado de entrada} como
+el nulo de vistas cerró la dirección de vistas de entrada: junto con los cuatro
+nulos de combinador aprendido, añadir maquinaria de representación
+\emph{alrededor} de una GRU única sobre un buen espacio latente no ayuda en este
+corpus, mientras que toda ganancia real del registro vino de mejorar el
+\emph{propio espacio latente} (la proyección de contenido InfoNCE, PCA-192) o del
+z-blend fijo. El eje queda ahora acotado cuantitativamente: mejor rama con
+pre-codificador \num{0.12369}, un empate; dosis plana hasta el doble de la
+dimensión de entrada; colocación irrelevante; interacción con la profundidad de
+fusión resuelta. La salvedad es que el \emph{control de anchura emparejado en
+parámetros resultó un instrumento más débil de lo supuesto}: C1 (h297) llegó a
+\num{0.11321}, perdiendo él mismo contra C0, y los puntos de anchura del lote
+corren \num{176} $\to$ \num{162} $\to$ \num{173} $\to$ \num{179} aciertos en h256
+/ h297 / h425 / h454 --- no monótonos, abarcando \num{0.0119} de recall sin
+tendencia. «La anchura de GRU única es plana en PCA-192» sobrevive como
+afirmación de \emph{tendencia} (h454 empata con h256), pero el ruido entre
+anchuras es de ${\sim}\pm\num{0.01}$ en una sola partición, aproximadamente dos
+tercios de la banda de ruido. \textbf{Un control emparejado en anchura que es él
+mismo una única ejecución sin replicar no es un anclaje de capacidad fiable a
+esta magnitud de efecto} --- razón por la cual importa que el veredicto de S1
+descanse en la comparación con C0, reproducida hasta el último dígito. Una
+segunda salvedad queda sin desenredar: el pre-MLP termina en \texttt{Dropout}, de
+modo que las ramas con pre-codificador reciben dropout a la \emph{entrada} de la
+GRU que las ramas desnudas no tienen, y la pérdida de S1 podría deberse en parte
+a sobre-regularización más que al rectificador --- separarlos exige un parámetro
+\texttt{pre\_dropout} que todavía no existe.
+\emph{Fuente: \texttt{2026-07-26-nexttrack-pre-encoder-scan.md}.}
+
+\section{Leyendo el registro: potencia estadística y las generaciones de holisticidad}
+\label{sec:power}
+De los lotes del 2026-07-25/26 emergieron dos hechos transversales que cambian
+cómo debe leerse cada número anterior. Ninguno es un resultado sobre un modelo;
+ambos son resultados sobre el \emph{instrumento de medida}, y su lugar es aquí y
+no enterrados en una sola campaña.
+
+\subsection{Los nulos están limitados por potencia, y esa es una afirmación distinta}
+\label{sec:power-stats}
+Todo veredicto de este documento descansa en un bootstrap pareado por sesión
+sobre las mismas \num{1431} sesiones de prueba. Ese $n$ tiene una resolución
+medible. Promediado sobre las nueve comparaciones pareadas del lote del
+pre-codificador, el semiancho del IC al 95\% es \textbf{\num{0.0124}} en
+Recall@10 (\num{0.0128} sobre las nueve del lote de torre doble, así que la cifra
+es estable), y \textbf{${\sim}\num{0.0018}$} en holisticness@10. Compárense ahora
+con el \emph{rango completo} de una familia de arquitectura: \num{0.028} en
+Recall@10 y \num{0.0031} en holisticness@10 (Tabla~\ref{tab:power}). El cociente
+es toda la historia: el rango completo de una familia mide solo ${\sim}2.3$
+anchos de resolución en recall y ${\sim}1.9$ en holisticidad, de modo que de ocho
+ramas adyacentes son separables aproximadamente \textbf{dos niveles} en Recall@10
+y \textbf{uno} en holisticness@10. Resolver una diferencia de \num{0.005} en
+Recall@10 a esta precisión exigiría
+$n \approx 1431\cdot(\num{0.0124}/\num{0.005})^2 \approx \num{8800}$ sesiones de
+prueba, seis veces lo que aporta la partición
+(Figura~\ref{fig:nexttrack-power}).
+
+\begin{table}[ht]
+  \centering
+  \caption{Resolución medida de la partición de prueba. Los semianchos son medias
+  sobre las nueve comparaciones de bootstrap pareado del lote del
+  pre-codificador (\num{2000} remuestreos, $n=\num{1431}$); el rango de familia
+  es el recorrido completo de ese lote en cada métrica. «Niveles» es
+  rango\,$/$\,semiancho, es decir, cuántos escalones genuinamente distinguibles
+  pueden ocupar ocho ramas adyacentes. \emph{Fuentes:
+  \texttt{2026-07-25-nexttrack-dual-tower-fusion-scan.md},
+  \texttt{2026-07-26-nexttrack-pre-encoder-scan.md}.}}
+  \label{tab:power}
+  {\footnotesize\setlength{\tabcolsep}{6pt}\begin{tabular}{lcccc}
+    \toprule
+    Métrica & semiancho del IC con $n=\num{1431}$ & rango de familia & niveles & $n$ para $\Delta=\num{0.005}$ \\
+    \midrule
+    Recall@10 & 0.0124 & 0.0280 & $\sim$2 de 8 & $\sim$\num{8800} \\
+    holisticness@10 & 0.0018 & 0.0031 & $\sim$1 de 8 & --- \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_power}
+  \caption{Los nulos de arquitectura están limitados por potencia. El semiancho
+  del IC de bootstrap pareado cae como $1/\sqrt{n}$; con el $n=\num{1431}$ de la
+  partición vale \num{0.0124} en Recall@10, mientras que una familia de
+  arquitectura completa abarca solo \num{0.028}. Resolver una diferencia de
+  \num{0.005} exigiría ${\sim}\num{8800}$ sesiones de prueba. La lectura honesta
+  de los cinco nulos de arquitectura se sigue de inmediato: \emph{los daños
+  grandes se detectaron con fiabilidad; las victorias moderadas nunca fueron
+  detectables}.}
+  \label{fig:nexttrack-power}
+\end{figure}
+
+\textbf{La lectura honesta de los cinco nulos de arquitectura se sigue
+directamente, y no es la que da una mirada superficial.} Lo que estas campañas
+establecieron con firmeza es que las arquitecturas probadas no entregan ganancias
+\emph{grandes}, y que varias de ellas hacen \emph{daño} real --- los daños son los
+resultados bien potenciados, porque son grandes (S1 $-\num{0.0140}$; la regresión
+de \texttt{fusion\_layers} $+\num{0.0266}$; seis de ocho ramas duales por debajo
+de la línea base). Lo que las campañas \emph{no} pueden establecer es la ausencia
+de una ganancia moderada: una mejora genuina de $+\num{0.005}$ --- que sobre una
+línea base de \num{0.123} sería un respetable \SI{4}{\percent} relativo --- habría
+sido invisible por construcción. Así que «la fusión de torre doble queda
+refutada» y «el pre-codificador queda refutado» deben leerse como \emph{ningún
+efecto grande, y ningún efecto de la magnitud hipotetizada}, no como «estas
+arquitecturas no funcionan». La consecuencia práctica es una regla de
+priorización más que una salvedad: en esta partición, más ramas de arquitectura
+son un mal uso de las ejecuciones sea cual sea su resultado, porque todo el rango
+dinámico del espacio de diseño apenas duplica el error de medición. O se amplía
+$n$, o se pasa a ejes cuyos efectos sean grandes --- que es, empíricamente,
+exactamente lo que han entregado los ejes de representación y supervisión (el
+$+\num{0.0259}$ de la proyección de contenido es el doble del semiancho, y el
+$+\num{0.0426}$ del endurecimiento en segunda partición, el triple).
+
+\subsection{Tres generaciones de holisticness@10, y por qué el tablero se denomina en recall}
+\label{sec:power-generations}
+El compuesto \emph{holisticness@10} se revisó dos veces en cuatro días, y los
+valores almacenados \textbf{no son comparables entre los cortes}:
+\begin{description}
+  \item[Gen.\ 1 --- 3 factores (hasta 2026-07-24).] El producto desnudo
+  \[\mathrm{clamp}(\text{mood\_coh},0)\times\text{ild}\times(1-\text{artist\_adj}),\]
+  que no lleva \emph{ningún término de corrección en absoluto}. Los valores caen
+  en \numrange{0.063}{0.233} --- la columna de la Tabla~\ref{tab:dualtower}.
+  \item[Gen.\ 2 --- 4 factores, anclada (2026-07-25).] Multiplica por un factor
+  de anclaje (\emph{grounding}) de \texttt{music@10},
+  \[\mathrm{clamp}\bigl((\text{music@10}-\num{0.185})/\num{0.815},\,0,\,1\bigr).\]
+  Como \texttt{music@10} cae al mismo compás que el recall, esto cancela las
+  «victorias» por des-eagerización que premiaba la forma de 3 factores; los
+  valores caen en \numrange{0.044}{0.050} --- la columna de la
+  Tabla~\ref{tab:preencoder}.
+  \item[Gen.\ 3 --- consciente de la concentración (2026-07-26).] La eagerness
+  pasa a ser \texttt{max(artist\_adj,} \texttt{artist\_conc)} y el piso de
+  anclaje sube \num{0.185}$\to$\num{0.34}. Los valores caen cerca de
+  \numrange{0.009}{0.025}.
+\end{description}
+Cada faceta se almacena por fila, así que cualquier generación es recalculable a
+posteriori (el ayudante \texttt{rescore\_holisticness.py} lo hace para las
+ejecuciones a las que puede llegar), y la Tabla~\ref{tab:hgen} re-deriva las tres
+para un corte representativo. Dos consecuencias importan al leer este documento.
+Primera, \textbf{una columna de holisticidad debe llevar siempre la etiqueta de su
+generación}, porque el efecto de generación empequeñece al efecto de modelo: todo
+valor de 3 factores supera mecánicamente a todo valor de 4 factores, ya que el
+factor de anclaje multiplica por ${\sim}0.3$. Segunda, y más importante,
+\textbf{los tableros de recall y de holisticidad apuntan en direcciones opuestas
+en todas las generaciones}. El blend campeón --- \num{0.21174} de Recall@10,
+\num{303} de \num{1431} --- queda \emph{último} en la Tabla~\ref{tab:hgen} bajo
+las tres fórmulas, porque es el modelo más artist-eager del registro; lideran la
+rama degenerada \texttt{cummean/cummean} y \texttt{mood-session}. La generación 3
+degradó \texttt{mood-session} de primero a un cero genuino, pero \emph{no}
+arregló la rama degenerada de torre doble, así que el piso de recall de
+$\pm\num{0.015}$ sigue siendo obligatorio en cualquier afirmación de
+holisticidad.
+
+\begin{table}[ht]
+  \centering
+  \caption{Los mismos modelos bajo las tres generaciones de holisticidad,
+  ordenados por Recall@10. El efecto de generación empequeñece al efecto de
+  modelo, y el orden es aproximadamente \emph{inverso} al de Recall@10 en todo el
+  rango --- razón por la cual la tabla de clasificación de este documento sigue
+  denominada en Recall@10. Los guiones son ejecuciones cuyas facetas no pudieron
+  re-derivarse bajo esa generación (ejecuciones solo remotas sin fichero de
+  predicciones materializado). \emph{Fuentes:
+  \texttt{2026-07-25-nexttrack-dual-tower-fusion-scan.md},
+  \texttt{2026-07-26-nexttrack-pre-encoder-scan.md}.}}
+  \label{tab:hgen}
+  {\footnotesize\setlength{\tabcolsep}{2.4pt}\begin{tabular}{llccc}
+    \toprule
+    Modelo (run) & R@10 (crudo) & gen-1 (3-f) & gen-2 (4-f) & gen-3 (actual) \\
+    \midrule
+    \best{blend \Rp+M+\Cp} (\texttt{1c1a3}) & \best{0.21174 (303)} & 0.0632 & 0.020830 & 0.00860 \\
+    GRU única h454 (\texttt{7646d}) & 0.12509 (179) & --- & 0.045765 & 0.02399 \\
+    GRU única h256 (\texttt{97c1e}, \texttt{bdcbc}) & 0.12299 (176) & 0.14172 & 0.047086 & \best{0.02454} \\
+    GRU única h425 (\texttt{be11b}) & 0.12089 (173) & 0.13850 & 0.046677 & 0.02487 \\
+    S1 pre-MLP$\to$GRU (\texttt{ad53f}) & 0.10901 (156) & 0.14499 & 0.047132 & 0.02410 \\
+    D-CC \emph{cum/cum} (\texttt{88a4c}) & 0.06639 (95) & 0.19715 & \best{0.050436} & --- \\
+    \texttt{mood-session} (degen.) & 0.02380 (34) & \best{0.23319} & 0.043881 & 0.00000 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\paragraph{Qué es la métrica principal, y por qué ordena este documento.} Para
+completar el cuadro: la clave \texttt{[metrics].primary} de \texttt{domain.toml},
+y el \texttt{primary\_metric} del grupo de mejores modelos, han marcado ambos
+\texttt{holisticness@10} desde 2026-07-23, así que la métrica principal
+\emph{efectiva en el servidor} ya no es Recall@10. Las afirmaciones de las
+secciones anteriores de que «la métrica principal sigue siendo Recall@10» eran
+ciertas cuando se escribieron y quedan superadas \emph{para el servidor}. Aun
+así, este documento sigue denominando su tabla de clasificación
+(Tabla~\ref{tab:lb}) y cada veredicto de campaña en \textbf{Recall@10}, y lo hace
+deliberadamente: es la moneda de comparabilidad del registro, es estable en las
+tres generaciones de la métrica y --- como muestra la Tabla~\ref{tab:hgen} --- un
+orden por holisticidad situaría último al campeón servible. La holisticidad se
+reporta en todo el documento como columna diagnóstica etiquetada y marcada con su
+generación.
+\emph{Fuentes: \texttt{2026-07-25-nexttrack-dual-tower-fusion-scan.md},
+\texttt{2026-07-26-nexttrack-pre-encoder-scan.md}.}
+
 \section{Conclusiones}
 \label{sec:conclusions}
-Doce campañas (jul 2026) sobre la tarea de recuperación de pista siguiente
+Catorce campañas (jul 2026) sobre la tarea de recuperación de pista siguiente
 convergen en una historia clara. (1) Un modelo de secuencias de sesión, incluso
 en su mejor forma (GRU-infonce), solo \emph{empata} con la barra de Markov de
 co-escucha de primer orden en recall@10 y pierde en MRR: predecir un latente del
@@ -1450,9 +2160,63 @@ des-eagers por $\sim$2 puntos de recall; music@10 incluso sube al diversificar l
 mientras que el regularizador $\beta$ de entrenamiento es débil ($\beta$ \numrange{0}{0.2}
 mueve artist\_adj@10 solo $-\num{0.0074}$); no se promovió nada, y $\lambda\approx\num{0.9}$
 queda señalado para una futura decisión de holisticidad del usuario (Sección~\ref{sec:holisticness}).
+(12) Dos campañas finales de arquitectura cerraron después los últimos ejes de
+arquitectura abiertos, y ambas son nulos --- pero nulos con mecanismo. Una GRU de
+\emph{torre doble} entrenada conjuntamente, cruzando la matriz completa de vistas
+$\{$\texttt{latent},\texttt{delta},\texttt{cummean}$\}^2$ contra una torre única
+emparejada en parámetros al \SI{0.098}{\percent}, no logra superar a esa torre en
+ninguna de ocho ramas (Sección~\ref{sec:dualtower}). Este es el \emph{cuarto}
+nulo independiente de combinador aprendido y el que más importa, porque responde a
+la objeción permanente a los tres anteriores («por supuesto que falla un
+combinador atornillado encima: entrenad la fusión de extremo a extremo»):
+entrenada de extremo a extremo a nivel de representación, sigue fallando. El
+mecanismo es que la vista \texttt{latent} cruda ya \emph{subsume} a las otras ---
+una GRU sobre latentes crudos integra internamente el movimiento y la media
+acumulada, y el único par genuinamente complementario es
+\texttt{delta}$+$\texttt{cummean}, que supera a sus dos padres pero es
+desesperado en términos absolutos. Dos subproductos son duraderos: la cabeza MLP
+de fusión es activamente \emph{perjudicial} (quitarla gana en todos los regímenes
+medidos, tres veces, Tabla~\ref{tab:fusion-depth}), y la anchura de GRU única
+queda ahora cerrada en PCA-192 como ya lo estaba en AE-64. Un
+\emph{pre-codificador} por paso aprendido falla luego con más contundencia
+(Sección~\ref{sec:preencoder}): la ablación decisiva de torre única
+\emph{pierde} sin paliativos ($-\num{0.0140}$, IC por debajo de cero, \num{156}
+aciertos contra \num{176}), la curva de dosis es plana hasta el doble de la
+dimensión de entrada y la colocación es irrelevante. Como un pre-codificador
+\emph{lineal} es aquí demostrablemente neutro en expresividad, el rectificador es
+la única causa candidata --- y una lectura contrafactual de interpretabilidad lo
+confirmó, midiendo el mapa afín como neutro en ${\sim}0.8\sigma$ y la ReLU
+costando ${\sim}5.9\sigma$, con \texttt{frac\_exact\_zero} \num{0.5327}
+coincidiendo con \texttt{frac\_negative\_coords} \num{0.5327} hasta cuatro
+dígitos: la rectificación de media onda de un latente centrado en cero borra
+exactamente su mitad negativa. A lo largo de cinco nulos de arquitectura el patrón
+es ya difícil de descartar: en este corpus de un solo usuario con
+\SI{55}{\percent} de ítems fríos, añadir maquinaria de representación
+\emph{alrededor} de una GRU única sobre un buen espacio latente no ayuda,
+mientras que toda ganancia real vino de mejorar el propio espacio latente o del
+z-blend fijo.
+(13) Por último, dos hechos sobre el \emph{instrumento} y no sobre ningún modelo
+reencuadran todo el arco de arquitectura (Sección~\ref{sec:power}). Los nulos
+están \textbf{limitados por potencia}: con $n=\num{1431}$ el semiancho del IC de
+bootstrap pareado es \num{0.0124} en Recall@10 y ${\sim}\num{0.0018}$ en
+holisticness@10, mientras que una familia de arquitectura completa abarca solo
+\num{0.028} y \num{0.0031} --- así que de ocho ramas adyacentes son separables
+unos dos niveles en recall y uno en holisticidad, y resolver una diferencia de
+\num{0.005} exigiría ${\sim}\num{8800}$ sesiones. La lectura honesta es por
+tanto que \emph{los daños grandes se detectaron con fiabilidad mientras las
+victorias moderadas nunca fueron detectables}, lo cual es una afirmación distinta
+de «estas arquitecturas no funcionan» y produce una regla de priorización: más
+ramas de arquitectura son un mal uso de las ejecuciones en esta partición, den lo
+que den, porque todo el rango dinámico del eje apenas duplica el error de
+medición. Y \emph{holisticness@10} existe en tres generaciones de código
+mutuamente no comparables (3 factores; 4 factores anclada; anclada más
+concentración de artista), cuyas diferencias empequeñecen a toda diferencia entre
+modelos y bajo todas las cuales el campeón servible queda \emph{último} --- así
+que esta síntesis mantiene su tablero denominado en Recall@10 y etiqueta cada
+columna de holisticidad con su generación (Tabla~\ref{tab:hgen}).
 
 \section{Informes fuente}
-Esta síntesis consolida doce informes de campaña de pista siguiente de
+Esta síntesis consolida catorce informes de campaña de pista siguiente de
 \texttt{experiments/}:
 \begin{itemize}
   \item \texttt{2026-07-13-nexttrack-sequence-sweep.md} --- la campaña
@@ -1513,6 +2277,24 @@ Esta síntesis consolida doce informes de campaña de pista siguiente de
     modelo más artist-eager, la eagerness proviene de la pata de Markov,
     GRU\,$\approx$\,LSTM, y MMR $\lambda$ es la palanca fuerte
     (Sección~\ref{sec:holisticness}).
+  \item \texttt{2026-07-25-nexttrack-dual-tower-fusion-scan.md} --- el escaneo de
+    emparejamiento de vistas $\times$ profundidad de fusión en torre doble contra
+    una torre única emparejada en parámetros al \SI{0.098}{\percent};
+    \textbf{REFUTADO} (el cuarto nulo de combinador aprendido, y el que cierra la
+    objeción de «entrenad la fusión de extremo a extremo»), mostrando que la vista
+    de latentes crudos subsume a \texttt{delta}/\texttt{cummean}, que la cabeza
+    MLP de fusión es activamente perjudicial, que la anchura de GRU única queda
+    cerrada en PCA-192, y que holisticidad y recall están anticorrelacionados en
+    todo el lote (Sección~\ref{sec:dualtower}).
+  \item \texttt{2026-07-26-nexttrack-pre-encoder-scan.md} --- el escaneo del
+    pre-codificador por paso aprendido (presencia $\times$ colocación $\times$
+    dosis) con la ablación decisiva de torre única; \textbf{REFUTADO y activamente
+    perjudicial} ($-\num{0.0140}$ de Recall@10, IC por debajo de cero), con el
+    rectificador identificado analíticamente y luego medido (mapa afín neutro en
+    ${\sim}0.8\sigma$, ReLU en ${\sim}5.9\sigma$, \texttt{frac\_exact\_zero} $=$
+    \texttt{frac\_negative\_coords} $=$ \num{0.5327}), más el análisis de potencia
+    medido y las tres generaciones de holisticidad
+    (Secciones~\ref{sec:preencoder} y~\ref{sec:power}).
 \end{itemize}
 
 \end{document}
