@@ -8,10 +8,10 @@ const W = 680
 const H = 300
 const M = { top: 16, right: 20, bottom: 56, left: 62 }
 
-type Metric = 'r2_log' | 'concepts' | 'utilization'
+type Metric = 'auc' | 'concepts' | 'utilization'
 
 const METRICS: { key: Metric; label: string; fmt: (v: number) => string }[] = [
-  { key: 'r2_log', label: 'decodability (R² log)', fmt: (v) => v.toFixed(2) },
+  { key: 'auc', label: 'next-item AUC', fmt: (v) => v.toFixed(2) },
   { key: 'concepts', label: 'interpretable concepts', fmt: (v) => v.toFixed(0) },
   { key: 'utilization', label: 'capacity used', fmt: (v) => `${(v * 100).toFixed(0)}%` },
 ]
@@ -31,8 +31,8 @@ function points(report: ModelSaeReport, metric: Metric): Pt[] {
   return report.layers.map((l) => {
     const cvd = report.concept_vs_decodability.find((c) => c.layer === l.layer)
     const value =
-      metric === 'r2_log'
-        ? cvd?.linear_r2_log ?? null
+      metric === 'auc'
+        ? cvd?.genre_auc ?? null
         : metric === 'concepts'
           ? l.n_interpretable_concepts
           : l.capacity.utilization
@@ -46,7 +46,7 @@ function points(report: ModelSaeReport, metric: Metric): Pt[] {
  *  X is relative depth (first hidden layer = 0 … deepest = 1) so nets of
  *  different depths align. Vanilla SVG, matching the lab's other charts. */
 export default function ModelSaeCompareChart({ series }: { series: ModelSaeSeries[] }) {
-  const [metric, setMetric] = useState<Metric>('r2_log')
+  const [metric, setMetric] = useState<Metric>('auc')
   const [hover, setHover] = useState<{ s: number; i: number } | null>(null)
 
   const perModel = useMemo(

@@ -38,29 +38,33 @@ const outputStage = (r: LayerProbeReport): LayerProbeStage =>
   r.stages.find((s) => s.lambda == null) ?? r.stages[r.stages.length - 1]
 
 export default function InterpretabilityView() {
-  const domain = useDomain()
-  // The probe tools decode a scalar target from hidden activations; a ranking
-  // instance has no such scalar. Guard the direct URL (the nav hides it too).
-  if (domain.target.task === 'ranking') {
-    return (
-      <NotApplicable
-        glyph="ip"
-        title="Interpretability"
-        reason="These probes decode a scalar target from a model's hidden activations. This instance ranks the next item in a sequence, so there is no scalar target to probe."
-      />
-    )
-  }
   return <InterpretabilityBody />
+}
+
+/** The layer-probe / dataset-SAE / embedding-probe tools decode a SCALAR target
+ *  from activations; a ranking (next-track) instance has none, so those tabs are
+ *  not applicable here. The per-model SAE IS applicable — it reads activations
+ *  against the next item — and is the default tab. */
+function ScalarToolNotApplicable() {
+  return (
+    <NotApplicable
+      glyph="ip"
+      title="Pointwise-only tool"
+      reason="This probe decodes a scalar target from a model's hidden activations. This instance ranks the next item in a sequence, so there is no scalar target to probe. Use the per-model SAE, which reads activations against the next item."
+    />
+  )
 }
 
 function InterpretabilityBody() {
   useDocTitle('Interpretability')
+  const domain = useDomain()
+  const isRanking = domain.target.task === 'ranking'
   const models = useAsync(() => api.listInterpModels(), [])
   const datasets = useAsync(() => api.listDatasets(), [])
 
   const [tool, setTool] = useState<
     'layer-probe' | 'sae' | 'model-sae' | 'embedding' | 'saved'
-  >('layer-probe')
+  >(isRanking ? 'model-sae' : 'layer-probe')
   const [datasetId, setDatasetId] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [metric, setMetric] = useState<ProbeMetric>('test_r2_log')
@@ -188,14 +192,16 @@ function InterpretabilityBody() {
         </aside>
 
         <section className="interp-main">
-          {tool === 'sae' ? (
-            <SaeTool />
-          ) : tool === 'embedding' ? (
-            <EmbeddingProbeTool />
-          ) : tool === 'model-sae' ? (
+          {tool === 'model-sae' ? (
             <ModelSaeTool />
           ) : tool === 'saved' ? (
             <SavedAnalysesTool />
+          ) : isRanking ? (
+            <ScalarToolNotApplicable />
+          ) : tool === 'sae' ? (
+            <SaeTool />
+          ) : tool === 'embedding' ? (
+            <EmbeddingProbeTool />
           ) : (
           <>
           <p className="interp-lede">

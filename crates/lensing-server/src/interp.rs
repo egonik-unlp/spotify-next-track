@@ -108,10 +108,15 @@ pub async fn list_models(State(state): State<Arc<AppState>>) -> Result<Json<Valu
                 Ok(r) => r,
                 Err(_) => continue,
             };
-            // Only families with a layer-probe subcommand declared in the registry.
-            let probeable =
-                state.registry.get(&record.predictor).map(|pr| pr.supports_probe()).unwrap_or(false);
-            if !probeable {
+            // Families exposing a hidden-activation analysis: a layer-probe
+            // subcommand (scalar-target nets) OR a per-model SAE (includes the
+            // sequence next-track families, which have no scalar-target probe).
+            let analyzable = state
+                .registry
+                .get(&record.predictor)
+                .map(|pr| pr.supports_probe() || pr.supports_model_sae())
+                .unwrap_or(false);
+            if !analyzable {
                 continue;
             }
             let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
@@ -120,9 +125,15 @@ pub async fn list_models(State(state): State<Arc<AppState>>) -> Result<Json<Valu
                 .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or(Value::Null);
-            // `hidden` + `activation` are surfaced top-level (the UI's MLP
-            // descriptor); other families leave `hidden` empty.
-            let hidden = hyperparams.get("hidden").cloned().unwrap_or_else(|| json!([]));
+            // `hidden` + `activation` are surfaced top-level (the UI's net
+            // descriptor). MLPs store a width array; the sequence families store
+            // a scalar recurrent/MLP width — normalize both to an array so the
+            // UI can render `[w, …]` uniformly. Other families leave it empty.
+            let hidden = match hyperparams.get("hidden") {
+                Some(Value::Array(a)) => Value::Array(a.clone()),
+                Some(n @ Value::Number(_)) => json!([n]),
+                _ => json!([]),
+            };
             let activation =
                 hyperparams.get("activation").and_then(|a| a.as_str()).unwrap_or("relu");
             let supports_model_sae = state
@@ -626,6 +637,10 @@ pub struct ModelSaeRequest {
     pub l1: f64,
     #[serde(default = "sae_epochs")]
     pub epochs: usize,
+    /// Top-k SAE: hard-cap active atoms per row to K (l0 == K by construction),
+    /// instead of relying on the L1 penalty. `0`/absent ⇒ L1-only sparsity.
+    #[serde(default)]
+    pub topk: usize,
     /// Label the surfaced atoms with an LLM (auto-interp). No-op on the engine
     /// side unless OPENAI_API_KEY is set in the server's environment.
     #[serde(default)]
@@ -678,7 +693,9 @@ pub async fn spawn_model_sae(
 
     let dataset = req.dataset.clone().unwrap_or_else(|| record.dataset_id.clone());
     let dataset_dir = state.datasets_dir().join(&dataset);
-    if !dataset_dir.join("manifest.json").exists() {
+    // Sequence datasets carry `sequence-manifest.json`, not `manifest.json`;
+    // the model-SAE families here are sequence models.
+    if !runs::dataset_dir_exists(&dataset_dir) {
         return Err(not_found("dataset"));
     }
 
@@ -700,7 +717,7 @@ pub async fn spawn_model_sae(
         Some(record.predictor.clone()),
         json!({
             "layers": req.layers, "n_atoms": req.n_atoms, "l1": req.l1, "epochs": req.epochs,
-            "label_atoms": req.label_atoms, "compare_embedding": req.compare_embedding,
+            "topk": req.topk, "label_atoms": req.label_atoms, "compare_embedding": req.compare_embedding,
         }),
         source,
         Utc::now().to_rfc3339(),
@@ -730,6 +747,10 @@ pub async fn spawn_model_sae(
     args.push(req.l1.to_string());
     args.push("--epochs".into());
     args.push(req.epochs.to_string());
+    if req.topk > 0 {
+        args.push("--topk".into());
+        args.push(req.topk.to_string());
+    }
     args.push("--cache-dir".into());
     args.push(cache_dir.to_string_lossy().into_owned());
     if req.label_atoms {
@@ -864,6 +885,7 @@ pub fn auto_queue_model_sae(state: Arc<AppState>, model: String) {
             n_atoms: 0,
             l1: sae_l1(),
             epochs: sae_epochs(),
+            topk: 0,
             label_atoms: false,
             compare_embedding: true,
         };

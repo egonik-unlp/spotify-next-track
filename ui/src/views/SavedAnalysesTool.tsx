@@ -585,11 +585,12 @@ function CompareView({
             <tr>
               <th aria-label="colour" />
               <th>model</th>
-              <th>peak R² log</th>
+              <th>peak next-item AUC</th>
               <th>width used</th>
               <th>concepts</th>
               <th>segments</th>
               <th>dropped</th>
+              <th>recall@10</th>
             </tr>
           </thead>
           <tbody>
@@ -601,11 +602,12 @@ function CompareView({
                     <span className="mlp-topo-swatch" style={{ background: paletteColor(i) }} />
                   </td>
                   <td className="saved-model">{a.model ?? a.id}</td>
-                  <td>{dg.peakR2.toFixed(3)}</td>
+                  <td>{dg.peakAuc.toFixed(2)}</td>
                   <td>{(dg.maxUtil * 100).toFixed(0)}%</td>
                   <td>{dg.concepts}</td>
                   <td>{dg.segRepr}</td>
                   <td>{dg.dropped ?? '—'}</td>
+                  <td>{dg.recall != null ? dg.recall.toFixed(3) : '—'}</td>
                 </tr>
               )
             })}
