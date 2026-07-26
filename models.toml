@@ -187,3 +187,169 @@ artist_penalty = 0.5
 k = 10
 mmr_lambda = 1.0
 mmr_pool = 100
+
+[[definitions]]
+name = "blend-gru-markov-content-proj-mmr-l09"
+predictor = "seq-blend"
+dataset_tags = ["seq-20260715-131139"]
+notes = "TIER-1 FREE on the 2026-07-26 MMR lambda frontier (eval-only re-rank; lambda=0.9 encoded as l09, pool=200). Run run-20260726-184115-6cb38-seq-blend on seq-20260715-131139. holisticness@10 0.010435; vs own lambda=1.0 control dH +0.001835 [+0.001458,+0.002223] CI>0 (measured paired half-width 0.000382); drecall -0.001272 [-0.007687,+0.004892] (statistical tie); recall@10 0.21034 (301/1431). Facets: ild 0.4362, mood_coh 0.3914, music@10 0.4625, artist_adj 0.6029, artist_conc 0.6707 (binds artist_conc). NOT PROMOTED - R4 robustness confirm + user approval pending."
+created_at = "2026-07-26T19:14:08.338357724+00:00"
+
+[definitions.hyperparams]
+alpha = 0.5
+arch = "gru"
+batch_size = 128
+content = false
+content_agg = "max"
+epochs = 40
+hidden = 256
+k = 10
+loss = "infonce"
+lr = 0.001
+mmr_lambda = 0.9
+mmr_pool = 200
+patience = 6
+projection = true
+projection_epochs = 40
+projection_lr = 0.001
+projection_objective = "infonce"
+projection_rank = 0
+projection_tau = 0.07
+seed = 1337
+
+[[definitions]]
+name = "blend-gru-markov-content-proj-mmr-l07"
+predictor = "seq-blend"
+dataset_tags = ["seq-20260715-131139"]
+notes = "TIER-2 PRICED on the 2026-07-26 MMR lambda frontier (eval-only re-rank; lambda=0.7 encoded as l07, pool=200). Run run-20260726-184115-36edb-seq-blend on seq-20260715-131139. holisticness@10 0.015289; vs own lambda=1.0 control dH +0.006675 [+0.005694,+0.007696] CI>0 (measured paired half-width 0.001001); drecall -0.018142 [-0.029350,-0.007669] (CI<0, priced); recall@10 0.19357 (277/1431). Facets: ild 0.5201, mood_coh 0.3643, music@10 0.4759, artist_adj 0.5713, artist_conc 0.6082 (binds artist_conc). NOT PROMOTED - R4 robustness confirm + user approval pending."
+created_at = "2026-07-26T19:14:08.343163895+00:00"
+
+[definitions.hyperparams]
+alpha = 0.5
+arch = "gru"
+batch_size = 128
+content = false
+content_agg = "max"
+epochs = 40
+hidden = 256
+k = 10
+loss = "infonce"
+lr = 0.001
+mmr_lambda = 0.7
+mmr_pool = 200
+patience = 6
+projection = true
+projection_epochs = 40
+projection_lr = 0.001
+projection_objective = "infonce"
+projection_rank = 0
+projection_tau = 0.07
+seed = 1337
+
+[[definitions]]
+name = "gru-infonce-h256-mmr-l09"
+predictor = "seq-nexttrack"
+dataset_tags = ["seq-20260715-131139"]
+notes = "TIER-1 FREE on the 2026-07-26 MMR lambda frontier (eval-only re-rank; lambda=0.9 encoded as l09, pool=200). Run run-20260726-184115-e1539-seq-nexttrack on seq-20260715-131139. holisticness@10 0.026761; vs own lambda=1.0 control dH +0.002203 [+0.001568,+0.002902] CI>0 (measured paired half-width 0.000667); drecall -0.002141 [-0.006289,+0.002096] (statistical tie); recall@10 0.12089 (173/1431). Facets: ild 0.4716, mood_coh 0.4746, music@10 0.4597, artist_adj 0.3408, artist_conc 0.3365 (binds artist_adj). NOT PROMOTED - R4 robustness confirm + user approval pending."
+created_at = "2026-07-26T19:14:08.347677728+00:00"
+
+[definitions.hyperparams]
+arch = "gru"
+batch_size = 128
+bidirectional = false
+dropout = 0.1
+eager_beta = 0.0
+eager_margin = 0.0
+epochs = 40
+hidden = 256
+k = 10
+loss = "infonce"
+lr = 0.001
+mmr_lambda = 0.9
+mmr_pool = 200
+num_layers = 1
+patience = 6
+pre_hidden = 0
+pre_layers = 1
+residual = false
+
+[[definitions]]
+name = "gru-infonce-h256-mmr-l08"
+predictor = "seq-nexttrack"
+dataset_tags = ["seq-20260715-131139"]
+notes = "TIER-1 FREE on the 2026-07-26 MMR lambda frontier (eval-only re-rank; lambda=0.8 encoded as l08, pool=200). Run run-20260726-184115-147a6-seq-nexttrack on seq-20260715-131139. holisticness@10 0.029458; vs own lambda=1.0 control dH +0.004922 [+0.004036,+0.005856] CI>0 (measured paired half-width 0.000910); drecall -0.003600 [-0.009085,+0.001398] (statistical tie); recall@10 0.11950 (171/1431). Facets: ild 0.4961, mood_coh 0.4688, music@10 0.4648, artist_adj 0.3300, artist_conc 0.3073 (binds artist_adj). NOT PROMOTED - R4 robustness confirm + user approval pending."
+created_at = "2026-07-26T19:14:08.352712028+00:00"
+
+[definitions.hyperparams]
+arch = "gru"
+batch_size = 128
+bidirectional = false
+dropout = 0.1
+eager_beta = 0.0
+eager_margin = 0.0
+epochs = 40
+hidden = 256
+k = 10
+loss = "infonce"
+lr = 0.001
+mmr_lambda = 0.8
+mmr_pool = 200
+num_layers = 1
+patience = 6
+pre_hidden = 0
+pre_layers = 1
+residual = false
+
+[[definitions]]
+name = "gru-infonce-h256-mmr-l07"
+predictor = "seq-nexttrack"
+dataset_tags = ["seq-20260715-131139"]
+notes = "TIER-2 PRICED on the 2026-07-26 MMR lambda frontier (eval-only re-rank; lambda=0.7 encoded as l07, pool=200). Run run-20260726-184115-bf395-seq-nexttrack on seq-20260715-131139. holisticness@10 0.034171; vs own lambda=1.0 control dH +0.009648 [+0.008322,+0.011042] CI>0 (measured paired half-width 0.001360); drecall -0.008492 [-0.016073,-0.001398] (CI<0, priced); recall@10 0.11461 (164/1431). Facets: ild 0.5314, mood_coh 0.4585, music@10 0.4747, artist_adj 0.3129, artist_conc 0.2707 (binds artist_adj). NOT PROMOTED - R4 robustness confirm + user approval pending."
+created_at = "2026-07-26T19:14:08.357403958+00:00"
+
+[definitions.hyperparams]
+arch = "gru"
+batch_size = 128
+bidirectional = false
+dropout = 0.1
+eager_beta = 0.0
+eager_margin = 0.0
+epochs = 40
+hidden = 256
+k = 10
+loss = "infonce"
+lr = 0.001
+mmr_lambda = 0.7
+mmr_pool = 200
+num_layers = 1
+patience = 6
+pre_hidden = 0
+pre_layers = 1
+residual = false
+
+[[definitions]]
+name = "gru-infonce-h256-mmr-l07-pool50"
+predictor = "seq-nexttrack"
+dataset_tags = ["seq-20260715-131139"]
+notes = "TIER-1 FREE (best TIER-1 arm of the batch) on the 2026-07-26 MMR lambda frontier (eval-only re-rank; lambda=0.7 encoded as l07, pool=50). Run run-20260726-184116-20d9b-seq-nexttrack on seq-20260715-131139. holisticness@10 0.030355; vs own lambda=1.0 control dH +0.005811 [+0.004819,+0.006846] CI>0 (measured paired half-width 0.001013); drecall -0.002908 [-0.008386,+0.002795] (statistical tie); recall@10 0.12020 (172/1431). Facets: ild 0.5017, mood_coh 0.4671, music@10 0.4670, artist_adj 0.3270, artist_conc 0.3019 (binds artist_adj). NOT PROMOTED - R4 robustness confirm + user approval pending."
+created_at = "2026-07-26T19:14:08.363028309+00:00"
+
+[definitions.hyperparams]
+arch = "gru"
+batch_size = 128
+bidirectional = false
+dropout = 0.1
+eager_beta = 0.0
+eager_margin = 0.0
+epochs = 40
+hidden = 256
+k = 10
+loss = "infonce"
+lr = 0.001
+mmr_lambda = 0.7
+mmr_pool = 50
+num_layers = 1
+patience = 6
+pre_hidden = 0
+pre_layers = 1
+residual = false
