@@ -28,6 +28,11 @@ pub struct RunMeta {
     /// Model definition (`models.toml`) this run was launched from, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_definition: Option<String>,
+    /// Which training worker claimed this run: `None` = trained locally on the
+    /// hub; `Some(worker_id)` = trained by a remote distributed worker (that
+    /// worker's id/hostname). Lets the UI mark a run local vs. remote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed_by: Option<String>,
 }
 
 fn default_contract_version() -> u32 {
@@ -115,6 +120,62 @@ pub struct Metrics {
     /// ranking; higher-better.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artist_mrr: Option<f64>,
+    /// Music@k: mean over ranking cases of the best (max) MUSICAL-DISTANCE
+    /// similarity (cosine in the balanced intrinsic content-metric space) between
+    /// the true next item and the top-k candidates — a continuous graded-relevance
+    /// metric that credits landing something that SOUNDS like the truth even on an
+    /// exact/artist/genre miss (a smooth superset of recall@k). 0..1, higher-better.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub music_at_k: Option<f64>,
+    // ---- session-holisticness diagnostics (display-only; primary stays
+    // recall@k). Quantify how "album-eager" vs. how mood-coherent/holistic a
+    // model's top-k is; see predictors/seq_common.py::eval_from_scores and
+    // predictors/seq_continuation_eval.py. ----
+    /// Artist-adjacency@k: mean over cases of the fraction of the top-k that
+    /// shares the SEED's (current/last-prefix item's) artist — the "keeps
+    /// parroting the same artist" rate. LOWER-better (register in
+    /// `[metrics].directions`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist_adj_at_k: Option<f64>,
+    /// Artist-concentration@k: normalized Herfindahl over the top-k's artists —
+    /// 0 = every slot a different artist, 1 = the whole list is one artist.
+    /// LOWER-better. This is the blind spot `artist_adj_at_k` cannot see: it
+    /// counts only the SEED's artist, so a top-k of ten tracks by one OTHER
+    /// artist scores a perfect 0.0 (measured 2026-07-26: `mood-session` reads
+    /// artist_adj 0.0036 at artist_conc 0.3291). The holisticness crown takes
+    /// max(artist_adj, artist_conc) as its eagerness term.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist_conc_at_k: Option<f64>,
+    /// Album-adjacency@k: same as artist-adjacency on the (artist, album) key —
+    /// the "predicts the rest of the album" symptom. Only present when the
+    /// dataset's items.json carries an `album` field. LOWER-better.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_adj_at_k: Option<f64>,
+    /// Mood-coherence@k: mean cosine of the top-k to the PREFIX mood centroid in
+    /// the content-metric space (does the list stay in the established sonic
+    /// neighborhood); read alongside `ild_at_k`. higher-better.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mood_coh_at_k: Option<f64>,
+    /// Intra-list diversity@k: mean pairwise sonic distance within the top-k in
+    /// the content-metric space; low = a duplicative, album-eager list.
+    /// higher-better.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ild_at_k: Option<f64>,
+    /// Suffix-recall@k: fraction of a held-out multi-item session continuation
+    /// recovered in the top-k (leave-last-m-out); rewards predicting the future
+    /// SET, not just the literal next track. higher-better.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suffix_recall_at_k: Option<f64>,
+    /// Continuation-precision@k: fraction of the top-k that appears anywhere in
+    /// the true multi-item continuation. higher-better.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cont_prec_at_k: Option<f64>,
+    /// Composite HOLISTICNESS crown: clamp(mood_coh,0) × ild × (1−artist_adj) —
+    /// rewards a mood-coherent AND varied AND non-eager session in one number.
+    /// The promotion/leaderboard primary when the crown is holisticness (see
+    /// domain.toml [metrics].primary). higher-better.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub holisticness_at_k: Option<f64>,
 }
 
 /// One element of `predictions.json` written by a predictor.

@@ -31,6 +31,14 @@ export type MetricKey =
   | 'artist_recall_at_k'
   | 'genre_recall_at_k'
   | 'artist_mrr'
+  | 'music_at_k'
+  | 'artist_adj_at_k'
+  | 'album_adj_at_k'
+  | 'mood_coh_at_k'
+  | 'holisticness_at_k'
+  | 'ild_at_k'
+  | 'suffix_recall_at_k'
+  | 'cont_prec_at_k'
 
 /** Display name → Metrics key. Lowercased, with "R²" → "r2"
  *  (e.g. "AUC"→"auc", "logloss"→"logloss", "macro_f1"→"macro_f1"). Ranking
@@ -41,10 +49,21 @@ export function metricKey(displayName: string): MetricKey {
   if (/^recall(@\d+|@k)?$/.test(s)) return 'recall_at_k'
   if (/^hit(_rate|@\d+|@k)?$/.test(s)) return 'hit_rate'
   if (/^ndcg(@\d+|@k)?$/.test(s)) return 'ndcg'
-  // graded-relevance ranking columns (artist@10 / genre@10 / artist_mrr)
+  // graded-relevance ranking columns (artist@10 / genre@10 / artist_mrr / music@10)
   if (s === 'artist_mrr') return 'artist_mrr'
+  // session-holisticness diagnostics. artist_adj is matched before the plain
+  // artist arm below (the anchored artist regex won't match "artist_adj@10"
+  // anyway, but keep them together to mirror the Rust resolver ordering).
+  if (/^artist_adj(@\d+|@k)?$/.test(s)) return 'artist_adj_at_k'
+  if (/^album_adj(@\d+|@k)?$/.test(s)) return 'album_adj_at_k'
+  if (/^mood_coh(@\d+|@k)?$/.test(s)) return 'mood_coh_at_k'
+  if (/^holistic(ness)?(@\d+|@k)?$/.test(s)) return 'holisticness_at_k'
+  if (/^ild(@\d+|@k)?$/.test(s)) return 'ild_at_k'
+  if (/^suffix_recall(@\d+|@k)?$/.test(s)) return 'suffix_recall_at_k'
+  if (/^cont_prec(@\d+|@k)?$/.test(s)) return 'cont_prec_at_k'
   if (/^artist(_recall)?(@\d+|@k)?$/.test(s)) return 'artist_recall_at_k'
   if (/^genre(_recall)?(@\d+|@k)?$/.test(s)) return 'genre_recall_at_k'
+  if (/^music(@\d+|@k)?$/.test(s)) return 'music_at_k'
   if (s === 'mrr') return 'mrr'
   return s as MetricKey
 }
@@ -57,6 +76,9 @@ const LOWER_IS_BETTER: Record<string, true> = {
   medape: true,
   logloss: true,
   brier: true,
+  // adjacency rates: a lower share of same-artist/same-album top-k = less eager
+  artist_adj_at_k: true,
+  album_adj_at_k: true,
 }
 
 /** True when a smaller value is better (error metrics), false for scores. */
@@ -84,6 +106,15 @@ const RATIO: Record<string, true> = {
   artist_recall_at_k: true,
   genre_recall_at_k: true,
   artist_mrr: true,
+  music_at_k: true,
+  // session-holisticness diagnostics — all unitless 0..1-ish ratios
+  artist_adj_at_k: true,
+  album_adj_at_k: true,
+  mood_coh_at_k: true,
+  holisticness_at_k: true,
+  ild_at_k: true,
+  suffix_recall_at_k: true,
+  cont_prec_at_k: true,
 }
 
 /** A formatter for a metric, given its display name. Percent when the display
@@ -149,7 +180,8 @@ export function resolveTask(domain: Domain, metrics?: Metrics | null): TaskKind 
   const declared = domain.target.task
   if (declared) return declared
   const primaryKey = metricKey(domain.metrics.primary)
-  if (primaryKey === 'recall_at_k' || primaryKey === 'mrr' || primaryKey === 'hit_rate' || primaryKey === 'ndcg') {
+  if (primaryKey === 'recall_at_k' || primaryKey === 'mrr' || primaryKey === 'hit_rate' || primaryKey === 'ndcg' ||
+      primaryKey === 'holisticness_at_k' || primaryKey === 'mood_coh_at_k') {
     return 'ranking'
   }
   const m = metrics

@@ -438,10 +438,23 @@ impl MetricsSpec {
             // graded-relevance ranking: artist_mrr must be matched before the
             // `artist`-prefix arm below so it maps to its own field.
             "artist_mrr" => m.artist_mrr,
+            // session-holisticness diagnostics (display-only). artist_adj MUST
+            // precede the `artist`-prefix arm below so it maps to its own field
+            // instead of being swallowed into artist_recall_at_k.
+            _ if lname.starts_with("artist_adj") => m.artist_adj_at_k,
+            // Must also precede the `artist`-prefix arm below, same reason.
+            _ if lname.starts_with("artist_conc") => m.artist_conc_at_k,
+            _ if lname.starts_with("album_adj") => m.album_adj_at_k,
+            _ if lname.starts_with("mood_coh") => m.mood_coh_at_k,
+            _ if lname.starts_with("holistic") => m.holisticness_at_k,
+            _ if lname.starts_with("ild") => m.ild_at_k,
+            _ if lname.starts_with("suffix_recall") => m.suffix_recall_at_k,
+            _ if lname.starts_with("cont_prec") => m.cont_prec_at_k,
             // ranking cutoff metrics carry a `@k` suffix (recall@10, hit@10,
             // artist@10, genre@10) — also artist_recall / genre_recall aliases.
             _ if lname.starts_with("artist") => m.artist_recall_at_k,
             _ if lname.starts_with("genre") => m.genre_recall_at_k,
+            _ if lname.starts_with("music") => m.music_at_k,
             _ if lname.starts_with("recall") => m.recall_at_k,
             _ if lname.starts_with("hit") => m.hit_rate,
             _ => None,
@@ -478,6 +491,13 @@ impl MetricsSpec {
             || lname.starts_with("hit")
             || lname.starts_with("artist")
             || lname.starts_with("genre")
+            || lname.starts_with("music")
+            || lname.starts_with("album_adj")
+            || lname.starts_with("mood_coh")
+            || lname.starts_with("holistic")
+            || lname.starts_with("ild")
+            || lname.starts_with("suffix_recall")
+            || lname.starts_with("cont_prec")
             || matches!(
                 lname.as_str(),
                 "mae" | "rmse" | "mape" | "medape" | "r²" | "r2" | "accuracy" | "acc"

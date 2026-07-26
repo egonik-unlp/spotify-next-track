@@ -96,14 +96,97 @@ latent_source = "spotify_tracks_song_ae"
 # wrong (artist@k / genre@k / artist_mrr). These are the items.json metadata
 # keys the eval reads; the module reads the artifact (not this config) so it
 # hardcodes "artist"/"genre" — this line documents that binding, keep in sync.
-relevance_fields = ["artist", "genre"]
+# "album" additionally drives album_adj@10 (keyed by the (artist,album) tuple);
+# it is emitted into items.json by pipeline/corpus/sequences.py and only
+# populates on datasets rebuilt after that emitter landed (older datasets omit
+# album_adj@10 gracefully).
+relevance_fields = ["artist", "genre", "album"]
 
 [metrics]
-primary = "recall@10"
-columns = ["recall@10", "artist@10", "genre@10", "mrr", "hit@10"]
+# CROWN = holisticness (2026-07-23; GROUNDED 2026-07-25): the goal is
+# mood-coherent, non-eager SESSIONS, not guessing the literal next track. The
+# primary is a COMPOSITE, computed in seq_common.py::eval_from_scores:
+#
+#   holisticness@10 = clamp(mood_coh,0) × ild × (1−eager) × music_rel
+#   where eager     = max(artist_adj, artist_conc)
+#         music_rel = clamp((music@10 − 0.34) / (1 − 0.34), 0, 1)
+#
+# REVISED 2026-07-26 (second revision; see seq_common.py for the derivations):
+#   * `eager` is now the WORSE of seed-echo (artist_adj) and within-list
+#     concentration (artist_conc, normalized Herfindahl over the top-k artists).
+#     artist_adj alone was blind to a top-k made of ten tracks by one NON-seed
+#     artist: `mood-session` scored artist_adj 0.0036 at artist_conc 0.3291.
+#   * the grounding floor rose 0.185 → 0.34, from the context-free popularity
+#     score to just above the MOOD-ONLY baseline (`mood-session`'s music@10 =
+#     0.3384). Mood coherence is already paid for by mood_coh and ild, so a floor
+#     below mood-only let the composite double-count mood; at 0.185 the
+#     degenerate `cummean/cummean` arm led the crown at recall@10 0.066.
+#   Under the revision: C0 single-GRU 0.0245 leads, degenerate arm 0.0141,
+#   champion blend 0.0048 (correctly low — artist_conc 0.69), mood-only 0.0000.
+#
+# DISCRIMINATION (measured 2026-07-26, 8 architecture arms, n=1431): the crown's
+# paired-bootstrap CI half-width is ~0.0018, so it resolves a Δ of 0.005 with only
+# ~181 test sessions — it is a PRECISE instrument. But the architecture family's
+# whole H spread is 0.003, i.e. 1.8 CI half-widths, so 7 of 8 adjacent arms are
+# unresolvable. Read: use holisticness to compare POLICIES and FAMILIES (an MMR
+# re-rank moves ild by ~0.11, ~30× the noise floor), not to rank near-identical
+# architectures. recall@10 is no better there — 2.3 half-widths, 2 of 8 resolvable.
+#
+# — coherent AND varied AND non-eager AND actually related to what the user
+# played next. The 4th factor was added 2026-07-25 because the original
+# 3-factor crown was gameable: all three of its facets are INTERNAL to the
+# returned list (top-10 vs the prefix mood centroid, and vs itself), so nothing
+# in it rewarded being right. Measured consequence — the 3-factor crown ranked
+# `seq-mood` first at holisticness 0.233 on recall@10 0.024 (34 correct
+# next-tracks of 1431) and music@10 0.338, with the whole ranking running
+# near-perfectly ANTI-correlated with music@10: it was maximized by serving
+# pleasant unrelated music. The grounding factor is music@10 (continuous
+# sounds-alike relevance, NOT exact recall — it credits landing something that
+# merely sounds like the true continuation), rescaled above a floor so it has
+# enough spread to bind; the raw product does NOT fix the failure mode (verified:
+# it still ranks `seq-mood` first). That floor was 0.185 on 2026-07-25 and is now
+# 0.34 — see the REVISED note above, which supersedes this paragraph.
+# recall@10 stays a displayed column (no longer load-bearing as a floor — the
+# music_rel factor now carries relevance inside the crown itself).
+# Reversible: set primary back to "recall@10" to restore the next-track crown.
+# ⚠ Stored holisticness@10 from runs BEFORE 2026-07-25 is the 3-factor value and
+# is NOT comparable; recompute from the stored facets across that cut.
+primary = "holisticness@10"
+# music@10 — continuous "sounds-alike" graded relevance: mean best cosine, in the
+# balanced intrinsic musical-distance space (spotify_tracks_content_metric, built
+# by pipeline/build_content_metric.py), between the true next track and the top-10
+# candidates. Credits landing something musically close on an exact/artist/genre
+# miss; a smooth superset of recall@10. 0..1, higher-better. Display-only (primary
+# stays recall@10).
+#
+# Session-holisticness diagnostics (all display-only; primary stays recall@10),
+# computed in predictors/seq_common.py::eval_from_scores. They quantify the
+# "predictions are too album-eager" symptom so it can be seen on the leaderboard:
+#   artist_adj@10 / album_adj@10 — share of the top-10 that just parrots the
+#     SEED's artist / album (LOWER better; the eagerness rate). album_adj@10 only
+#     populates on datasets whose items.json carries "album".
+#   mood_coh@10 — top-10 cosine to the prefix mood centroid in the content-metric
+#     space (higher = stays in the sonic neighborhood).
+#   ild@10 — intra-list diversity of the top-10 (higher = less duplicative).
+# NOT leaderboard columns (a run's eval never produces them): suffix_recall@10 /
+# cont_prec@10 are multi-step continuation metrics from the on-demand harness
+# predictors/seq_continuation_eval.py (leave-last-m-out) — they're reported in
+# campaign write-ups, not per-run, so they're intentionally left out of `columns`
+# (their Metrics fields still exist for the harness / reports).
+columns = [
+    "holisticness@10", "mood_coh@10", "ild@10", "artist_adj@10", "artist_conc@10", "album_adj@10",
+    "recall@10", "artist@10", "genre@10", "music@10", "mrr", "hit@10",
+]
 percent = []
 value_unit = "P(next-track hit)"
 best_models_size = 12
+# Ranking-direction overrides: the adjacency rates are LOWER-better (a lower
+# share of same-artist/same-album top-k = less eager). All other holisticness
+# metrics are higher-better (the built-in default).
+[metrics.directions]
+"artist_adj@10" = true
+"artist_conc@10" = true
+"album_adj@10" = true
 
 # ---- Fields: the corpus payload schema ----
 
