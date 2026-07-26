@@ -1,0 +1,65 @@
+% ===========================================================================
+%  topo-style.tex --- the shared TikZ style block for the next-track topology
+%  diagrams AND for the evaluation-protocol diagram in the body of
+%  model-comparison.tex.  Extracted from topologies.tex so that the protocol
+%  figure, which appears BEFORE \input{figures/topologies}, can use the same
+%  visual language.  \input from docs/ (compilation cwd):
+%
+%      \input{figures/topo-style}
+%
+%  Idempotent: guarded, so a second \input is a no-op.  Requires
+%      \usepackage{tikz}
+%      \usetikzlibrary{positioning,arrows.meta,fit,backgrounds,calc}
+% ===========================================================================
+\ifdefined\nexttracktopostyle\else
+\newcommand{\nexttracktopostyle}{}
+
+\providecommand{\dsid}[1]{\texttt{\small #1}}
+\providecommand{\Rp}{\ensuremath{R'}}
+\providecommand{\Cp}{\ensuremath{C'}}
+
+% --- palette: the same hex values as docs/figures/make_figures.py ----------
+\definecolor{topoacc}{HTML}{2563EB}   % ACCENT  --- default / on-record path
+\definecolor{topogood}{HTML}{16A34A}  % GOOD    --- favoured variant
+\definecolor{topobad}{HTML}{DC2626}   % BAD     --- refuted variant
+\definecolor{topomut}{HTML}{9CA3AF}   % MUTED   --- frozen, parameter-free
+\definecolor{topolook}{HTML}{9333EA}  % seq-markov purple --- table lookup
+\definecolor{topoink}{HTML}{374151}   % annotation ink
+
+\tikzset{
+  topo/.style={
+    font=\footnotesize,
+    every node/.append style={align=center},
+  },
+  box/.style={rounded corners=1.4pt, inner xsep=3.2pt, inner ysep=2.8pt,
+              minimum height=6.4mm, text=topoink},
+  dsh/.style={dash pattern=on 2pt off 1.4pt},
+  % --- component styles ---------------------------------------------------
+  trained/.style={box, draw=topoacc, line width=0.9pt, fill=topoacc!7},
+  frozen/.style={box, dsh, draw=topomut, line width=0.8pt, fill=topomut!14},
+  lookup/.style={box, dsh, draw=topolook, line width=0.9pt, fill=topolook!7},
+  learnspace/.style={box, dsh, draw=topoacc, line width=0.9pt, fill=topoacc!5},
+  won/.style={box, draw=topogood, line width=1.0pt, fill=topogood!8},
+  refuted/.style={box, draw=topobad, line width=1.0pt, fill=topobad!6},
+  op/.style={box, dash pattern=on 1.5pt off 1.2pt, draw=topomut,
+             line width=0.7pt, fill=white, rounded corners=3.2pt},
+  % --- edges --------------------------------------------------------------
+  flow/.style={-{Stealth[length=4.2pt,width=3.4pt]}, draw=topoink,
+               line width=0.7pt},
+  proj/.style={flow, draw=topoacc},
+  data/.style={flow, draw=topomut, dsh},
+  tie/.style={flow, draw=topogood, line width=0.8pt},
+  grad/.style={flow, draw=topobad, line width=0.75pt,
+               dash pattern=on 1.6pt off 1.3pt},
+  variant/.style={flow, draw=topobad, line width=0.75pt,
+                  dash pattern=on 1.6pt off 1.3pt},
+  % --- text ---------------------------------------------------------------
+  tag/.style={font=\scriptsize, text=topoink, inner sep=1.2pt},
+  edg/.style={font=\scriptsize, text=topoink, inner sep=1.4pt},
+  note/.style={font=\scriptsize, text=topoink, align=flush left,
+               text width=134mm, inner sep=1.4pt, anchor=north west},
+  grp/.style={draw=topomut!80, line width=0.5pt, rounded corners=2.4pt,
+              dash pattern=on 1pt off 1pt, inner sep=3.4pt},
+  swatch/.style={minimum width=5.2mm, minimum height=3.2mm, inner sep=0pt},
+}
+\fi

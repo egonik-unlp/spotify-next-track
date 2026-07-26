@@ -1,0 +1,512 @@
+% ===========================================================================
+%  topologies.tex --- TikZ network-topology diagrams for the next-track
+%  MODEL-COMPARISON document.  Not a standalone document: \input it from the
+%  body of the main .tex, which must be compiled from docs/:
+%
+%      \input{figures/topologies}
+%
+%  (\graphicspath{{figures/}} governs \includegraphics only, NOT \input, so the
+%   figures/ prefix is spelled out above.)
+%
+%  ------------------------------------------------------------------------
+%  REQUIRED PREAMBLE LINES in the main document --- add these two lines after
+%  \usepackage{graphicx}, before \begin{document}:
+%
+%      \usepackage{tikz}
+%      \usetikzlibrary{positioning,arrows.meta,fit,backgrounds,calc}
+%
+%  Nothing else is required: xcolor arrives with tikz, and every colour and
+%  every style used below is defined in this file.  \dsid, \Rp and \Cp are
+%  \providecommand-guarded here so the file also compiles inside a bare
+%  wrapper; when the main document defines them, its definitions win.
+%
+%  PACKAGES DELIBERATELY *NOT* REQUIRED: amssymb is absent from the house
+%  preamble, so nothing below uses \mathbb.  Every picture is laid out with
+%  RELATIVE positioning (right=/above=/below= of ...), never with hard
+%  coordinates, so no node can collide with its neighbour if the font or the
+%  wording changes; the per-figure notes and the legend are anchored to
+%  `current bounding box', so they always land underneath the diagram.
+%  ------------------------------------------------------------------------
+%
+%  LABELS DEFINED IN THIS FILE (in file order)
+%      fig:topo-gru       seq-nexttrack --- the baseline; ALSO CARRIES THE LEGEND
+%      fig:topo-ann       seq-ann       --- pooled feed-forward twin
+%      fig:topo-dualgru   seq-dualgru   --- two towers + fusion head + pre-MLP variant
+%      fig:topo-embed     seq-embed     --- learned, weight-tied item table (DESIGN ONLY)
+%      fig:topo-blend     seq-blend     --- the champion, three legs
+%      fig:topo-stacker   seq-stacker   --- learned XGBoost combiner
+%
+%  VISUAL LANGUAGE (the primary axis is the LINE, not the colour, so it
+%  survives greyscale printing; stated for the reader in the caption of
+%  fig:topo-gru and re-pointed-at by every other caption)
+%      SOLID  border  = TRAINED component (parameters fitted by gradient descent)
+%      DASHED border  = FROZEN or PARAMETER-FREE component
+%      blue   = the on-record default path
+%      purple dashed  = non-parametric table lookup over the dataset
+%      dashed blue    = parameter-free, but operating inside a LEARNED geometry
+%      green  = variant favoured by the record
+%      red    = variant refuted by the record
+% ===========================================================================
+
+\input{figures/topo-style}
+
+
+
+% ===========================================================================
+% 1. seq-nexttrack --- the baseline (and the legend)
+% ===========================================================================
+\begin{figure}[ht]
+  \centering
+  \begin{tikzpicture}[topo]
+    % ---- the frozen item-latent table, read TWICE ------------------------
+    \node[frozen, minimum width=20mm, minimum height=12mm] (tab)
+      {frozen item\\latents $Z$\\[1pt]{\scriptsize$19{,}402\times192$}};
+    % ---- the prefix, in order (one column per step) ----------------------
+    \node[frozen, minimum width=12mm, right=7mm of tab]  (x1) {$x_1$};
+    \node[frozen, minimum width=12mm, right=4mm of x1]   (x2) {$x_2$};
+    \node[tag, right=2.5mm of x2]                        (xd) {$\cdots$};
+    \node[frozen, minimum width=12mm, right=2.5mm of xd] (x3) {$x_t$};
+    \begin{scope}[on background layer]
+      \node[grp, fit=(x1)(x3)] (pfx) {};
+    \end{scope}
+    \draw[data] (tab.east) -- (pfx.west);
+    \node[tag, below=1.2mm of pfx] (pfxlab)
+      {prefix latents --- \emph{order preserved}};
+    % ---- the recurrence --------------------------------------------------
+    \node[trained, minimum width=12mm, above=7mm of x1] (g1) {GRU};
+    \node[trained, minimum width=12mm, above=7mm of x2] (g2) {GRU};
+    \node[tag] (gd) at (g1 -| xd) {$\cdots$};
+    \node[trained, minimum width=12mm, above=7mm of x3] (g3) {GRU};
+    \draw[flow] (x1) -- (g1);
+    \draw[flow] (x2) -- (g2);
+    \draw[flow] (x3) -- (g3);
+    \draw[flow] (g1) -- node[edg, above, inner sep=0.7pt] {$h_t$} (g2);
+    \draw[flow] (g2) -- (gd);
+    \draw[flow] (gd) -- (g3);
+    % ---- head and retrieval ---------------------------------------------
+    \node[trained, right=6mm of g3] (head)
+      {linear head\\{\scriptsize$256\to192$}};
+    \node[op, right=7mm of head] (rk)
+      {rank the catalogue by $\cos(\hat z, z_v)$\\{\scriptsize prefix excluded $\to$ top-10}};
+    \draw[flow] (g3) -- (head);
+    \draw[flow] (head) -- node[edg, above, inner sep=1pt] {$\hat z$} (rk);
+    % ---- the SAME frozen table is the retrieval target -------------------
+    \coordinate (c1) at ([yshift=-3mm]tab.south |- current bounding box.south);
+    \coordinate (c2) at (rk.south |- c1);
+    \draw[data] (tab.south) -- (c1);
+    \draw[data] (c1) -- node[tag, above]
+      {the \emph{same} frozen table is the retrieval target} (c2);
+    \draw[data] (c2) -- (rk.south);
+    % ---- supervision note ------------------------------------------------
+    \node[note] (nt) at ([yshift=-3.5mm]current bounding box.south west)
+      {\textbf{Supervision --- per-step teacher forcing.} The head is shared
+       across positions and must predict the next item's latent at
+       \emph{every} prefix position, so one session of length $L$ yields
+       $L-1$ examples: $73{,}632$ (prefix, next-item) pairs on the train
+       split. The loss is masked in-batch InfoNCE at $\tau=0.07$ --- each
+       step's true next latent must outscore the other steps' targets in the
+       same minibatch, which supplies negatives for free.};
+    % ---- LEGEND (two rows so it cannot widen the picture) ----------------
+    \node[trained, swatch, anchor=north west] (l1)
+      at ([yshift=-3mm]current bounding box.south west) {};
+    \node[tag, right=1.1mm of l1] (t1) {trained (solid)};
+    \node[frozen, swatch, right=3.4mm of t1] (l2) {};
+    \node[tag, right=1.1mm of l2] (t2) {frozen / parameter-free (dashed)};
+    \node[lookup, swatch, right=3.4mm of t2] (l3) {};
+    \node[tag, right=1.1mm of l3] (t3) {table lookup};
+    \node[learnspace, swatch, anchor=north west] (l4)
+      at ([yshift=-1.6mm]l1.south west) {};
+    \node[tag, right=1.1mm of l4] (t4) {parameter-free, learned space};
+    \node[won, swatch, right=3.4mm of t4] (l5) {};
+    \node[tag, right=1.1mm of l5] (t5) {favoured variant};
+    \node[refuted, swatch, right=3.4mm of t5] (l6) {};
+    \node[tag, right=1.1mm of l6] (t6) {refuted variant};
+  \end{tikzpicture}
+  \caption{\texttt{seq-nexttrack}, the single-model baseline every other
+    topology in this document is measured against: a frozen item space, a
+    recurrence over the \emph{ordered} prefix, a linear head, and cosine
+    retrieval back into the \emph{same} frozen space. Nothing about the item
+    geometry is learned here --- the $19{,}402\times192$ latent table (offline
+    PCA-192 on \dsid{seq-20260715-131139}) is read twice, once to embed the
+    prefix and once as the retrieval target, and only the GRU and its linear
+    head carry parameters (\num{394944} at $h=256$). \textbf{The visual
+    language used throughout this document is fixed here.} A \emph{solid}
+    border marks a trained component and a \emph{dashed} border a frozen or
+    parameter-free one; that distinction rides on the line style, not the
+    colour, so it survives greyscale. Colour then carries the verdict ---
+    blue: the on-record default path; purple dashed: a non-parametric table
+    lookup over the dataset; dashed blue: parameter-free but operating inside
+    a \emph{learned} geometry; green: a variant the record favours; red: a
+    variant the record refutes. On the canonical split this configuration
+    scores Recall@10 \num{0.12299} (\num{176} of \num{1431}), reproduced
+    bit-identically eleven times.}
+  \label{fig:topo-gru}
+\end{figure}
+
+
+% ===========================================================================
+% 2. seq-ann --- the pooled feed-forward twin
+% ===========================================================================
+\begin{figure}[ht]
+  \centering
+  \begin{tikzpicture}[topo]
+    \node[frozen, minimum width=20mm, minimum height=12mm] (tab)
+      {frozen item\\latents $Z$\\[1pt]{\scriptsize$19{,}402\times192$}};
+    \node[frozen, minimum width=12mm, right=7mm of tab]  (x1) {$x_1$};
+    \node[frozen, minimum width=12mm, right=4mm of x1]   (x2) {$x_2$};
+    \node[tag, right=2.5mm of x2]                        (xd) {$\cdots$};
+    \node[frozen, minimum width=12mm, right=2.5mm of xd] (x3) {$x_t$};
+    \begin{scope}[on background layer]
+      \node[grp, fit=(x1)(x3)] (pfx) {};
+    \end{scope}
+    \draw[data] (tab.east) -- (pfx.west);
+    % ---- the two parameter-free summaries of the same prefix -------------
+    \node[op, right=8mm of pfx, yshift=10mm] (mp)
+      {causal mean-pool\\$\frac{1}{t}\sum_{i\le t}x_i$\\[1pt]{\scriptsize\emph{permutation-invariant}}};
+    \node[op, right=8mm of pfx, yshift=-10mm] (lt)
+      {last item\\$x_t$\\[1pt]{\scriptsize the only recency cue}};
+    \draw[flow] (pfx.east) -- (mp.west);
+    \draw[flow] (pfx.east) -- (lt.west);
+    % ---- the MLP ---------------------------------------------------------
+    \node[trained, right=5mm of mp, yshift=-10mm] (mlp)
+      {MLP\\$384\to256\to256\to192$\\[1pt]{\scriptsize ReLU $+$ dropout}};
+    \draw[flow] (mp.east) -- (mlp.north west);
+    \draw[flow] (lt.east) -- (mlp.south west);
+    \node[edg] at ([xshift=-4.2mm]mlp.west) {$\|$};
+    % ---- retrieval, placed below to keep the picture inside the text ------
+    \node[op, below=9mm of mlp] (rk)
+      {$\hat z\to$ cosine rank\\{\scriptsize prefix excluded $\to$ top-10}};
+    \draw[flow] (mlp) -- (rk);
+    \coordinate (c1) at ([yshift=-3mm]tab.south |- current bounding box.south);
+    \coordinate (c2) at (rk.south |- c1);
+    \draw[data] (tab.south) -- (c1);
+    \draw[data] (c1) -- node[tag, above]
+      {the same frozen table is the retrieval target} (c2);
+    \draw[data] (c2) -- (rk.south);
+    \node[note] at ([yshift=-3.5mm]current bounding box.south west)
+      {\textbf{The same information, with the order discarded.} Both summaries
+       are strictly causal, so the objective, the padded batching and the
+       early stopping are reused \emph{verbatim} from
+       Figure~\ref{fig:topo-gru} --- but a mean weights the track from twenty
+       steps ago exactly like the one before last, and cannot represent ``A
+       then B'' differently from ``B then A''. Only the special-cased $x_t$ tap
+       carries any notion of recency, and the concatenation ($\|$) is this
+       model's entire account of sequence.};
+  \end{tikzpicture}
+  \caption{\texttt{seq-ann}, the GRU's non-recurrent twin: the recurrence of
+    Figure~\ref{fig:topo-gru} is replaced by two parameter-free summaries of
+    the same prefix --- a causal mean-pool concatenated with the last item's
+    latent --- feeding a plain three-layer ReLU MLP. Everything else is
+    literally the same code (\texttt{seq\_ann.py} imports
+    \texttt{make\_batches} and \texttt{step\_loss} from
+    \texttt{seq\_nexttrack}), which is what makes this pair a clean test of
+    the recurrence itself rather than of a training recipe. Visual convention
+    as in Figure~\ref{fig:topo-gru}: the two pooling operators are dashed
+    because they hold no parameters, and only the MLP is trained. The
+    defensible comparison is same-space: on \dsid{seq-20260715-030509}
+    (PCA-128) the pooled twin scores Recall@10 \num{0.0901} (\num{129} of
+    \num{1431}) against the GRU's \num{0.1146} (\num{164}), paired $\Delta$
+    $-\num{0.0245}$ $[-0.039, -0.011]$, a CI \emph{entirely below zero}.
+    \texttt{seq-ann} has no run at all on the canonical PCA-192 split, so it
+    never belongs in the same column as the \num{0.12299} bar.}
+  \label{fig:topo-ann}
+\end{figure}
+
+
+% ===========================================================================
+% 3. seq-dualgru --- two towers, a fusion head, and the pre-MLP variant
+% ===========================================================================
+\begin{figure}[ht]
+  \centering
+  \begin{tikzpicture}[topo]
+    \node[frozen, minimum width=19mm, minimum height=11mm] (pf)
+      {prefix\\latents\\$x_1\dots x_t$};
+    % ---- the three configurable causal views ----------------------------
+    \node[op, right=7mm of pf] (v2) {\texttt{delta}\\$x_t-x_{t-1}$};
+    \node[op, above=2.6mm of v2] (v1) {\texttt{latent}\\$x_t$};
+    \node[op, below=2.6mm of v2] (v3) {\texttt{cummean}\\$\frac{1}{t}\sum_{i\le t}x_i$};
+    \begin{scope}[on background layer]
+      \node[grp, fit=(v1)(v3)] (vg) {};
+    \end{scope}
+    \draw[data] (pf.east) -- (vg.west);
+    % ---- two independent towers -----------------------------------------
+    \node[trained, right=8mm of vg, yshift=9mm] (ta)
+      {tower A on \texttt{view\_a}\\GRU $h_a{=}256$\\[1pt]{\scriptsize own weights}};
+    \node[trained, right=8mm of vg, yshift=-9mm] (tb)
+      {tower B on \texttt{view\_b}\\GRU $h_b{=}256$\\[1pt]{\scriptsize own weights}};
+    \draw[flow] (vg.east) -- (ta.west);
+    \draw[flow] (vg.east) -- (tb.west);
+    % ---- concat + the two fusion depths ---------------------------------
+    \node[op, right=7mm of ta, yshift=-9mm] (cc)
+      {concat\\$h_a\|h_b$\\[1pt]{\scriptsize$512$}};
+    \draw[flow] (ta.east) -- (cc.north west);
+    \draw[flow] (tb.east) -- (cc.south west);
+    \node[won, right=7mm of cc, yshift=9mm] (f0)
+      {\texttt{fusion\_layers}${}=0$\\$512\to192$, linear};
+    \node[refuted, right=7mm of cc, yshift=-9mm] (f1)
+      {\texttt{fusion\_layers}${}=1$\\$512\to256\to192$\\[1pt]{\scriptsize$+$ ReLU $+$ dropout}};
+    \draw[flow] (cc.north east) -- (f0.west);
+    \draw[flow] (cc.south east) -- (f1.west);
+    % ---- the refuted per-step pre-MLP variant ---------------------------
+    \node[refuted, below=12mm of tb] (pb)
+      {\emph{variant} --- per-step pre-MLP\\on a tower:
+       Linear$(192{\to}256)$\\$+$ ReLU $+$ Dropout};
+    \draw[variant] (vg.south) |- (pb.west);
+    \draw[variant] (pb.north) -- (tb.south);
+    \node[note] at ([yshift=-3.5mm]current bounding box.south west)
+      {\textbf{Both heads emit the same $192$-d $\hat z$ and retrieve exactly
+       as in Figure~\ref{fig:topo-gru}.} The towers share nothing --- separate
+       modules, separate parameters --- and their per-step hidden states are
+       concatenated, so the combiner sees the towers' \emph{representations}
+       rather than their scores and gradients flow back into both. There is no
+       bidirectional mode by construction: a backward pass would let step $t$
+       read item $t+1$ and copy its own teacher-forcing target. All three views
+       are strictly causal for the same reason, and so is the pre-MLP, which is
+       applied \emph{timestep-wise}; it is drawn solid because it is trained,
+       red because it is refuted.};
+  \end{tikzpicture}
+  \caption{\texttt{seq-dualgru}: two recurrent towers with entirely separate
+    weights read the prefix in parallel and a head fuses their hidden states
+    --- the strongest available form of ``train the combination end-to-end so
+    the parts co-adapt''. Each tower's input is a configurable causal view
+    (\texttt{view\_a} / \texttt{view\_b}); the default is
+    \texttt{latent}/\texttt{latent}, i.e.\ two independent GRUs over the same
+    stream. Two of the boxes are coloured by the record rather than by the
+    design. Removing the MLP fusion head (\texttt{fusion\_layers}${}=0$,
+    green) \emph{beats} keeping it in three independent measurements, most
+    recently by $+\num{0.02655}$ $[+0.01398, +0.03913]$ CI$>$0 --- and with
+    some $9$--$10\%$ \emph{fewer} parameters, so the linear readout is the
+    family default; and the
+    per-step pre-MLP (red) loses the decisive single-tower ablation, Recall@10
+    \num{0.10901} (\num{156} of \num{1431}) against the baseline's \num{176},
+    paired $\Delta$ $-\num{0.01398}$ $[-0.02657, -0.00140]$ CI$<$0. Visual
+    convention as in Figure~\ref{fig:topo-gru}. The best dual arm reaches
+    \num{0.11880} and merely \emph{ties} the single-GRU bar, as does a
+    $0.098\%$ parameter-matched width control --- so capacity is not the
+    explanation.}
+  \label{fig:topo-dualgru}
+\end{figure}
+
+
+% ===========================================================================
+% 4. seq-embed --- a learned, weight-tied item table (DESIGN ONLY)
+% ===========================================================================
+\begin{figure}[ht]
+  \centering
+  \begin{tikzpicture}[topo]
+    \node[frozen, minimum width=20mm, minimum height=11mm] (ids)
+      {session prefix\\item \emph{ids}\\$i_1\dots i_t$};
+    \node[trained, right=10mm of ids, minimum height=11mm] (E)
+      {learned item\\table $E$\\[1pt]{\scriptsize$19{,}402\times192$}};
+    \node[trained, right=6mm of E] (gru)
+      {GRU $h{=}256$\\{\scriptsize$+$ dropout}};
+    \node[trained, right=6mm of gru] (hd)
+      {linear head\\{\scriptsize$256\to192$}};
+    \node[op, right=6mm of hd] (rk)
+      {$\cos(\hat z, E_v)$ over all\\$19{,}402$ rows $\to$ top-10};
+    \draw[flow] (ids) -- node[edg, above, inner sep=1pt] {gather} (E);
+    \draw[flow] (E) -- (gru);
+    \draw[flow] (gru) -- (hd);
+    \draw[flow] (hd) -- node[edg, above, inner sep=1pt] {$\hat z$} (rk);
+    % ---- the three modes -------------------------------------------------
+    \node[op, text width=64mm, align=flush left, anchor=south west] (md)
+      at ([xshift=4mm,yshift=8mm]E.north east)
+      {\texttt{embed\_mode} --- what the table $E$ actually is:\\
+       \textbf{\texttt{frozen}} $E=Z$, nothing trained (the reproduction gate)\\
+       \textbf{\texttt{residual}} $E=Z+\Delta E$: frozen content vector $+$ a
+       trained correction, so a cold item still has a position\\
+       \textbf{\texttt{free}} $E$ fully trained, optionally randomly initialised};
+    \draw[flow] (md.west) -- (E.north east);
+    % ---- weight tying: the same table is the retrieval target -----------
+    \coordinate (c1) at ([yshift=-8mm]E.south);
+    \coordinate (c2) at (rk.south |- c1);
+    \draw[tie] (E.south) -- (c1);
+    \draw[tie] (c1) -- node[tag, above, text=topogood]
+      {weight tying --- the \emph{same} table is\\the input embedding
+       \emph{and} the retrieval target} (c2);
+    \draw[tie] (c2) -- (rk.south);
+    % ---- the gradient loop that makes the geometry trainable ------------
+    \coordinate (t1) at ([yshift=5mm]rk.north |- current bounding box.north);
+    \coordinate (t2) at (E.north |- t1);
+    \draw[grad] (rk.north) -- (t1);
+    \draw[grad] (t1) -- node[tag, above, text=topobad]
+      {$\nabla$ --- one InfoNCE step moves the query \emph{and} every target:
+       the geometry itself is trainable} (t2);
+    \draw[grad] (t2) -- (E.north);
+    \node[note] at ([yshift=-3.5mm]current bounding box.south west)
+      {\textbf{Why the loop is the whole point.} In
+       Figures~\ref{fig:topo-gru}--\ref{fig:topo-dualgru} the retrieval space
+       is fixed and only the map into it is learned; here the space is a
+       parameter, shaped by next-track adjacency rather than inherited from a
+       reconstruction objective. That also creates a collapse hazard absent
+       everywhere else: with a learned table a plain cosine objective has a
+       trivial optimum at ``send every item to one point'', so only a
+       contrastive loss is admissible and \texttt{loss=cosine} is rejected
+       outright for the trained modes.};
+  \end{tikzpicture}
+  \caption{\texttt{seq-embed}, the one axis the record has not tested:
+    \textbf{a design, not a result}. No run of this predictor exists on any
+    dataset, it is absent from the server's registered predictor list, and
+    nothing here is a measured score. The item table $E$ is used twice, as the
+    GRU's input embedding and as the retrieval target (weight tying, the
+    GRU4Rec/SASRec formulation), so a single gradient step moves the query and
+    all the candidates together --- the return arrow along the top is what
+    makes the geometry trainable, and it is exactly what every other topology
+    in this document lacks. The three \texttt{embed\_mode} settings span the
+    space from a reproduction gate to a fully free table. What \emph{is}
+    measured is the data budget that bounds them: \num{73632} training steps
+    to fit \num{15816} item vectors, a median per-item training frequency of
+    \num{1}, only \num{3294} items occurring five or more times, and
+    \num{788} of \num{1431} test targets never appearing in any training
+    session --- so a \texttt{free} table cannot retrieve the cold
+    \SI{55}{\percent} at all and is capped at Recall@10 \num{0.4493}, whereas
+    \texttt{residual} keeps the content vector and with it the cold reach.
+    Visual convention as in Figure~\ref{fig:topo-gru}.}
+  \label{fig:topo-embed}
+\end{figure}
+
+
+% ===========================================================================
+% 5. seq-blend --- the champion
+% ===========================================================================
+\begin{figure}[ht]
+  \centering
+  \begin{tikzpicture}[topo]
+    \node[frozen, minimum width=18mm, minimum height=11mm] (pf)
+      {session\\prefix\\$i_1\dots i_t$};
+    % ---- the learned metric map: shared by two legs, bypassed by one -----
+    \node[trained, right=4mm of pf] (W)
+      {learned map $W$\\$192\times192$\\[1pt]{\scriptsize no bias, identity init}\\{\scriptsize
+       InfoNCE $\tau{=}0.07$}\\{\scriptsize $36{,}864$ params}};
+    % ---- the three legs -------------------------------------------------
+    \node[learnspace, right=3mm of W] (C)
+      {\Cp\ content-$k$NN in $W$-space\\$\max_{u}\cos(Wz_v,Wz_u)$\\[1pt]{\scriptsize
+       no parameters of its own}};
+    \node[trained, above=7mm of C] (R)
+      {\Rp\ projected GRU\\$h{=}256$, $394{,}944$ params};
+    \node[lookup, below=7mm of C] (M)
+      {$M$ first-order Markov counts\\$P(v\mid u)$, $u=$ last prefix item\\[1pt]{\scriptsize
+       Dirichlet trust $n_u/(n_u{+}8)$,}\\{\scriptsize artist/genre back-off; $0$ params}};
+    \draw[flow] (pf.east) -- (W.west);
+    % ---- the frozen item table W acts ON: the same Z as Figure~\ref{fig:topo-gru} --
+    \node[frozen, anchor=south east, minimum width=18mm] (Z)
+      at ([yshift=6mm]W.north west)
+      {frozen item latents $Z$\\{\scriptsize$19{,}402\times192$}};
+    \draw[data] (Z.south east) -- node[edg, left, inner sep=1.2pt] {$z_i$} (W.north west);
+    \draw[proj] (W.north east) -- (R.west);
+    \draw[proj] (W.east) -- (C.west);
+    \draw[data] (pf.south) |- node[tag, above, pos=0.55]
+      {item \emph{ids} only ---\\the $M$ leg bypasses $Z$ and $W$} (M.west);
+    % ---- the fixed combiner ---------------------------------------------
+    \node[op, right=3mm of C] (cb)
+      {z-normalise each leg\\over the candidate set,\\then average\\[1pt]{\scriptsize
+       equal thirds ---}\\{\scriptsize\emph{no learned weights}}};
+    \draw[flow] (R.east) -- node[edg, above, sloped, pos=0.55] {$s_{\Rp}$} (cb.north west);
+    \draw[flow] (C.east) -- node[edg, above, inner sep=1pt] {$s_{\Cp}$} (cb.west);
+    \draw[flow] (M.east) -- node[edg, above, sloped, pos=0.30] {$s_M$} (cb.south west);
+    \node[op, right=2mm of cb] (rk) {rank\\$\to$ top-10};
+    \draw[flow] (cb) -- (rk);
+    \node[note] at ([yshift=-3.5mm]current bounding box.south west)
+      {\textbf{Which legs are learned.} $W$ and the \Rp\ recurrence are
+       trained (\num{431808} parameters between them); \Cp\ has no parameters
+       of its own but retrieves inside $W$'s learned geometry, which is why it
+       is drawn dashed-blue; $M$ is a table of training-set transition counts,
+       drawn dashed-purple. The combiner is a fixed rule: each leg's
+       full-vocabulary score vector is z-scored over the admissible candidates
+       (every item minus those already in the prefix) and the three are
+       averaged with hard-coded equal weights. The z-scoring is the
+       load-bearing step --- it puts three incomparable score scales onto one
+       per-session scale while \emph{preserving} relative magnitude, so a
+       confidently-peaked leg can outvote two diffuse ones. Rank-only fusion,
+       which discards that magnitude, loses by $-\num{0.029}$ CI$<$0.};
+  \end{tikzpicture}
+  \caption{\texttt{seq-blend} with \texttt{projection=true}, the champion:
+    three full-vocabulary score vectors, z-normalised over the candidate set
+    and averaged in fixed equal thirds. $W$ acts on the \emph{frozen item
+    latents} $Z$ of Figure~\ref{fig:topo-gru} --- it warps the retrieval geometry,
+    it does not read the prefix ids directly --- and it is shared by two of the
+    three legs and bypassed by the third; that is the whole mechanism. $W$ is fit by in-batch InfoNCE on consecutive within-train
+    pairs, which rebuilds the retrieval metric from ``reconstruct the item
+    matrix'' into ``what follows what''; both legs that retrieve by cosine in
+    that space improve --- the parameter-free content-$k$NN leg more than
+    doubles, \num{0.0685} to \num{0.1516}, and the recurrent leg rises from
+    \num{0.1230} to $\approx$\num{0.172} --- while the item-ID lookup is
+    untouched at \num{0.106918}. The two projected-leg standalone figures come
+    from the off-server driver of the 2026-07-18 campaign and have no server
+    run of their own; only the $M$ leg's number is a canonical-split run.
+    Together the three legs reach Recall@10 \num{0.21174} (\num{303} of
+    \num{1431}), paired $\Delta$ over the unprojected three-leg blend
+    $+\num{0.0259}$ $[+0.012, +0.041]$, a CI entirely above zero and robust
+    across three seeds. Visual convention as in Figure~\ref{fig:topo-gru}.}
+  \label{fig:topo-blend}
+\end{figure}
+
+
+% ===========================================================================
+% 6. seq-stacker --- the learned combiner
+% ===========================================================================
+\begin{figure}[ht]
+  \centering
+  \begin{tikzpicture}[topo]
+    \node[frozen, minimum width=18mm, minimum height=11mm] (pf)
+      {session\\prefix\\$i_1\dots i_t$};
+    \node[trained, right=6mm of pf] (R)
+      {$R$ GRU $h{=}256$\\[1pt]{\scriptsize trained separately}};
+    \node[lookup, above=6mm of R] (M) {$M$ Markov counts};
+    \node[trained, below=6mm of R] (A)
+      {$A$ pooled MLP\\[1pt]{\scriptsize trained separately}};
+    \draw[flow] (pf.east) -- (M.west);
+    \draw[flow] (pf.east) -- (R.west);
+    \draw[flow] (pf.east) -- (A.west);
+    % ---- the per-candidate feature row ----------------------------------
+    \node[op, right=6mm of R] (fx)
+      {per-candidate feature row\\$[\,s_M,\ s_R,\ s_A,\ \log(1{+}\text{plays}),$\\$\text{recency},\
+       \text{artist match},\ \text{genre match}\,]$};
+    \draw[flow] (M.east) -- (fx.north west);
+    \draw[flow] (R.east) -- (fx.west);
+    \draw[flow] (A.east) -- (fx.south west);
+    \node[refuted, right=5mm of fx] (xgb)
+      {XGBoost meta-learner\\$200$ rounds, depth $6$\\[1pt]{\scriptsize\texttt{binary:logistic}}};
+    \draw[flow] (fx) -- (xgb);
+    \node[op, below=9mm of xgb] (rk)
+      {score all $19{,}402$ items\\$\to$ top-10};
+    \draw[flow] (xgb) -- (rk);
+    % ---- the two failure mechanisms, marked on the diagram --------------
+    \node[refuted, text width=56mm, align=flush left, anchor=north west] (tr)
+      at ([yshift=-10mm]fx.south west)
+      {\textbf{Training rows}: $1$ positive $+$ $50$ popularity-sampled
+       negatives per train session, i.e.\ \num{5723} positives, against the
+       \num{73632} teacher-forced steps its own $R$ leg trains on
+       ($12.9\times$ less signal) --- and a decision surface calibrated on
+       $51$ candidates ($0.26\%$ of the catalogue) is then asked to rank all
+       \num{19402}.};
+    \draw[grad] (tr.north east) -- (xgb.south west);
+    \node[note] at ([yshift=-3.5mm]current bounding box.south west)
+      {\textbf{Why the shape matters.} A $200$-round depth-$6$ booster is
+       piecewise \emph{constant}, so ranking \num{19402} candidates with it
+       produces large tied blocks that the harness breaks by item index. The
+       fixed z-blend of Figure~\ref{fig:topo-blend} is instead a strictly
+       monotone continuous function of the leg scores: it preserves each leg's
+       internal ordering exactly and can only trade the legs off against one
+       another.};
+  \end{tikzpicture}
+  \caption{\texttt{seq-stacker}, the learned counterpart of
+    Figure~\ref{fig:topo-blend}'s fixed rule: the same separately-trained base
+    legs, but their per-candidate scores become columns of a feature row
+    alongside four cheap candidate features, and a gradient-boosted tree
+    learns the combination. It earns a diagram because its failure is
+    informative --- with the \texttt{markov}, \texttt{gru} and \texttt{ann}
+    legs it reaches Recall@10 \num{0.085255} (\num{122} of \num{1431}),
+    \emph{below its own GRU base leg} at \num{0.12299}, paired $\Delta$
+    $-\num{0.0377}$ $[-0.056, -0.020]$ CI$<$0. The red callout names the two
+    mechanisms: supervision starvation, since the meta-learner gets one
+    labelled event per session where its base leg gets one per prefix
+    position, and a train/serve candidate mismatch. The booster is drawn solid
+    because it is trained and red because it is refuted; the feature row and
+    the ranking step are dashed because they hold no parameters. Visual
+    convention as in Figure~\ref{fig:topo-gru}. This is one of four
+    independent learned-combiner nulls, the others being reciprocal-rank
+    fusion, oracle weights fitted on the test labels, and the jointly-trained
+    dual tower of Figure~\ref{fig:topo-dualgru}.}
+  \label{fig:topo-stacker}
+\end{figure}

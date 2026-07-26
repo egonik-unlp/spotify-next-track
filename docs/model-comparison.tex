@@ -1,0 +1,2209 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.6cm]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds,calc}
+\usepackage{siunitx}
+\sisetup{group-digits=integer}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{seqsplit}
+\graphicspath{{figures/}}
+\setlength{\emergencystretch}{3em}
+\newcommand{\runid}[1]{\texttt{\small\seqsplit{#1}}}
+\newcommand{\dsid}[1]{\texttt{\small #1}}
+\newcommand{\best}[1]{\textbf{#1}}
+\newcommand{\Rp}{\ensuremath{R'}}
+\newcommand{\Cp}{\ensuremath{C'}}
+
+\title{Next-Track Session Recommendation: Which Trained Models Win, and Why}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document compares the \emph{trained} models built for the next-track task
+in this lab and argues why the successful ones succeed; the markdown reports in
+\texttt{experiments/} are the primary record and this synthesis transcribes
+rather than recomputes their numbers. The task is next-item \emph{retrieval}:
+given a listening \emph{session} (an ordered sequence of tracks), rank the
+\num{19402}-item catalog and recover the next \emph{distinct} track the user
+actually played. The board is scored on one leak-free chronological split
+(\dsid{seq-20260715-131139}: \num{7154} sessions / \num{19402} items,
+\num{5723} train / \num{1431} test) and is denominated in \textbf{Recall@10},
+the record's comparability currency; the server's \emph{declared} primary metric
+is \textbf{holisticness@10}, a four-factor list-quality composite that has had
+\emph{three} incompatible code generations and that orders the models almost
+inversely, and this document keeps both boards distinct rather than silently
+choosing one. Six trained predictor families are in scope
+(Section~\ref{sec:zoo}); pure table lookups over the dataset appear only as
+reference bars and as blend \emph{legs}, never as \emph{compared} models. The
+one fact that explains most of the results is that \SI{55}{\percent} of test
+targets are \emph{cold} --- never seen in any training session --- which caps
+every seen-items-only mechanism at Recall@10 \num{0.4493} and makes retrieval in
+a \emph{learned content geometry}, not per-item memory, the only channel to the
+majority of the test set. On that reading the record has one champion --- the
+promoted \Rp+M+\Cp{} blend at Recall@10 \num{0.2117} (\num{303} of \num{1431}),
+paired $\Delta$ over the unprojected three-leg crown $+\num{0.0259}$
+$[+0.012,+0.041]$, CI \emph{entirely above zero}, seed-robust across three seeds
+and hardened on a second, colder split at $+\num{0.0426}$
+$[+\num{0.0280},+\num{0.0573}]$ --- a single-model bar of \num{0.12299}
+(\num{176} of \num{1431}) that no topology change has beaten \emph{with a CI
+above zero}, five refuted design axes whose mechanisms are now \emph{measured}
+rather than guessed (dual-tower view fusion, a ReLU pre-encoder, an MLP fusion
+head, four learned combiners, and depth/width/direction), and an eval-time
+re-ranking policy --- maximal marginal relevance, MMR --- that is the first
+honest lever on the crown and from which \textbf{nothing has been promoted}. The
+honest frame for the nulls is statistical: at $n=\num{1431}$ the paired
+half-width is ${\sim}\num{0.0124}$ on Recall@10 against a whole-family spread of
+\num{0.028}, so large harms were reliably detected while \emph{moderate wins
+were never detectable at all}.
+\end{abstract}
+
+\section{Introduction: one split, one number, and why the cold half decides everything}
+\label{sec:intro}
+
+\emph{Rationale.} Every model in this document solves the same problem. A
+listening \emph{session} is an ordered sequence of tracks; the model reads a
+prefix and must produce a ranking of the entire \num{19402}-item catalog such
+that the track the user actually played next lands near the top. Two separate
+conventions shape that, and the phrase ``next-distinct'' is easy to misread as
+covering both. First, the \textbf{target} is the next \emph{distinct} track: an
+immediate repeat of something already in the prefix is skipped over when the
+label is constructed, so the task is not repeat detection in disguise --- this
+is the operation the name refers to. Second, and independently, the
+\textbf{candidate set} excludes every item already present in the prefix, which
+is the parity convention the Markov leg is built on; a model is therefore never
+credited for re-proposing a track the session already contains.
+
+\emph{The one artifact --- and the three places it is not.} The board is scored
+on \dsid{seq-20260715-131139}, split \emph{chronologically by session start} at
+2024-08-24T14:28:02Z into \num{5723} train and \num{1431} test sessions, with
+every item represented by a frozen \num{192}-dimensional latent
+(\dsid{spotify\_tracks\_song\_pca192}). Three groups of numbers below are
+deliberately \emph{not} on that artifact and are named at every use: the
+\texttt{seq-ann} pooled twin and one stacker arm (\dsid{seq-20260715-030509},
+PCA-128), the second-split hardening of the champion
+(\dsid{seq-20260718-211238}), and the 2026-07-13/14 topology and first-blend
+campaigns, which predate it (\dsid{seq-20260713-014226}, built on the earlier
+\emph{AE-64} item space --- a \num{64}-dimensional autoencoder embedding of the
+same track features, which a compression bake-off later replaced with PCA-192
+because the linear projection retrieved better at every dimension tested). Their \emph{verdicts} are paired $\Delta$s against
+a same-split anchor and do travel; their \emph{levels} do not, and must never be
+read beside the canonical-split column.
+
+\emph{The hard fact.} A test target is \textbf{cold} if its item index never
+appears in \emph{any} of the \num{5723} training sessions. On this split
+\num{788} of \num{1431} targets are cold --- a rate of \num{0.550664}, which
+independently reproduces the manifest's declared \num{0.5507}. The consequence
+is a hard structural ceiling: any mechanism that can only retrieve items it
+observed during training --- a co-occurrence table, a first-order Markov bigram,
+a free per-item embedding table --- is capped at Recall@10 $\num{643}/\num{1431}
+= \num{0.449336}$ no matter how good it is. Everything above that line has to
+come from somewhere else, and on this corpus the only ``somewhere else'' is
+\emph{content geometry}: a track that never appeared in training still has a
+feature vector, hence a position in the item space, hence a chance of being
+retrieved.
+
+\emph{The second hard fact.} The supervision budget is thin. Under per-step
+teacher forcing the \num{5723} training sessions yield \num{73632}
+(prefix, next-item) pairs against a \num{19402}-item retrieval catalog, of which
+only \num{15816} items are ever observed in training; the \emph{median} observed
+item appears exactly \emph{once}, the mean \num{5.017} times, and only
+\num{3294} items (\SI{17}{\percent} of the catalog) reach five occurrences.
+These figures were recomputed here from the dataset artifact and agree with the
+\textsc{data budget} block in the header of
+\texttt{predictors/seq\_embed.py}. Read together with the cold rate they explain
+the shape of the entire record: every win on this board came from improving the
+\emph{shared} latent geometry, and every attempt to spend parameters per item,
+per leg or per extra tower failed.
+
+\emph{Interpretation.} The rest of this document is one argument in that frame.
+Section~\ref{sec:machinery} defines the machinery; Section~\ref{sec:metrics}
+handles the awkward fact that this lab now has two primary metrics;
+Sections~\ref{sec:zoo}--\ref{sec:board} lay out the trained models and their
+scores; Sections~\ref{sec:fusion}--\ref{sec:mmr} explain the four things that
+work; Section~\ref{sec:failures} explains the five that do not, with a measured
+mechanism for each; Section~\ref{sec:power} reframes those nulls as upper
+bounds; and Section~\ref{sec:gains} states what the record implies about where
+gains on this problem actually come from.
+
+{\rightskip=0pt plus 2em \emph{Sources: \texttt{PROJECT-FACTS.md}, and \texttt{2026-\allowbreak 07-\allowbreak 15c-\allowbreak nexttrack-\allowbreak phase2-\allowbreak model-\allowbreak sweep.md}.}\par}
+
+\clearpage
+\section{Background: the machinery, defined once}
+\label{sec:machinery}
+
+\input{figures/topo-style}
+
+This section is for a reader who knows mathematics and machine learning but not
+recommender-systems conventions. Nothing below is assumed later.
+Figure~\ref{fig:protocol} draws the evaluation protocol every number in this
+document is produced by; the topology diagrams of Section~\ref{sec:zoo} all
+presuppose it.
+
+\begin{figure}[ht]
+  \centering
+  \begin{tikzpicture}[topo]
+    % ---- row 1: the session is cut into a prefix and one held-out target ----
+    \node[frozen, minimum width=38mm, minimum height=8.5mm] (sess)
+      {one \emph{test} session, in play order\\$[\,i_1,\ i_2,\ \dots,\ i_{L-1}\ \mid\ i_L\,]$};
+    \node[frozen, right=8mm of sess, minimum width=22mm, minimum height=8.5mm] (pfx)
+      {\textbf{prefix} $i_1\dots i_{L-1}$};
+    \node[trained, right=8mm of pfx, minimum width=28mm, minimum height=8.5mm] (mod)
+      {model $\to\ \hat{y}\in\mathbf{R}^{192}$};
+    \draw[flow] (sess.east) -- (pfx.west);
+    \draw[flow] (pfx.east) -- (mod.west);
+    % ---- the held-out target: the other half of the same cut ---------------
+    \node[won, anchor=north west, minimum width=28mm, minimum height=6.4mm]
+      (tgt) at ([yshift=-4.4mm]sess.south west)
+      {\textbf{target} $i_L$ --- the next \emph{distinct} track};
+    \draw[data] ([xshift=-5mm]sess.south) -- ([xshift=-5mm]tgt.north);
+    % ---- row 2: rank the catalog, cut to ten, score against the target -----
+    \node[op, anchor=north west, minimum width=38mm, minimum height=8.5mm]
+      (rank) at ([yshift=-5.5mm]tgt.south west)
+      {rank all \num{19402} items minus\\the prefix, by $\cos(\hat{y},z_i)$};
+    \node[op, right=8mm of rank, minimum width=22mm, minimum height=8.5mm] (top)
+      {top-\num{10} list};
+    \node[won, right=8mm of top, minimum width=28mm, minimum height=6mm] (hit)
+      {$i_L$ \emph{in} it $\Rightarrow$ \textbf{hit}};
+    \node[refuted, below=2.6mm of hit, minimum width=28mm, minimum height=6mm] (miss)
+      {$i_L$ \emph{not} in it $\Rightarrow$ \textbf{miss}};
+    \draw[flow] (mod.south) -- ++(0,-5.4mm) -| ([xshift=-4mm]rank.north east);
+    \draw[flow] (rank.east) -- (top.west);
+    \draw[tie] (top.east) -- (hit.west);
+    \draw[variant] (top.east) -- (miss.west);
+    \node[tag, below=1.0mm of rank]
+      {the split cut is chronological --- no test session is ever trained on};
+    \node[note] at ([yshift=-3.5mm]current bounding box.south west)
+      {\textbf{How every number in this document is produced.} Repeat the above
+       for each of the \num{1431} test sessions. \emph{Recall@10} is the fraction
+       that are hits (reported as ``value (raw hits)'', e.g.\ \num{0.21174}
+       (\num{303})); \emph{MRR} averages $1/\mathrm{rank}(i_L)$ over the full
+       ranking; the \emph{graded} diagnostics ask instead whether some top-ten
+       candidate shares $i_L$'s artist or genre, and music@10 how close the
+       nearest of the ten is to $i_L$ in the content metric $M$. Each session is
+       additionally labelled \textbf{warm} or \textbf{cold} by whether $i_L$'s
+       item index occurs anywhere in the \num{5723} training sessions ---
+       \num{643} warm, \num{788} cold --- which is the partition
+       Section~\ref{sec:fusion} turns on. During \emph{training} the same picture
+       is applied at \emph{every} prefix position of every training session
+       rather than only the last (``teacher forcing'', below), which is where the
+       \num{73632} supervision events come from.};
+  \end{tikzpicture}
+  \caption{The evaluation protocol, once. One test session is cut into an
+    ordered prefix and a single held-out target; the model turns the prefix into
+    one \num{192}-dimensional point; the whole catalog minus the prefix is ranked
+    by cosine to that point; the top ten either contains the target or does not.
+    Everything else in this document is an aggregate over \num{1431} such trials,
+    or a property of the ten returned items rather than of the target.
+    Solid borders mark trained components, dashed borders frozen or
+    parameter-free ones --- the convention reused by
+    Figures~\ref{fig:topo-gru}--\ref{fig:topo-stacker}.}
+  \label{fig:protocol}
+\end{figure}
+
+\begin{description}
+  \item[Cosine retrieval in a frozen item space.] Every model here scores
+  candidates the same way: it emits a single predicted vector $\hat{y}\in
+  \mathbf{R}^{192}$ (or a full score column, for the lookup legs), and candidate
+  $i$ is ranked by $\cos(\hat{y}, z_i)$ against the \emph{frozen} item latent
+  $z_i$. The item table is not a parameter --- it is read twice, once to embed
+  the prefix and once as the retrieval target. This is why the geometry of that
+  table is load-bearing, and why the single largest win on record is a learned
+  \emph{warp} of it (Section~\ref{sec:projection}).
+  \item[Teacher forcing (per-step supervision).] For a session $[a,b,c,d]$ the
+  supervised steps are $b\mid[a]$, $c\mid[a,b]$, $d\mid[a,b,c]$: at every
+  timestep the model predicts the \emph{next} item from the prefix so far, so one
+  session of length $L$ yields $L-1$ training examples. On this split that is
+  \num{73632} supervision events rather than \num{5723}. The distinction is not
+  bookkeeping --- two of the worst results on record are caused by an
+  architecture that forced a switch to a one-target-per-session objective
+  (Sections~\ref{sec:fail-combiners} and~\ref{sec:fail-topology}).
+  \item[In-batch InfoNCE.] The contrastive objective every trained model here
+  uses. For a minibatch of $B$ (prefix, target) pairs, embed the predictions
+  $a_i$ and the targets $p_j$, $L2$-normalize both, form the $B\times B$ logit
+  matrix $(a\cdot p^{\top})/\tau$ and apply cross-entropy with the
+  \emph{diagonal} as the labels. The $B-1$ off-diagonal targets are the
+  ``in-batch negatives'' --- free negatives obtained by reusing every other row's
+  positive. The temperature $\tau$ (\num{0.07} throughout unless stated) is the
+  softmax sharpness: smaller $\tau$ demands a larger margin over the negatives.
+  InfoNCE matters because ranking rewards a representation that \emph{separates}
+  the true next item from distractors, which a contrastive loss optimizes
+  directly and a pointwise cosine regression does not.
+  \item[The z-blend (score-level fusion).] Each leg produces a full score column
+  over the admissible candidates (all catalog items minus the prefix). Each
+  column is z-scored \emph{over that candidate set} and the columns are averaged
+  with hard-coded weights: equal thirds for the three-leg recipe,
+  $\alpha z(\text{GRU}) + (1-\alpha)z(\text{Markov})$ with $\alpha=\num{0.5}$
+  for the two-leg one. The z-scoring is the load-bearing detail: it puts legs
+  whose raw scores live on incomparable scales onto a common per-session scale
+  \emph{while preserving relative magnitude}, so a leg that is confidently right
+  about one candidate can outvote two diffusely uncertain legs.
+  \item[Two spaces, and which one each quantity lives in.] This is the single
+  most confusing thing in the setup and it is stated once, here. \textbf{Retrieval}
+  happens in the frozen PCA-192 item space: a candidate's rank is
+  $\cos(\hat{y},z_i)$ with $z_i\in\mathbf{R}^{192}$. \textbf{Every list-quality
+  facet}, by contrast, is a cosine in a \emph{different}, larger space: the
+  \num{517}-dimensional intrinsic \emph{content metric} $M$ (the
+  \texttt{balanced} dial of \dsid{spotify\_tracks\_content\_metric}). music@10,
+  mood\_coh@10, ild@10 \emph{and} MMR's diversity penalty are all cosines in
+  $M$; nothing in that group is computed in PCA-192. That split is exactly why
+  the facets in Section~\ref{sec:mmr} move together --- one greedy penalty in
+  $M$ moves three quantities that are all defined in $M$ --- and why an
+  eval-time re-rank can raise them while barely touching a ranking produced in
+  PCA-192.
+  \item[MMR (maximal marginal relevance) re-ranking.] A purely \emph{eval-time}
+  policy: take the top \texttt{mmr\_pool} candidates in base-score order,
+  min-max normalize their scores to $\mathrm{rel}\in[0,1]$ over that pool, then
+  build the top-$k$ greedily by
+  \[
+    \arg\max_i\ \lambda\,\mathrm{rel}(i) - (1-\lambda)\max_{j\in\text{selected}}
+      \cos(M_i, M_j),
+  \]
+  with $M$ the \num{517}-dimensional content metric just defined. In words: keep
+  taking the most relevant remaining track, minus a penalty equal to its
+  similarity to whichever already-chosen track it most resembles. The penalty is
+  \emph{continuous} --- there is no similarity threshold and no cutoff radius;
+  a highly relevant track can survive close to an already-picked one.
+  $\lambda=1$ recovers the base order exactly, so it is an exact identity gate;
+  $\lambda\to0$ ignores relevance and merely spreads the list out sonically.
+  Crucially the \emph{trained weights are bit-identical} across $\lambda$ arms of
+  one model, which is what makes those comparisons far sharper than
+  architecture comparisons (Section~\ref{sec:power}).
+  \item[Participation ratio.] Used once, in
+  Figure~\ref{fig:mc-candidate-eigen}. Take the top candidates' latents,
+  weight each by its share of the score mass, centre them, and let $s_1\ge s_2\ge
+  \dots$ be the resulting covariance eigenvalues normalized to sum to one. Then
+  $\mathrm{pr}=1/\sum_i s_i^2$ is the \emph{effective number of directions} the
+  belief spreads over: $\mathrm{pr}=1$ when all the variance is on one axis, and
+  $\mathrm{pr}=m$ when $m$ directions carry equal shares. It is not entropy over
+  items --- a tight cluster of fifty near-identical tracks has high item entropy
+  but $\mathrm{pr}\approx1$.
+  \item[CKA (centered kernel alignment).] A scalar in $[0,1]$ measuring how
+  similar two layers' \emph{representation geometries} are, computed from their
+  centred Gram matrices; $1$ means the two carry the same pairwise-similarity
+  structure up to rotation and scaling, $0$ means unrelated. A middling value
+  such as \num{0.458} therefore says the two representations are \emph{partly}
+  distinct, not that a fraction of them is new information.
+  \item[Paired bootstrap.] The decisive statistic throughout is a \emph{paired}
+  per-session $\Delta$: resample the \num{1431} test sessions with replacement
+  (\num{2000} resamples, rng 1337), recompute both arms' metrics on the
+  \emph{same} resampled index set, and report the 95\% interval of the
+  difference. A CI entirely above zero is a win, entirely below is a loss, and a
+  CI straddling zero is a \emph{tie}. Marginal (unpaired) CIs are also reported
+  for the champion rows but are much wider and much weaker.
+  \item[The $\pm\num{0.015}$ band --- a policy constant, not a measurement.] One
+  number does two jobs in this record and it is worth separating them from the
+  measured half-width. As a \emph{practical tie band} it declares any Recall@10
+  difference under \num{0.015} not worth acting on; as an \emph{anti-degenerate
+  recall floor} it says a holisticness gain does not count unless Recall@10 stays
+  within \num{0.015} of the reference. In both roles it is a chosen bright line,
+  deliberately set \emph{above} the measured cross-model paired half-width of
+  ${\sim}\num{0.0124}$ (Section~\ref{sec:power}) so that it is conservative
+  rather than borderline. It is not pre-registered as a noise estimate and it
+  should never be quoted as one --- the measured per-comparison half-widths in
+  this document range from \num{0.000382} to \num{0.018169} depending on the
+  pairing structure.
+\end{description}
+
+{\rightskip=0pt plus 2em \emph{Source: \texttt{PROJECT-FACTS.md}.}\par}
+
+\clearpage
+\section{Two boards, three definitions: Recall@10 is the currency, holisticness@10 is the declared primary}
+\label{sec:metrics}
+
+\emph{Rationale.} Two things are true at once and the document would be
+dishonest if it collapsed them. The experimental record's \emph{comparability
+currency} is Recall@10: the whole leaderboard is denominated in it, every paired
+decision rule is stated on it, and it is stable across every code change of the
+past month. The live server's \emph{declared} primary metric, however, is
+holisticness@10: \texttt{GET /api/best-models} returns
+\texttt{primary\_metric} $=$ \texttt{holisticness@10} and
+\texttt{domain.toml [metrics].primary} has read the same since 2026-07-23. The
+two orderings are close to inverted, so which board you read decides who is
+champion.
+
+\begin{description}
+  \item[Recall@10 ($\uparrow$).] The fraction of test sessions whose held-out
+  next track appears in the top ten retrieved. Reported throughout as
+  ``\num{0.21174} (\num{303})'' --- the value and the raw hit count out of
+  \num{1431}.
+  \item[MRR ($\uparrow$).] Mean reciprocal rank of the true next track --- the
+  average of $1/\mathrm{rank}$, so it rewards getting the truth to position 1
+  rather than position 9.
+  \item[artist@10 / genre@10 ($\uparrow$).] \emph{Graded} relevance --- credit
+  in degrees rather than the binary hit/miss of Recall@10. Both ask whether
+  \emph{some} top-ten candidate shares the true next track's artist,
+  respectively its primary genre. Exact recall is modest here by construction,
+  and landing the right artist ${\sim}\SI{33}{\percent}$ of the time and the
+  right genre ${\sim}\SI{40}{\percent}$ is what the models actually deliver.
+  \textbf{These two columns must not be read as absolute quality.} Their chance
+  floors are high and \emph{have not been measured} on this corpus --- there are
+  far fewer distinct genres than items, so a random top ten hits the right genre
+  vastly more often than it hits the right track. For contrast, chance Recall@10
+  is $10/\num{19402}\approx\num{0.00052}$, and the popularity lookup ---
+  which is not random but is the crudest real baseline --- lands \num{1} hit in
+  \num{1431} (Recall@10 \num{0.00070}) at genre@10 well above zero. Use
+  artist@10 / genre@10 only to compare models against each other.
+  \item[music@10 ($\uparrow$).] The \emph{grounding} metric: the mean, over
+  sessions, of the best cosine \emph{in the \num{517}-dimensional content metric
+  $M$} (Section~\ref{sec:machinery}) between the \emph{true} next track and the
+  ten retrieved candidates. It equals
+  \num{1.0} whenever the exact truth is in the list, so it is a smooth superset
+  of Recall@10 that also credits landing something that merely \emph{sounds
+  like} the real continuation.
+  \item[mood\_coh@10 ($\uparrow$).] Mean cosine, again in $M$, of the top ten to
+  the \emph{prefix}'s mood centroid --- the mean $M$-vector of the tracks already
+  played. It asks whether the list belongs to the session it continues, and it
+  can go \emph{negative} for a list that is unrelated to the prefix.
+  \item[ild@10 ($\uparrow$).] Intra-list diversity: mean pairwise $1-\cos$
+  \emph{within} the top ten, again in $M$. Note that this is exactly the
+  quantity MMR's penalty term (also a cosine in $M$) pushes down, which is why
+  Section~\ref{sec:mmr}'s lever raises it by construction.
+  \item[artist\_adj@10 ($\downarrow$).] The ``eagerness'' or seed-echo rate: the
+  fraction of the top ten sharing the artist of the \emph{seed} track --- the
+  \emph{last item of the prefix}, the track notionally still playing. It measures
+  how much a ranker simply parrots what is on. \textbf{Lower is better.}
+  \item[artist\_conc@10 ($\downarrow$).] Normalized Herfindahl concentration
+  over the top ten's artists: with $p_a$ the share of slots held by artist $a$
+  and $n=10$, $(\sum_a p_a^2 - 1/n)/(1-1/n)$, which is \num{0} when every slot
+  is a different artist and \num{1} when one artist holds the whole list. It
+  exists because artist\_adj@10 is blind to a list of ten tracks by one
+  \emph{other} artist --- a blind spot that is widest precisely on the
+  pathological models. The out-of-scope \texttt{seq-mood} predictor (promoted
+  under the definition name \texttt{mood-session}; called \texttt{seq-mood}
+  throughout this document) reads artist\_adj \num{0.003564}, apparently
+  ``perfectly non-eager'', at artist\_conc \num{0.329063} --- a ${\sim}90\times$
+  gap. Note that the \emph{popularity} lookup also reads artist\_adj
+  ${\approx}\num{0.003}$ (\num{0.002655}), for the opposite reason: it returns
+  the same ten globally popular tracks for every session and so echoes no seed at
+  all. Two different pathologies, one apparently virtuous number.
+  \textbf{Lower is better.}
+\end{description}
+
+\paragraph{The crown, and its three generations.} holisticness@10 multiplies
+four aggregate facets. The \emph{live} (third) definition is
+\[
+  \begin{aligned}
+    H = {}& \mathrm{clamp}(\text{mood\_coh},0)\ \times\ \text{ild}
+      \ \times\ \bigl(1-\mathrm{clamp}(\max(\text{artist\_adj},\text{artist\_conc}),0,1)\bigr)\\
+      &{}\times\ \mathrm{clamp}\!\left(\frac{\text{music@10}-\num{0.34}}{\num{0.66}},0,1\right).
+  \end{aligned}
+\]
+Three of those four factors are properties of the \emph{returned list} rather
+than of its correctness, so a ranker that has given up on identifying the actual
+next track can maximize them all at once. That is not a fear, it is a
+measurement: under the original three-factor form
+$\mathrm{clamp}(\text{mood\_coh},0)\times\text{ild}\times(1-\text{artist\_adj})$
+the out-of-scope \texttt{seq-mood} model held best-models rank 1 at $H$
+\num{0.2332} on Recall@10 \num{0.0238} (\num{34} of \num{1431}), and a
+degenerate two-tower arm that reads only the slow session centroid took rank 2
+at Recall@10 \num{0.06639} (\num{95} of \num{1431}). Two fixes followed, both
+load-bearing: the \emph{grounding} factor built on music@10 (rescaled, because
+music@10's raw spread across models is far narrower than the three-factor
+product's, so multiplying in the raw value does not stop the ignore-the-user
+mode), and an anti-degenerate \textbf{recall floor} applied as a decision rule
+--- an $H$ gain does not count unless Recall@10 stays within $\pm\num{0.015}$ of
+the reference. Table~\ref{tab:hgen} shows what those revisions did to identical
+predictions.
+
+\begin{table}[ht]
+  \centering
+  \caption{The same predictions under all three holisticness@10 generations ---
+    gen 1 (three-factor, to 2026-07-24), gen 2 (grounded four-factor with
+    music floor \num{0.185}, 2026-07-25), gen 3 (concentration-aware, eagerness
+    becomes $\max(\text{artist\_adj},\text{artist\_conc})$ and the floor rises to
+    \num{0.34}; live since 2026-07-26). Values change by up to $6.4\times$ and
+    \emph{so does the ordering}: a stored \texttt{holisticness\_at\_k} is
+    comparable only \emph{within} one generation. This is survivable because
+    every input facet is stored per row in each run's \texttt{predictions.json},
+    so any generation is exactly recomputable for any past run --- the
+    generation labels used in this document were re-derived that way and matched
+    by exact residual (\numrange{0}{3e-7}). Recall@10 is given for scale.
+    \textsuperscript{*}~run \protect\runid{run-20260726-161801-0df6f} and its
+    bit-identical twin \protect\runid{run-20260725-143502-12fe6} are the same
+    configuration with the same facets, and they \emph{store} $H$ \num{0.022841}
+    and \num{0.146354} respectively --- the cleanest single demonstration that a
+    stored value carries its generation with it.
+    Every cell here is a value that exists: gen-1 and gen-2 figures are as
+    recorded in the campaign reports, gen-3 figures as returned by the live API.
+    The only ``---'' in the table is the one genuinely uncomputable cell, the
+    degenerate arm's gen-3 value: that run is remote-only, never emitted
+    \texttt{artist\_conc\_at\_k}, and so cannot be rescored under a formula that
+    needs it. Note also \texttt{seq-mood}'s gen-3 value: it is \num{0.0}
+    \emph{exactly}, because its music@10 of \num{0.33837} falls below the
+    grounding floor \num{0.34} and the fourth factor clamps to zero. That single
+    number is the grounding factor working as designed.
+    \emph{Sources: \texttt{2026-\allowbreak 07-\allowbreak 25-\allowbreak nexttrack-\allowbreak dual-\allowbreak tower-\allowbreak fusion-\allowbreak scan.md},
+    \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak pre-\allowbreak encoder-\allowbreak scan.md},
+    and \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak mmr-\allowbreak lambda-\allowbreak frontier.md}.}}
+  \label{tab:hgen}
+  {\small\setlength{\tabcolsep}{6pt}\begin{tabular}{lcccc}
+    \toprule
+    Run & R@10 (raw) & $H$ gen 1 & $H$ gen 2 & $H$ gen 3 (live) \\
+    \midrule
+    GRU h256 baseline & 0.12299 (176) & 0.141723 & 0.0470862 & 0.024538 \\
+    GRU h425 (width control) & 0.12089 (173) & 0.13850 & 0.046677 & 0.024872 \\
+    MLP256$\to$GRU256 (S1) & 0.10901 (156) & 0.14499 & 0.047132 & 0.024102 \\
+    Dual latent/latent, $f{=}1$\textsuperscript{*} & 0.10273 (147) & 0.146354 & 0.046612 & 0.022841 \\
+    Dual cummean/cummean (degenerate) & 0.06639 (95) & 0.19715 & 0.050436 & --- \\
+    \texttt{seq-mood} (out of scope) & 0.0238 (34) & 0.23319 & 0.043881 & 0.0 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{Results.} On the live board the recall champion ranks \emph{eighth of the
+nine} current best-models entries ($H$ \num{0.008603}, above only the two-leg
+R+M blend at \num{0.008259}), while the leader is an eval-time re-ranking policy
+applied to the plain single GRU ($H$ \num{0.034171} at \num{164} of \num{1431}).
+Figure~\ref{fig:mc-two-boards} plots the near-inversion;
+Figure~\ref{fig:nexttrack-holisticness-antiwin} shows the failure mode the
+recall floor was written for.
+
+\emph{Results --- the two statements that look contradictory, reconciled.} The
+record also says that the crown ordering carries \emph{no information}, and both
+things are true because they are statements about different parts of the axis.
+Take the ten separately-trained architecture arms that carry a live $H$: they
+span \numrange{0.02127}{0.02487}, a spread of ${\sim}\num{0.0036}$ against a
+measured $\mathrm{hw}(\Delta H)$ of ${\sim}\num{0.0018}$ --- so within that
+\emph{healthy band} the arms are statistically indistinguishable and their rank
+order is noise, exactly as \texttt{PROJECT-FACTS.md} states. The inversion is not
+inside that band. The recall champion sits at \num{0.008603}, roughly seven
+half-widths \emph{below} the band's floor, and the MMR arms sit up at
+\numrange{0.026761}{0.034171}, well above its ceiling and resolved by a far
+sharper instrument (Section~\ref{sec:power}). So: the champion-versus-band gap
+and the band-versus-MMR gap are real and large; the ordering \emph{within} the
+band is not a ranking of anything.
+
+\emph{Interpretation.} Picking one board fails in both directions: ranking by
+$H$ alone crowns models with near-zero recall, while ranking by Recall@10 alone
+hides that the recall champion is the most artist-eager model measured
+(artist\_adj \num{0.6097}, artist\_conc \num{0.6917} --- inherited from its
+Markov leg, whose standalone artist\_adj is \num{0.543}, not from its neural
+one, since the single GRU and LSTM sit at \num{0.347} and \num{0.344}). That the
+display facets are not merely ``gameable by being good'' is settled by the
+popularity floor: it \emph{maximizes} ild (\num{0.898}) and \emph{minimizes}
+artist\_adj (\num{0.002655}, by echoing no seed at all rather than by being
+diverse) while landing one hit in \num{1431} and a \emph{negative} mood
+coherence ($-\num{0.041}$). This document therefore
+denominates its board in Recall@10 and reports $H$ beside it, always
+generation-tagged.
+
+{\rightskip=0pt plus 2em \emph{Sources: \texttt{2026-\allowbreak 07-\allowbreak 20-\allowbreak musical-\allowbreak distance-\allowbreak metric.md},
+\texttt{2026-\allowbreak 07-\allowbreak 22-\allowbreak session-\allowbreak holisticness-\allowbreak and-\allowbreak antieager-\allowbreak levers.md},
+and \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak mmr-\allowbreak lambda-\allowbreak frontier.md}.}\par}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.9\textwidth]{mc_two_boards}
+  \caption{The two boards are nearly inverted \emph{across} the healthy band,
+    and carry no information \emph{within} it. Recall@10 against
+    \emph{generation-3 (live)} holisticness@10 for the \num{22} distinct
+    canonical-split configurations whose stored $H$ is gen 3 (a further ten
+    canonical-split runs are bit-identical repeats of these, and nine store gen-1
+    or gen-2 values and are excluded rather than rescaled). The recall champion
+    sits bottom-right at $H$ \num{0.008603}; the crown leader is an eval-time MMR
+    re-rank of the plain GRU at \num{0.034171} on \num{164} of \num{1431}. MMR
+    arms are drawn hollow because they share bit-identical trained weights with
+    their parent --- \textbf{none of them is promoted}, and the point labelled
+    $\lambda$0.3 on the champion trace is arm A4 of Table~\ref{tab:mmr}, a TIER-3
+    \emph{rejected} arm that gets its high $H$ by giving up $\num{0.102}$ of
+    recall; it is plotted to map the frontier, not as a candidate. The shaded
+    green strip is the \emph{healthy band} \numrange{0.02127}{0.02487} spanned by
+    the ten separately-trained architecture arms, and the drawn measurement bar is
+    the point: that spread (${\sim}\num{0.0036}$) is barely twice the measured
+    $\mathrm{hw}(\Delta H)\approx\num{0.0018}$, so the ordering \emph{inside} the
+    strip is noise while the champion's position far below it, and the MMR arms'
+    far above it, are not. The shaded red region below Recall@10
+    ${\approx}\num{0.108}$ is the degenerate zone the anti-degenerate recall floor
+    excludes; the gen-1-only \texttt{cummean/cummean} arm lives there and is
+    annotated rather than plotted, since rescaling it across generations would be
+    fabrication.}
+  \label{fig:mc-two-boards}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_holisticness_antiwin}
+  \caption{Why the crown needs a floor: unconstrained list-quality is maximized
+    by predicting \emph{worse}. \textbf{This figure is generation-1
+    (three-factor) holisticness} and its $y$ values are not comparable to
+    Figure~\ref{fig:mc-two-boards}'s or Table~\ref{tab:hgen}'s gen-3 column.
+    Green circles are the five dual-tower arms whose paired $\Delta H$ CI clears
+    zero; every one of them falls below the dashed anti-degenerate recall floor
+    at $\num{0.12299}-\num{0.015}=\num{0.10799}$ (shaded), so no crown changed
+    hands. The arrowed open square is the \texttt{seq-mood} incumbent at $H$
+    \num{0.2332} on \num{34} hits of \num{1431} --- the canonical instance of the
+    pathology; the figure labels it by its promoted definition name,
+    \texttt{mood-session}. Two labels in the figure are the source campaign's
+    internal shorthand: its legend's ``Rule 6'' is that campaign's numbering for
+    the crown decision rule --- an $H$ gain counts only if Recall@10 holds within
+    $\pm\num{0.015}$ --- and the arm codes are C0 the single-GRU baseline, C1 the
+    $h425$ width control, and D-\emph{XY} the two-tower arm reading view $X$ in
+    tower A and view $Y$ in tower B (L $=$ \texttt{latent}, D $=$ \texttt{delta},
+    C $=$ \texttt{cummean}). \emph{Source:
+    \texttt{2026-\allowbreak 07-\allowbreak 25-\allowbreak nexttrack-\allowbreak dual-\allowbreak tower-\allowbreak fusion-\allowbreak scan.md}.}}
+  \label{fig:nexttrack-holisticness-antiwin}
+\end{figure}
+
+\clearpage
+\section{The model zoo: six topologies over one frozen geometry}
+\label{sec:zoo}
+
+\emph{Rationale.} The six trained families differ in exactly one respect ---
+\emph{how the ordered prefix becomes one predicted point (or one score column)}
+--- and are otherwise deliberately identical: same item space, same in-batch
+InfoNCE, same batching, same held-out-train-slice early stopping, same
+$\tau=\num{0.07}$, same seed 1337. That is what makes the comparisons in
+Sections~\ref{sec:fusion}--\ref{sec:failures} clean.
+Figures~\ref{fig:topo-gru}--\ref{fig:topo-stacker} draw all six; the visual
+convention (solid border $=$ trained, dashed $=$ frozen or parameter-free, and
+colour carries the verdict) is fixed in Figure~\ref{fig:topo-gru}'s caption and
+used by the rest. All six presuppose the evaluation protocol of
+Figure~\ref{fig:protocol}: each one is a different answer to ``how does the
+prefix become $\hat{y}$?'', and everything downstream of $\hat{y}$ is identical.
+
+\emph{A one-line map before the diagrams.} The six differ as follows.
+\texttt{seq-nexttrack} (Figure~\ref{fig:topo-gru}) runs a \emph{recurrence} over
+the prefix latents and reads $\hat{y}$ off the final hidden state --- the
+workhorse, and the single-model bar. \texttt{seq-ann}
+(Figure~\ref{fig:topo-ann}) replaces the recurrence with an order-blind
+\emph{pooling} (mean of the prefix plus the last item) through an MLP --- the
+control that isolates what recurrence buys. \texttt{seq-dualgru}
+(Figure~\ref{fig:topo-dualgru}) runs \emph{two} independent recurrences over
+different causal views of the same prefix and fuses them --- refuted, twice over,
+with the fusion head itself the larger harm. \texttt{seq-embed}
+(Figure~\ref{fig:topo-embed}) would make the item table \emph{trainable} instead
+of frozen --- the standard formulation in the literature, and the one family here
+with no runs at all. \texttt{seq-blend} (Figure~\ref{fig:topo-blend}) does not
+predict a point at all: it fuses three full-vocabulary \emph{score columns} with
+fixed weights --- the champion. \texttt{seq-stacker}
+(Figure~\ref{fig:topo-stacker}) takes the same score columns and \emph{learns}
+the combination with a gradient-boosted tree ensemble --- the fourth of four
+learned-combiner nulls. Read the pair \texttt{seq-blend} versus
+\texttt{seq-stacker} as the document's central contrast: same inputs, fixed
+versus learned combination, and a \num{0.13} recall gap in favour of fixed.
+
+\input{figures/topologies}
+
+\paragraph{\texttt{seq-embed}: a design, not a result.} One family in scope has
+no measurements at all and must be read as an argument rather than a row.
+\texttt{predictors/seq\_embed.py} exists (written 2026-07-26) and implements a
+\emph{learned} item-embedding table in three modes --- \texttt{frozen},
+\texttt{residual} and \texttt{free} --- with InfoNCE forced because cosine has a
+trivial collapse optimum on a learned table. It is registered in
+\texttt{registry.toml} but does \emph{not} appear in
+\texttt{GET /api/predictors}, has no model definition, and has \textbf{zero runs
+on any dataset}. Its interest is that the data budget of
+Section~\ref{sec:intro} predicts its outcome: a \texttt{free} table is the
+GRU4Rec/SASRec formulation, one trainable vector per item, estimated here from a
+\emph{median of one observation}, and structurally capped at Recall@10
+\num{0.4493} because an unobserved item's vector never receives a gradient. (That
+formulation --- one free trainable vector per item, learned end-to-end from
+sequences --- is the standard one in the session-recommendation literature, where
+GRU4Rec and SASRec are its recurrent and self-attentive canonical instances. It
+is the obvious thing to try and it is the one thing this corpus is least able to
+support.) This
+document quotes the dataset facts (\num{73632} steps, \num{15816} observed
+items, median frequency \num{1}, \num{3294} items at frequency $\ge5$) as
+measured, and everything about \texttt{seq-embed}'s performance as
+\emph{unmeasured}.
+
+{\rightskip=0pt plus 2em \emph{Sources: \texttt{predictors/} sources read directly;
+\texttt{PROJECT-FACTS.md}.}\par}
+
+\clearpage
+\section{The board: what the trained models actually score}
+\label{sec:board}
+
+\emph{Results.} Table~\ref{tab:models} is the in-scope board and
+Figure~\ref{fig:mc-model-landscape} is the same information as a landscape, with
+the two non-parametric reference bars drawn as \emph{lines} rather than compared
+rows. Figure~\ref{fig:nexttrack-phase2-families} shows the family ordering that
+first established it. Three reading rules apply.
+
+First, the promoted champion is the \Rp+M+\Cp{} blend at \num{0.21174}
+(\num{303} of \num{1431}); the \num{0.22292} (\num{319}) cell above it is a
+temperature scan point ($\tau=\num{0.10}$) whose $+\num{0.011}$ nominal edge was
+judged \emph{sub-noise} and whose default was \textbf{held} --- it is the
+highest Recall@10 ever measured on this split and it is \emph{not} the
+champion's number.
+
+Second, the single-model bar is the plain GRU at \num{0.12299}, which has been
+reproduced \emph{eleven} times bit-identically
+($\num{0.12299091544374564}=\num{176}/\num{1431}$, MRR agreeing to
+\num{3.1e-11}) across hosts and across a predictor code edit. Same-configuration
+reproduction spread on this deterministic path is therefore exactly zero, which
+is why the noise discussion in Section~\ref{sec:power} is about
+\emph{between}-configuration jitter, not seeds.
+
+Third, \texttt{seq-ann}'s only run in the entire system is on
+\dsid{seq-20260715-030509} (PCA-128), \emph{not} the canonical split. Because
+both splits share the same session index its $n_{\text{test}}$ is also
+\num{1431}, which makes the number look canonical when it is not; it is
+therefore daggered and excluded from the best-cell bolding, and the defensible
+GRU-versus-ANN comparison is the same-space one in
+Section~\ref{sec:recurrence}. Seven further cells carry a
+\textsuperscript{\S}: they are \emph{nominal single-run} comparisons for which no
+paired bootstrap CI was ever computed --- the two temperature cells, the
+projection-rank cell, the two BPR cells, the anti-eager $\beta$ arm and the
+canonical-split LSTM. The reports call some of those ties and one a collapse;
+none of those calls is backed by a paired test, and none of the cells is eligible
+for a best-cell bold.
+
+\begin{table}[ht]
+  \centering
+  \caption{The in-scope trained models on the canonical split
+    \dsid{seq-20260715-131139} (\num{1431} test sessions), sorted by Recall@10.
+    Eval-time MMR arms are held back to Table~\ref{tab:mmr} because they share
+    bit-identical weights with their parent. The \emph{family} column abbreviates
+    the predictor: blend $=$ \texttt{seq-blend}, next $=$ \texttt{seq-nexttrack},
+    dual $=$ \texttt{seq-dualgru}, ann $=$ \texttt{seq-ann}, stack $=$
+    \texttt{seq-stacker}, embed $=$ \texttt{seq-embed}, lookup $=$ a
+    non-parametric table over the dataset. \textbf{Directions:} R@10, MRR,
+    art@10, gen@10 \emph{and} $H$ are all higher-better. $H$ is the
+    \emph{generation-3 (live)} composite and is \textbf{not} comparable to
+    Table~\ref{tab:hgen}'s gen-1/gen-2 columns (Section~\ref{sec:metrics}); the
+    champion's low $H$ (\num{0.008603}, the smallest non-lookup value in the
+    column) is the two-board inversion of Section~\ref{sec:metrics}, not a
+    defect, and it is not resolvable against the \numrange{0.02127}{0.02487}
+    healthy band by anything in this table. For absolute scale, chance Recall@10
+    for a random top ten is $10/\num{19402}\approx\num{0.00052}$ and the
+    popularity lookup reaches \num{0.00070} (\num{1} hit); the art@10 and gen@10
+    chance floors are much higher and have \emph{not} been measured, so read
+    those two columns only across rows.
+    \textbf{Bolding.} Two rows are bolded, the promoted champion and the prior
+    crown it replaced. Best cell per metric is bolded among the
+    \emph{on-split, unrefuted, non-nominal} rows only --- which excludes the
+    \texttt{seq-ann} row (off-split), the Markov row (a lookup, kept in sorted
+    position for scale rather than as a compared model), the $\tau0.10$ scan cell
+    and the other \textsuperscript{\S}-marked cells (nominal, no paired CI), and
+    every \texttt{seq-dualgru}, pre-encoder, stacker and $\beta$ arm shown to
+    \emph{bound} a refuted axis. On that rule the champion holds R@10 and MRR and
+    the $h425$ width control holds art@10, gen@10 and $H$.
+    ``---'' marks a value not recorded: the nine remote-only runs never emitted
+    \texttt{artist\_conc\_at\_k} and so could not be rescored to generation 3
+    (their stored $H$ is gen 1 or gen 2 and is therefore withheld rather than
+    printed in a gen-3 column), and no parameter count is recorded anywhere for
+    \texttt{seq-stacker} or \texttt{seq-ann}.
+    \textsuperscript{\dag}~\emph{not} on the canonical split ---
+    \dsid{seq-20260715-030509}, PCA-128; do not read it in this column.
+    \textsuperscript{\ddag}~scan cell whose nominal edge was judged sub-noise;
+    the $\tau=\num{0.07}$ default was held.
+    \textsuperscript{\S}~\emph{nominal single-run comparison} --- no paired
+    bootstrap CI exists for this cell (Section~\ref{sec:notestablished}).
+    \emph{Sources: \texttt{2026-\allowbreak 07-\allowbreak 15c-\allowbreak nexttrack-\allowbreak phase2-\allowbreak model-\allowbreak sweep.md},
+    \texttt{2026-\allowbreak 07-\allowbreak 18b-\allowbreak nexttrack-\allowbreak projection-\allowbreak registration-\allowbreak and-\allowbreak scan.md},
+    \texttt{2026-\allowbreak 07-\allowbreak 25-\allowbreak nexttrack-\allowbreak dual-\allowbreak tower-\allowbreak fusion-\allowbreak scan.md},
+    \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak pre-\allowbreak encoder-\allowbreak scan.md},
+    and \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak mmr-\allowbreak lambda-\allowbreak frontier.md}.}}
+  \label{tab:models}
+  {\scriptsize\setlength{\tabcolsep}{2.2pt}\begin{tabular}{llrcccccl}
+    \toprule
+    Model / arm & family & params & R@10 (raw) & MRR & art@10 & gen@10 & $H$ gen 3 & Note \\
+    \midrule
+    proj-blend $\tau0.10$\textsuperscript{\ddag\S} & blend & 431808 & 0.22292 (319) & 0.1273 & 0.3424 & 0.4032 & --- & held sub-noise \\
+    \best{\Rp+M+\Cp{} $\tau0.07$} & blend & 431808 & \best{0.21174 (303)} & \best{0.1220} & 0.3326 & 0.4011 & 0.008603 & promoted, servable \\
+    proj-blend rank-64\textsuperscript{\S} & blend & 407232 & 0.20545 (294) & 0.1169 & 0.3326 & 0.3990 & --- & rank is not the gain \\
+    proj-blend $\tau0.05$\textsuperscript{\S} & blend & 431808 & 0.19287 (276) & 0.1111 & 0.3354 & 0.3997 & --- & $\tau$ ablation \\
+    \best{R+M+C} & blend & 394944 & 0.18588 (266) & 0.1025 & 0.3305 & 0.3941 & --- & prior crown \\
+    R+M two-leg & blend & 394944 & 0.17121 (245) & 0.0952 & 0.3291 & 0.3983 & 0.008259 & leg-ablation ref. \\
+    proj-blend BPR full\textsuperscript{\S} & blend & 431808 & 0.15793 (226) & 0.0939 & 0.3187 & 0.3913 & --- & InfoNCE $\gg$ BPR \\
+    proj-blend BPR rk-64\textsuperscript{\S} & blend & 407232 & 0.15234 (218) & 0.0909 & 0.3194 & 0.3906 & --- & worst proj.\ cell \\
+    C2 GRU h454 \emph{ctrl} & next & 969936 & 0.12509 (179) & 0.0539 & 0.3375 & 0.4542 & 0.023988 & width ctrl, tie \\
+    GRU h256 $\beta{=}0.05$\textsuperscript{\S} & next & 394944 & 0.12369 (177) & 0.0534 & 0.3368 & 0.4500 & 0.024755 & weak knob \\
+    T1-f0 bare/preMLP256 & dual & 888256 & 0.12369 (177) & 0.0547 & 0.3333 & 0.4647 & --- & a repair, not a win \\
+    GRU h256 (bar) & next & 394944 & 0.12299 (176) & 0.0534 & 0.3375 & 0.4500 & 0.024538 & single-model bar \\
+    C1 GRU h425 \emph{ctrl} & next & 871017 & 0.12089 (173) & 0.0522 & \best{0.3410} & \best{0.4577} & \best{0.024872} & tie, $2.2\times$ params \\
+    LSTM h256\textsuperscript{\S} & next & 510144 & 0.11880 (170) & 0.0493 & 0.3277 & 0.4549 & 0.022941 & GRU $\approx$ LSTM \\
+    D-LL-f0 latent/latent & dual & 789696 & 0.11880 (170) & 0.0563 & 0.3368 & 0.4563 & 0.023785 & best 07-25 dual: tie \\
+    GRU h297 \emph{ctrl} & next & 494697 & 0.11321 (162) & 0.0520 & 0.3284 & 0.4500 & --- & outlier, CI$<$0 \\
+    S1 MLP256$\to$GRU256 & next & 493504 & 0.10901 (156) & 0.0446 & 0.3235 & 0.4689 & 0.024102 & pre-encoder harmful \\
+    B2 first-order Markov & lookup & 0 & 0.10692 (153) & 0.0694 & 0.2984 & 0.3885 & 0.004409 & reference bar only \\
+    D-LL latent/latent, $f1$ & dual & 871872 & 0.10273 (147) & 0.0424 & 0.3089 & 0.4577 & 0.022841 & fusion head harmful \\
+    T4 preMLP both towers & dual & 1068992 & 0.09783 (140) & 0.0383 & 0.2991 & 0.4389 & --- & placement irrelevant \\
+    pooled-MLP twin\textsuperscript{\dag} & ann & --- & 0.09015 (129) & 0.0394 & 0.2991 & 0.4354 & --- & off-split, PCA-128 \\
+    D-DC delta/cummean & dual & 871872 & 0.08665 (124) & 0.0338 & 0.2579 & 0.4242 & --- & beats both parents \\
+    XGB stacker (M+G+A) & stack & --- & 0.08526 (122) & 0.0490 & 0.3005 & 0.3753 & --- & below its base leg \\
+    D-CC cummean/cummean & dual & 871872 & 0.06639 (95) & 0.0266 & 0.2460 & 0.4060 & --- & degenerate arm \\
+    D-DD delta/delta & dual & 871872 & 0.05800 (83) & 0.0282 & 0.2523 & 0.4228 & --- & worst real arm \\
+    learned item table & embed & --- & --- & --- & --- & --- & --- & design only, no runs \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{mc_model_landscape}
+  \caption{The whole in-scope landscape, and the things it is easy to misread.
+    \num{27} trained arms on the canonical split plus the off-split ANN twin
+    (\num{28} rows in all), ordered by Recall@10 with raw hits of \num{1431} and
+    coloured by predictor family (\texttt{seq-blend} blue,
+    \texttt{seq-nexttrack} green, \texttt{seq-dualgru} gray,
+    \texttt{seq-stacker} cyan, \texttt{seq-ann} orange). The champion is the blue
+    star. The first-order Markov lookup (\num{0.107}) is drawn only as a
+    reference \emph{line}, never as a row, because it is a table over the
+    dataset; the single-model GRU bar (\num{0.123}) is drawn \emph{both} as its
+    own dotted line and as a row (bold label, green square), because it is
+    simultaneously a compared model and the anchor every architecture $\Delta$ is
+    measured against. Two markers are hollow for integrity: the ANN row because
+    it is PCA-128 off-split, and the $\tau0.10$ cell because its nominal edge was
+    held sub-noise --- it is the highest Recall@10 on the split and it is
+    \emph{not} the champion. Only the champion carries a recorded marginal 95\%
+    CI $[\num{0.191},\num{0.233}]$; the separate $\pm\num{0.0124}$ bar states the
+    paired-$\Delta$ resolution of the instrument, which is what actually decides
+    the adjacent rows.}
+  \label{fig:mc-model-landscape}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.85\textwidth]{nexttrack_phase2_families}
+  \caption{The family ordering that set the shape of the board, from the
+    Phase-2 sweep. Green: the \emph{fixed} z-blends. \textbf{Read the in-figure
+    label ``NEW CHAMPION ROW'' historically:} the three-leg R+M+C on PCA-192 at
+    \num{0.1859} was the champion at the date of that sweep and is the
+    \emph{prior} crown here, superseded by \Rp+M+\Cp{} at \num{0.21174}
+    (Section~\ref{sec:projection}), which is not in this figure. Blue: other
+    fixed blends. Gray: single models --- the LSTM on PCA-128 (\num{0.1272}) is
+    the best single model in that sweep, the pooled ANN twin (\num{0.0901}) the
+    worst. Red: the \emph{learned} XGBoost stackers at \numrange{0.0853}{0.0867},
+    below every single model they were built on top of. The first-order Markov
+    bar (\num{0.107}) is the incumbent reference line. Read left to right the
+    figure already contains the document's thesis: fixed fusion of unlike
+    signals beats every single model, and learning the fusion loses.
+    \emph{Source: \texttt{2026-\allowbreak 07-\allowbreak 15c-\allowbreak nexttrack-\allowbreak phase2-\allowbreak model-\allowbreak sweep.md}.}}
+  \label{fig:nexttrack-phase2-families}
+\end{figure}
+
+\clearpage
+\section{Fusion wins because its legs are correct on almost disjoint sessions}
+\label{sec:fusion}
+
+\emph{Rationale.} The champion is a score-level fusion of three legs, and the
+naive story --- ``ensembling reduces variance'' --- is wrong here in an
+instructive way. What each leg \emph{knows} is structurally different. The
+Markov leg is a pure count lookup keyed on the single last prefix item $u$: the
+empirical $P(v\mid u)$ over training bigrams. Its counts are shrunk toward a
+fallback by a \emph{trust weight} $n_u/(n_u+8)$, where $n_u$ is how many times $u$
+was ever followed by anything in training --- so an item seen once is trusted
+$1/9$ and an item seen a hundred times almost fully, and the remaining mass goes
+to an artist/genre back-off distribution plus a tiny popularity tie-break. (This
+is Dirichlet--multinomial smoothing with a pseudo-count of 8; the point is only
+that a leg built on counts must have \emph{something} to say when the counts are
+thin.) It can only score items it has \emph{seen follow something}. The GRU leg
+regresses a point in the item space from the ordered prefix and ranks the whole
+catalog by cosine to it; it never needs to have seen the target at all, only to
+land near it. The content-kNN leg is the same idea with no training (max cosine
+of a candidate to any prefix item). So the fusion is not two estimates of one
+quantity, it is a \emph{union of two retrieval mechanisms} --- identity memory
+and content geometry --- whose failure modes are close to complementary.
+
+\emph{Results.} The warm/cold decomposition makes the mechanism visible.
+Partitioning the \num{1431} test targets into \num{643} warm and \num{788} cold
+by the train-seen test and recomputing recall in each half from each run's
+\texttt{predictions.json} gives: popularity \num{0.0016} warm / \num{0.0000}
+cold; Markov \num{0.2255} (\num{145}/\num{643}) warm / \num{0.0102}
+(\num{8}/\num{788}) cold; the GRU \num{0.1198} (\num{77}/\num{643}) warm /
+\num{0.1256} (\num{99}/\num{788}) cold; R+M \num{0.2255} / \num{0.1269}; R+M+C
+\num{0.2255} / \num{0.1536}; and the champion \num{0.2395}
+(\num{154}/\num{643}) / \num{0.1891} (\num{149}/\num{788}).
+Figure~\ref{fig:mc-cold-warm} plots this. The asymmetry is extreme: Markov is
+$22\times$ better on warm targets than cold ones, while the GRU is \emph{flat}
+across the split and in fact very slightly better on cold --- exactly what a
+content-space retrieval should be. Hit-set overlap on the identical sessions:
+$|M|=\num{153}$, $|R|=\num{176}$, $|M\cap R|=\num{55}$, $|M\cup R|=\num{274}$,
+Jaccard \num{0.201}; \num{98} sessions are Markov-only and \num{121} GRU-only.
+R+M lands \num{245} hits, \num{211} of them inside that \num{274}-session union
+plus \num{34} sessions \emph{neither} leg hit alone. Note the scope carefully:
+this overlap argument is about the \textbf{R+M stage}, computed with the
+\emph{unprojected} GRU leg $R$. The champion's \num{303} hits do include
+\num{109} sessions outside $M\cup R$ entirely, but that number mixes the fusion
+effect with the projection upgrade of Section~\ref{sec:projection} --- it is not
+evidence about fusion, and the champion's extra reach is measured there, not
+here. The fusion win itself is CI-backed. On the AE-64-lineage artifact
+\dsid{seq-20260713-014226} where the two-leg blend was first established, paired
+$\Delta$ over the Markov bar on that split is $+\num{0.0657}$
+$[+\num{0.049},+\num{0.083}]$, three-seed confirmed; on the canonical split the
+content third leg is $+\num{0.0147}$ $[+\num{0.003},+\num{0.026}]$ over
+same-space R+M, both CIs above zero. The warm/cold and overlap counts are
+\emph{single-run observations with no CI}, though they reproduce
+independently-reported off-server figures and rest on deterministic runs.
+
+\emph{Interpretation --- and three alternatives ruled out.} (a) ``More models
+help.'' No: adding a leg of the \emph{same kind} does nothing.
+\emph{All four numbers in this paragraph are on the 2026-07-13/14
+AE-64-lineage artifact \dsid{seq-20260713-014226}, not the canonical split, and
+must be read only against each other} --- the single GRU on that artifact scores
+${\approx}\num{0.089}$, not \num{0.12299}. There, adding the pooled ANN as a
+third leg gives R+A+M \num{0.1684} against R+M's \num{0.1726}, i.e.\ slightly
+worse, and R+A alone is \num{0.0894}, essentially that split's GRU alone.
+Substituting \emph{item2vec} --- a skip-gram co-listening embedding, the
+word2vec construction applied to sessions-as-sentences --- for the content leg
+gives R+M+I \num{0.1349}, well below R+M. And on the canonical split a fourth
+leg of \emph{session-kNN} type (retrieve whole \emph{sessions} similar to the
+current one and vote over what followed them; V-SKNN in the literature) drags
+R+M+C+V to \num{0.1474}, paired $\Delta$ $-\num{0.038}$ CI below zero --- and it
+fails for precisely the mechanism above, being structurally warm-only against a
+\SI{55}{\percent} cold test set in a single-user corpus where there is no
+cross-user neighbourhood to borrow from. Diversity of signal \emph{kind}, not
+model count, is what pays. (b) ``The blend just inherits
+Markov's warm hits.'' No: R+M lands \num{100} cold hits where Markov alone lands
+\num{8}, and the entire cold half of the champion's performance (\num{149} of
+\num{303}) is carried by legs Markov contributes nothing to. (c) ``A smarter
+fuser would do better.'' That is Section~\ref{sec:fail-combiners}, and it is
+five independent nulls.
+
+{\rightskip=0pt plus 2em \emph{Sources: \texttt{2026-\allowbreak 07-\allowbreak 14-\allowbreak nexttrack-\allowbreak blend-\allowbreak and-\allowbreak ensemble.md},
+\texttt{2026-\allowbreak 07-\allowbreak 15c-\allowbreak nexttrack-\allowbreak phase2-\allowbreak model-\allowbreak sweep.md},
+and \texttt{2026-\allowbreak 07-\allowbreak 18-\allowbreak nexttrack-\allowbreak literature-\allowbreak fit-\allowbreak campaign.md}.}\par}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{mc_cold_warm}
+  \caption{The one decomposition that explains the champion. \emph{Left}:
+    Recall@10 split into warm and cold halves for each champion leg and each
+    blend stage. The Markov leg collapses to \num{0.010} on cold targets
+    (\num{8} of \num{788}) against \num{0.226} warm, whereas the projected
+    content leg reads cold \num{0.152} $\approx$ warm \num{0.151} and the base
+    GRU is fractionally \emph{better} on cold than warm --- so the fusion lifts
+    both halves at once (\num{154}/\num{643} warm, \num{149}/\num{788} cold).
+    The \Rp{} and \Cp{} bars are hatched because those standalone figures are
+    report provenance from an off-server driver, with no server run and no raw
+    hit counts. \emph{Right}: the split's composition --- the warm fraction
+    \emph{is} the seen-items-only ceiling, Recall@10 $\le\num{0.4493}$, against
+    $\num{788}/\num{1431}=\SI{55.1}{\percent}$ cold. Any model that cannot
+    retrieve an unseen item is arguing over the left-hand \SI{45}{\percent}
+    only.}
+  \label{fig:mc-cold-warm}
+\end{figure}
+
+\clearpage
+\section{The learned projection wins because it rebuilds the retrieval metric}
+\label{sec:projection}
+
+\emph{Rationale.} Before the projection, both the GRU leg and the content-kNN
+leg retrieved by cosine in the same unsupervised PCA-192 space. That space is
+variance-ordered and completely target-agnostic: it was fit to \emph{reconstruct}
+the item feature matrix, so its dominant directions are whatever has the most
+raw variance --- on this corpus loudness, era and popularity --- and not ``tracks
+that follow each other''. The top ten principal components carry
+\SI{65}{\percent} of the variance with essentially zero text loading. The
+projection replaces the \emph{metric} rather than the model.
+
+\emph{What is actually learned.} \texttt{seq\_blend.fit\_projection} learns a
+single square matrix $W$ (\num{192}$\times$\num{192}, no bias, initialized to
+the identity; Adam, lr \num{1e-3}, \num{40} epochs, batch \num{512}) from
+\emph{train} consecutive item pairs $(u,v)$ with self-loops dropped. The
+objective is the in-batch InfoNCE of Section~\ref{sec:machinery} at
+$\tau=\num{0.07}$: for a batch of \num{512} pairs, embed
+$a_i=\mathrm{normalize}(Wz_{u_i})$ and $p_j=\mathrm{normalize}(Wz_{v_j})$ and
+require each item's true successor to outscore the \num{511} other rows'
+successors.
+
+\emph{What $W$ is, stated exactly.} Up to the row normalization, ranking by
+$\langle Wz_u, Wz_v\rangle = z_u^{\top}(W^{\top}W)z_v$ means the projection is a
+\textbf{learned Mahalanobis metric} on the original \num{192} dimensions, with
+positive-semidefinite Gram matrix $W^{\top}W$. Two things follow immediately.
+First, by the singular value decomposition $W=U\Sigma V^{\top}$ a general square
+$W$ is a rotation, then a per-axis rescaling, then \emph{another} rotation --- so
+it can both re-orient the axes along which ``followed by'' varies and rescale
+them, which is more than a diagonal reweighting of the existing PCA coordinates
+could do. Second, $z_u^{\top}(W^{\top}W)z_v$ is \emph{symmetric in $u$ and $v$ by
+construction}: the object being learned is a ``these two go together'' relation,
+not a directed ``$u$ is followed by $v$'' one. That is exactly why the directional
+two-tower ablation below is the right test of whether the symmetry is a
+limitation, and why its losing is informative rather than incidental.
+\textbf{The honest gap:} the spectrum of $W^{\top}W$ has never been inspected on
+this corpus, so the natural next sentence --- \emph{which} directions were
+stretched and which shrunk --- is not something this document can assert. What is
+measured is only the consequence: after the fit, cosine in the new space behaves
+like transition affinity. Two of the three legs are defined by cosine in that
+space, so both improve at once; the Markov leg is item-ID based and is untouched
+by construction. And because $W$ is a function of \emph{content
+only}, an item that never appeared in training still has a position in the
+projected space --- this is the one channel with cold reach, and the cold half is
+\SI{55}{\percent} of the test set. The supervision is leak-free: train pairs and
+intrinsic latents only.
+
+\emph{Results.} \Rp+M+\Cp{} reaches Recall@10 \num{0.2117}
+$[\num{0.191},\num{0.233}]$ at MRR \num{0.1220}, paired $\Delta$ over the R+M+C
+crown $+\num{0.0259}$ $[+\num{0.012},+\num{0.041}]$, CI entirely above zero.
+Both shared-metric legs improve and the untouched leg does not: content-kNN
+$C\to\Cp$ goes \num{0.0685}$\to$\num{0.1516} --- a $2.2\times$ lift on a leg with
+\emph{no trainable parameters of its own} (the $k$NN rule is parameter-free; the
+\num{36864} parameters of the shared $W$ it now retrieves inside are counted once,
+in the champion's total), so the entire change is the geometry ---
+the GRU leg $R\to\Rp$ goes \num{0.1230}$\to$\numrange{0.1719}{0.1761} across
+seeds, and Markov stays at \num{0.1069}. Unlike the deterministic GRU path this
+result has genuine seed variance (random init, shuffled batches): over seeds
+1337/7/99 the blend reads \num{0.2117}/\num{0.2110}/\num{0.2145} with paired
+$\Delta$ $+\num{0.026}$/$+\num{0.025}$/$+\num{0.029}$, every CI above zero. It
+is then hardened on a split disjoint in both index and time
+(\dsid{seq-20260718-211238}, the earlier chronological band, byte-identical item
+space, cold rate \num{0.64}): \num{0.1705} against the crown's \num{0.1279} and
+R+M's \num{0.1174}, paired $\Delta$ $+\num{0.0426}$
+$[+\num{0.0280},+\num{0.0573}]$ --- a \emph{wider} margin on the colder split,
+exactly what the mechanism predicts, since when more targets are cold the
+cold-reaching leg carries proportionally more of the win.
+Figure~\ref{fig:nexttrack-projection-hardening} shows both splits.
+
+\emph{The axis ablations, and their status.} Four cells sharpen what is doing
+the work, and none of them carries a paired CI --- they are \emph{nominal
+single-run} comparisons and are labelled as such here and in
+Table~\ref{tab:models}. InfoNCE $\gg$ BPR: replacing the softmax-over-in-batch-
+negatives objective with pairwise BPR --- Bayesian Personalized Ranking, the
+standard pairwise recommender loss, which for each positive samples \emph{one}
+negative and maximizes $\log\sigma(s_{\text{pos}}-s_{\text{neg}})$ --- collapses the
+blend to \num{0.1579} and \num{0.1523}, roughly \num{0.055} below the default
+and \emph{below even the unprojected crown}, so the specific shape of the
+contrastive loss is load-bearing and not merely ``some pairwise supervision''.
+Full rank $\approx$ rank 64: constraining $W$ to $64\times192$ gives
+\num{0.2055} against \num{0.2117}, a nominal $-\num{0.006}$ and a tie inside the
+$\pm\num{0.015}$ band --- \emph{the gain is the supervision, not the capacity}.
+Temperature is mildly monotone over the tested range
+(\num{0.05}$\to$\num{0.1929}, \num{0.07}$\to$\num{0.2117},
+\num{0.10}$\to$\num{0.2229}) and $\tau0.10$'s $+\num{0.0112}$ sits inside the
+band, so the decision rule did not re-promote it. A directional two-tower
+$W_q/W_k$ variant --- which drops the $W^{\top}W$ symmetry by giving $u$ and $v$
+separate maps --- scored \Cp{} \num{0.1349} against the symmetric single $W$'s
+\num{0.1516}, so the symmetry is not the binding constraint, and a symmetric
+``these two go together'' relation is what this corpus supports.
+
+\emph{Interpretation --- the nuance that is easy to state wrongly.} A separate
+campaign asked whether the frozen equal-weighted PCA-192 vector is itself the
+bottleneck, building eight alternative \num{192}-dimensional item spaces under
+parity gates and evaluating each under two readouts. Under the \emph{frozen} GRU
+readout, \emph{six of eight} beat it with paired CI above zero
+(\numrange{+0.0252}{+0.0356}), so at the raw level the PCA-192 geometry
+genuinely is a handicap. Under the \emph{champion} readout, with the projection
+re-fit on each space, \emph{not one} variant beats it: the two nominally
+positive spaces straddle zero and two are significantly worse. The correct
+reading is that pre-whitening the input and the learned projection are the
+\emph{same fix applied in two places}, so they do not stack --- a full-rank
+linear map over the same \num{192} dimensions can rescale and rotate away the
+loud inert directions, and InfoNCE gives it the supervision to know \emph{which}
+ones. It is emphatically not ``the representation does not matter'' (it
+demonstrably does, six times over with CI above zero) and not ``whitening helps
+the champion'' (it does not). A sub-finding sharpens it: dropping the numeric and
+acoustic blocks \emph{helps} the frozen GRU ($+\num{0.0335}$) but \emph{hurts}
+the champion ($-\num{0.0168}$), so the lesson is not ``drop the loud blocks'' but
+``let a supervised map decide their weight''. The honest caveat is that this
+cross-readout conclusion rests on a \emph{null} on the champion readout, which
+is weaker evidence than a win. Because those eight spaces are dataset variants
+rather than models they are otherwise out of scope here.
+
+{\rightskip=0pt plus 2em \emph{Sources: \texttt{2026-\allowbreak 07-\allowbreak 18-\allowbreak nexttrack-\allowbreak literature-\allowbreak fit-\allowbreak campaign.md},
+\texttt{2026-\allowbreak 07-\allowbreak 18b-\allowbreak nexttrack-\allowbreak projection-\allowbreak registration-\allowbreak and-\allowbreak scan.md},
+and \texttt{2026-\allowbreak 07-\allowbreak 18c-\allowbreak nexttrack-\allowbreak representation-\allowbreak exploration.md}.}\par}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_projection_hardening}
+  \caption{The champion's lead \emph{widens} on the colder split, which is the
+    mechanism's own prediction. Two splits $\times$ three blends: the canonical
+    split (cold rate \num{0.55}) and a disjoint earlier-holdout split (cold rate
+    \num{0.64}), with \Rp+M+\Cp{} in green (\num{0.2117} / \num{0.1705}), the
+    unprojected R+M+C crown in blue (\num{0.1859} / \num{0.1279}) and the
+    two-leg R+M in gray (\num{0.1712} / \num{0.1174}). The annotated paired
+    deltas are $+\num{0.0259}$ $[+\num{0.012},+\num{0.041}]$ and $+\num{0.0426}$
+    $[+\num{0.0280},+\num{0.0573}]$, both CIs above zero. Absolute recall is
+    lower on the right-hand split by construction; the verdict is the paired
+    $\Delta$, not the level. \emph{Sources:
+    \texttt{2026-\allowbreak 07-\allowbreak 18-\allowbreak nexttrack-\allowbreak literature-\allowbreak fit-\allowbreak campaign.md},
+    and \texttt{2026-\allowbreak 07-\allowbreak 18b-\allowbreak nexttrack-\allowbreak projection-\allowbreak registration-\allowbreak and-\allowbreak scan.md}.}}
+  \label{fig:nexttrack-projection-hardening}
+\end{figure}
+
+\clearpage
+\section{Recurrence beats pooling because the pooled summaries are already inside the state}
+\label{sec:recurrence}
+
+\emph{Rationale.} \texttt{seq-ann} is built specifically as the GRU's
+non-recurrent twin, and the comparison is unusually clean because everything
+except the architecture is reused verbatim: \texttt{seq\_ann.py} imports
+\texttt{make\_batches} and \texttt{step\_loss} from \texttt{seq\_nexttrack}, so
+objective, batching and early stopping are byte-for-byte identical, and the live
+API confirms matched hyperparameters ($h=256$, InfoNCE, \num{40} epochs, lr
+\num{1e-3}, dropout \num{0.1}, seed 1337). Where the GRU carries a hidden state
+updated by learned gates, the ANN builds a fixed-width bag-of-prefix at each
+step --- the concatenation of the \emph{mean} of the prefix latents so far and
+the \emph{last} item's latent --- and feeds it through a ReLU MLP. Both are
+strictly causal, so neither leaks. The difference is therefore exactly: a mean
+plus a special-cased most-recent item, versus a state whose gates decide per
+dimension and per step how much of the incoming item to write and how much
+context to forget. A mean is permutation-invariant and weights a track from
+twenty steps ago as much as the one just played; a gated state can hold a
+stylistic thread through an interruption and can represent ``A then B''
+differently from ``B then A''.
+
+\emph{Results.} Head-to-head on the same PCA-128 space
+\dsid{seq-20260715-030509}: ANN \num{0.09015} (\num{129} of \num{1431}) at MRR
+\num{0.03941} against the GRU anchor's \num{0.11461} (\num{164}) at MRR
+\num{0.0489}, paired $\Delta$ $-\num{0.0245}$
+$[-\num{0.039},-\num{0.011}]$, CI entirely below zero; the LSTM on the same
+space reaches \num{0.12718} (\num{182}), so the pooled model is beaten by both
+recurrent cells. Where it loses is informative and was recomputed here from the
+same predictions pipeline: ANN warm \num{0.1026} (\num{66}/\num{643}) / cold
+\num{0.0799} (\num{63}/\num{788}) against the GRU's \num{0.1182} / \num{0.1117},
+i.e.\ it gives up \num{10} warm hits but \num{25} cold ones --- the damage
+concentrates on the cold half. \emph{Why} it concentrates there is a conjecture
+this document cannot settle, and it must not be stated as the earlier
+Markov-versus-GRU argument was: neither the ANN nor the GRU has any item-memory
+mechanism, so ``you cannot lean on having seen the item'' does not distinguish
+them --- both are pure content retrieval on both halves. The plausible reading is
+about \emph{density}: warm targets are by definition items the user played
+before, so they sit in the well-trodden, densely covered regions of the latent
+space where a sloppy predicted point still lands one of ten neighbours, whereas
+cold targets sit in sparse regions where the precision of the point is what
+decides. That is untested here --- no per-region density measurement exists ---
+and it is offered as the likely mechanism, not a result. Hit-set
+overlap: \num{92} of the ANN's \num{129} hits are also GRU hits and only
+\num{37} are ANN-only, so the pooled model is close to a strict subset --- which
+is also why it is redundant as a blend leg (Section~\ref{sec:fusion}). These
+warm/cold and overlap figures are single-run, uncertainty-unquantified counts.
+
+\emph{Interpretation --- two triangulations and one reverse test.} First, the
+explicit pooled summaries are drastically weaker \emph{even with recurrence over
+them}: a two-tower arm reading only the running prefix mean scores \num{0.06639}
+(\num{95}) and one reading only step-to-step differences \num{0.05800}
+(\num{83}), against \num{0.12299} for a single GRU over raw latents. Both of
+those ablation arms carry the harmful \texttt{fusion\_layers}${}=1$ head
+(Section~\ref{sec:fail-head}), so part of the ${\sim}\num{0.057}$ gap is the head
+rather than the view; the clean within-regime contrast is against the
+latent/latent arm at the \emph{same} depth, \num{0.06639} against \num{0.10273},
+a still-decisive $-\num{0.036}$. The direction of the finding survives; its
+magnitude does not. Second,
+handing a raw-latent tower an \emph{explicit} running mean or difference adds
+nothing --- latent/cummean versus latent/latent is $-\num{0.00559}$
+$[-\num{0.01747},+\num{0.00699}]$ and latent/delta is $-\num{0.01118}$
+$[-\num{0.02306},+\num{0.00070}]$, both straddling zero --- because a GRU's
+update gate is a leaky accumulator (a running mean is inside its hypothesis
+space) and its candidate/gate interaction covers first differences. An
+interpretability read on that arm is consistent with the derived views being
+lossy functions of what the raw-latent tower already held: the two towers'
+representation geometries are only partly distinct (CKA \num{0.458} --- a
+\emph{middling} similarity, so there is real new linear structure between them)
+yet the sparse-autoencoder decomposition recovers \emph{zero} next-item concepts
+in the second tower that the first does not already carry. New geometry, no new
+concepts. Third, the reverse test shows the fusion
+machinery is not broken: pairing the two \emph{individually hopeless} views with
+each other beats both parents with CI above zero ($+\num{0.02865}$ and
+$+\num{0.02027}$) at a hopeless absolute \num{0.08665}. Two-view co-adaptation
+is a real mechanism; it simply has nothing left to contribute once a raw-latent
+tower is present. Figure~\ref{fig:mc-view-redundancy} draws the argument.
+Capacity is separately ruled out, with the caveat of
+Section~\ref{sec:fail-topology}: on PCA-192 single-GRU width is flat at the
+endpoints, $h=425$ at $2.2\times$ the parameters tying $h=256$ ($-\num{0.00210}$
+$[-\num{0.01118},+\num{0.00629}]$) and $h=454$ at $2.5\times$ also tying, so the
+${\sim}\num{0.025}$ recurrence gap cannot be bought with parameters. And the
+GRU's advantage \emph{widens} multi-step: on three-step continuation
+($n=\num{1172}$) it beats the first-order bigram on both suffix\_recall@10
+(\num{0.0963} versus \num{0.0869}) and cont\_prec@10 (\num{0.0273} versus
+\num{0.0236}).
+
+\emph{The honest weakness.} The ANN datapoint is a \emph{single unreplicated run
+on PCA-128}. It has never been measured on the canonical PCA-192 split, so it
+must not be read in the same column as the \num{0.12299} bar
+(Table~\ref{tab:models}, dagger), and the only defensible GRU-versus-ANN
+statement is the same-space one above.
+
+{\rightskip=0pt plus 2em \emph{Sources: \texttt{2026-\allowbreak 07-\allowbreak 15c-\allowbreak nexttrack-\allowbreak phase2-\allowbreak model-\allowbreak sweep.md},
+\texttt{2026-\allowbreak 07-\allowbreak 25-\allowbreak nexttrack-\allowbreak dual-\allowbreak tower-\allowbreak fusion-\allowbreak scan.md},
+and \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak pre-\allowbreak encoder-\allowbreak scan.md}.}\par}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{mc_view_redundancy}
+  \caption{Why a second tower cannot add information here. \emph{Left}: the
+    three tower views --- \texttt{latent} $x_t$, \texttt{delta}
+    $x_t-x_{t-1}$, \texttt{cummean} the running prefix centroid --- are all
+    deterministic, strictly causal functions of the \emph{same} prefix, so
+    $\sigma(\text{tower B})\subseteq\sigma(\text{tower A})$: tower B holds a
+    re-compression of what tower A already receives, never new information, and
+    the recurrence's own gates already accumulate a running mean and a first
+    difference. Measured, the best dual arm \num{0.11880} (\num{170} of
+    \num{1431}) ties the \num{0.12299} (\num{176}) baseline, paired $\Delta$
+    $-\num{0.00419}$ $[-\num{0.013},+\num{0.004}]$. \emph{Right}: what genuine
+    multi-modal fusion looks like, where each stream has a private region the
+    other cannot supply --- measured exactly once on this corpus, with
+    \texttt{delta}$+$\texttt{cummean} beating \emph{both} parents with CI above
+    zero ($+\num{0.02865}$, $+\num{0.02027}$) at a hopeless absolute
+    \num{0.08665}. The inner ellipses are drawn strictly inside tower A's
+    boundary because the panel asserts a subset relation. The right panel's
+    ``CKA \num{0.458}'' is a similarity, not a fraction of newness: it says the
+    two towers' representation geometries are only \emph{partly} alike, which
+    makes the accompanying ``$+0$ new next-item concepts'' the informative half of
+    the pair. All the recall figures quoted on this figure are
+    \texttt{fusion\_layers}${}=0$ arms except the parents of the
+    \texttt{delta}$+$\texttt{cummean} contrast, which are
+    \texttt{fusion\_layers}${}=1$ throughout and therefore internally comparable.}
+  \label{fig:mc-view-redundancy}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.82\textwidth]{nexttrack_music_scatter}
+  \caption{The families differ in \emph{kind}, not only in rank. music@10
+    against Recall@10 for all \num{53} next-track runs, one marker per run,
+    coloured and shaped by predictor family: \texttt{seq-blend} (blue circles),
+    \texttt{seq-nexttrack} (green squares), \texttt{seq-markov} (purple
+    diamond), \texttt{seq-ann} (orange triangle), \texttt{seq-stacker} (cyan
+    down-triangles), \texttt{seq-popularity} (red $\times$ at the bottom left).
+    The two metrics correlate at $r=\num{0.609}$ but crown different winners:
+    the content-regressing \texttt{seq-nexttrack} family lands the
+    \emph{musically closest misses} (best music@10 \num{0.482}) while the blend
+    family wins exact recall. \textbf{One in-figure annotation is stale and must
+    be read against Section~\ref{sec:board}}: the point it labels ``Recall@10
+    champion (\num{0.223})'' is the $\tau0.10$ scan cell whose nominal edge was
+    judged sub-noise and whose default was held --- it is the highest Recall@10
+    measured on this split, but the champion is \Rp+M+\Cp{} at \num{0.21174}. Read against Section~\ref{sec:metrics}, this is
+    why music@10 makes a usable grounding factor: it is a smooth superset of
+    recall, not a substitute for it. \emph{Source:
+    \texttt{2026-\allowbreak 07-\allowbreak 20-\allowbreak musical-\allowbreak distance-\allowbreak metric.md}.}}
+  \label{fig:nexttrack-music-scatter}
+\end{figure}
+
+\clearpage
+\section{MMR is the first honest crown lever, and it de-concentrates artists for free}
+\label{sec:mmr}
+
+\emph{Rationale.} Every prior attempt to raise holisticness@10 raised it by
+predicting worse (Section~\ref{sec:metrics}). MMR re-ranking is different for a
+structural reason: it is eval-time only, so the trained weights are
+bit-identical across $\lambda$ arms and $\lambda=1$ is an exact identity gate,
+and its single greedy penalty moves \emph{three} of the crown's four factors the
+same way at once. ild is literally the quantity the penalty maximizes, so it
+rises by construction. Eagerness falls as a \emph{side effect} with no notion of
+artist anywhere in the rule, because same-artist tracks are sonic near-neighbours
+and the max-similarity penalty preferentially evicts them. And music@10
+\emph{rises}, because a sonically spread top-ten covers more of the
+neighbourhood around the truth, so the best-of-ten cosine to the true next track
+goes up. Only exact recall pays.
+Figure~\ref{fig:mc-mmr-geometry} draws the geometry;
+Figure~\ref{fig:nexttrack-mmr-tradeoff} shows the original offline sweep.
+
+\emph{Results.} Ten arms on the canonical split, same host, serialized, none
+failed; every arm's $H$ recomputed from \texttt{predictions.json} under one code
+path and validated against storage to $|\Delta|\le\num{2.1e-7}$; all statistics
+paired bootstrap with all five facets and hence $H$ recomputed for both arms on
+each resampled index set. \textbf{Eight of eight $\lambda<1$ arms lift $H$ with
+paired $\Delta H$ CI entirely above zero} (Table~\ref{tab:mmr}). The best
+\emph{free} operating point is the single GRU at $\lambda=\num{0.7}$ with
+\texttt{mmr\_pool} \num{50}: $H$ \num{0.030355}, $+\SI{22.1}{\percent}$ over the
+all-time healthy bar \num{0.024872} and \num{5.4} measured half-widths above it,
+at Recall@10 \num{0.120196} (\num{172}) with $\Delta$ recall $-\num{0.002908}$
+$[-\num{0.008386},+\num{0.002795}]$ \emph{straddling} zero and $|\Delta|$ far
+inside the $\pm\num{0.015}$ band. It also beats the nearest pure-$\lambda$ point
+on $H$ by $+\num{0.000889}$ $[+\num{0.000497},+\num{0.001360}]$ at a recall tie,
+so its rank as best free arm is resolved rather than nominal.
+
+\emph{Results --- the facets, with the arm named.} The three-factors-together
+move is clearest on the GRU's deepest $\lambda$ arm, \textbf{B3
+($\lambda=\num{0.7}$, pool \num{200})}, which is \emph{priced} rather than free:
+there, as $\lambda$ goes \num{1.0}$\to$\num{0.7}, ild rises
+\num{0.4536}$\to$\num{0.5314}, artist\_adj falls
+\num{0.3474}$\to$\num{0.3129}, artist\_conc falls
+\num{0.3559}$\to$\num{0.2707} and music@10 \emph{rises}
+\num{0.4558}$\to$\num{0.4747}, with mood\_coh moving only
+\num{0.4788}$\to$\num{0.4585} ($-\SI{4.2}{\percent}$). The \emph{free} arm B4
+(same $\lambda$, pool \num{50}) makes the same moves less far --- ild
+\num{0.5017}, artist\_adj \num{0.3270}, artist\_conc \num{0.3019}, music@10
+\num{0.4670}, mood\_coh \num{0.4671} --- which is precisely the trade the pool
+axis buys back. Every quoted facet is a cosine in the content metric $M$
+(Section~\ref{sec:machinery}), which is also the space MMR's penalty acts in;
+that shared space is why one knob moves four numbers. The instrument transferred
+exactly: an offline sweep on the champion checkpoint had projected
+\num{0.2103}/\num{0.1936}/\num{0.1642}/\num{0.1097} for $\lambda$
+\num{0.9}/\num{0.7}/\num{0.5}/\num{0.3} and the native runs returned
+\num{0.21034}/\num{0.19357}/\num{0.16422}/\num{0.10971}.
+
+\begin{table}[ht]
+  \centering
+  \caption{The eval-time MMR $\lambda$ frontier, ten arms on
+    \dsid{seq-20260715-131139} (\num{1431} test sessions), grouped by anchor and
+    sorted within group by $\lambda$. $\lambda$ and \texttt{mmr\_pool} are
+    \emph{eval-time} parameters: within a group the trained weights are
+    bit-identical, so $\lambda=\num{1.0}$ is an exact identity control. Paired
+    $\Delta$ is a per-session paired bootstrap against that control (\num{2000}
+    resamples, rng 1337); CI bounds are given to three decimals, and a CI
+    straddling zero is a \emph{tie}. $H$ is the \emph{generation-3 (live)}
+    composite. Tiers are the campaign's own decision rule: TIER-1 \emph{free}
+    ($\Delta H$ above zero at a recall tie), TIER-2 \emph{priced} ($\Delta$
+    recall CI below zero), TIER-3 \emph{rejected} (frontier mapping only).
+    \textbf{Six definitions were registered on 2026-07-26 and \emph{none} was
+    promoted}; the recall champion is unchanged. \textbf{Bolding.} The bolded row
+    is B4, the best \emph{free} operating point, and the two bolded cells are the
+    best $H$ and $\Delta H$ among the free arms. \textbf{Recall is deliberately
+    unbolded in this table}: it is not a maximization target here but a
+    \emph{constraint} --- each group's $\lambda=\num{1.0}$ control is the highest
+    recall in its group by construction, since MMR can only reorder a list the
+    control already produced, and a free arm's merit is that its recall $\Delta$
+    \emph{straddles} zero rather than that it is large. Recall also must not be
+    compared \emph{across} the two groups: the anchors are different models.
+    \emph{Source:
+    \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak mmr-\allowbreak lambda-\allowbreak frontier.md}.}}
+  \label{tab:mmr}
+  {\scriptsize\setlength{\tabcolsep}{2.2pt}\begin{tabular}{llccccl}
+    \toprule
+    Arm & $\lambda$ / pool & R@10 (raw) & $\Delta$ recall [95\% CI] & $H$ gen 3 & $\Delta H$ [95\% CI] & Tier \\
+    \midrule
+    B0 GRU h256 & 1.0 / --- & 0.12299 (176) & --- & 0.024538 & --- & control \\
+    B1 GRU h256 & 0.9 / 200 & 0.12089 (173) & $-0.0021$ [$-.006$, $+.002$] & 0.026761 & $+0.0022$ [$+.0016$, $+.0029$] & TIER-1 free \\
+    B2 GRU h256 & 0.8 / 200 & 0.11950 (171) & $-0.0036$ [$-.009$, $+.001$] & 0.029458 & $+0.0049$ [$+.0040$, $+.0059$] & TIER-1 free \\
+    \best{B4 GRU h256} & 0.7 / 50 & 0.12020 (172) & $-0.0029$ [$-.008$, $+.003$] & \best{0.030355} & \best{$+0.0058$ [$+.0048$, $+.0068$]} & TIER-1 free \\
+    B3 GRU h256 & 0.7 / 200 & 0.11461 (164) & $-0.0085$ [$-.016$, $-.001$] & 0.034171 & $+0.0096$ [$+.0083$, $+.0110$] & TIER-2 priced \\
+    \midrule
+    A0 \Rp+M+\Cp & 1.0 / --- & 0.21174 (303) & --- & 0.008603 & --- & control \\
+    A1 \Rp+M+\Cp & 0.9 / 200 & 0.21034 (301) & $-0.0013$ [$-.008$, $+.005$] & 0.010435 & $+0.0018$ [$+.0015$, $+.0022$] & TIER-1 free \\
+    A2 \Rp+M+\Cp & 0.7 / 200 & 0.19357 (277) & $-0.0181$ [$-.029$, $-.008$] & 0.015289 & $+0.0067$ [$+.0057$, $+.0077$] & TIER-2 priced \\
+    A3 \Rp+M+\Cp & 0.5 / 200 & 0.16422 (235) & $-0.0473$ [$-.061$, $-.033$] & 0.023576 & $+0.0150$ [$+.0132$, $+.0168$] & TIER-3 rejected \\
+    A4 \Rp+M+\Cp & 0.3 / 200 & 0.10971 (157) & $-0.1019$ [$-.120$, $-.084$] & 0.031626 & $+0.0230$ [$+.0206$, $+.0256$] & TIER-3 rejected \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{Interpretation --- the mechanism, resolved.} A pre-registered question
+asked whether artist concentration is \emph{responsive} to a sonic penalty or
+\emph{sticky}. It resolves unanimously to responsive: in eight of eight arms
+$|\Delta\text{artist\_conc}|$ exceeds $|\Delta\text{artist\_adj}|$, by
+\numrange{1.59}{3.06}$\times$, where the sticky hypothesis required a ratio
+below \num{0.5}. So a rule with no notion of artist in it de-concentrates artists
+faster than it reduces seed echo, and the planned explicit artist penalty is
+consequently dropped as the next move. The ratio also \emph{shrinks}
+monotonically as $\lambda$ falls (\num{3.06}$\to$\num{1.59} on the champion),
+i.e.\ the easy de-concentration is bought first and the mechanism saturates.
+Because the crown takes $\max(\text{artist\_adj},\text{artist\_conc})$ and
+concentration falls ${\sim}2.5\times$ faster, the two must cross: past that
+switch the eagerness factor becomes the stiff one and each further recall point
+buys progressively less crown. Note that this verdict rests on the \emph{sign
+and ratio} of point estimates across eight arms --- its strength is unanimity,
+not an interval on the ratio. The $\Delta H$ and $\Delta$ recall figures, and
+hence the tiers, are paired-CI-backed.
+
+\emph{Why the plain GRU benefits and the champion does not.} The pre-registered
+expectation was the opposite: the champion's eagerness is $1.9\times$ the GRU's,
+so its $(1-\text{eager})$ factor enters at \num{0.308} against \num{0.644} and
+it has far more headroom. The measurement says no --- at $\lambda=\num{0.7}$ the
+GRU reaches $H$ \num{0.034171} against the champion's \num{0.015289}, a
+$2.24\times$ gap whose \emph{absolute} size grows as $\lambda$ falls
+(\num{0.01633} at $\lambda=\num{0.9}$, \num{0.01888} at $\lambda=\num{0.7}$)
+even though the ratio itself narrows slightly, from $2.56\times$ to $2.24\times$,
+over the only two $\lambda$ values where both anchors were run
+(Figure~\ref{fig:mc-lambda-frontier}). The reason is in the facets. At
+\emph{matched} $\lambda=\num{0.7}$ and pool \num{200}, the champion's mood\_coh
+falls \num{0.3982}$\to$\num{0.3643} ($-\SI{8.5}{\percent}$) against the GRU's
+\num{0.4788}$\to$\num{0.4585} ($-\SI{4.2}{\percent}$) --- a factor of two, not a
+collapse. Pushed to $\lambda=\num{0.3}$ the champion's mood\_coh does collapse to
+\num{0.2378} ($-\SI{40}{\percent}$), but no GRU arm was run that deep, so the
+often-quoted $\SI{40}{\percent}$-versus-$\SI{4}{\percent}$ contrast is
+\emph{not} like-for-like and the honest matched figure is the $2\times$ one.
+The champion's recall is built substantially on artist
+adjacency supplied by its Markov leg, so diversifying away from the seed artist
+also walks it out of the prefix's mood neighbourhood --- it pays twice. MMR's
+value therefore scales with the \emph{health} of the other three factors, not
+with headroom to de-eager. Figure~\ref{fig:mc-candidate-eigen} shows the same
+asymmetry from the inside, as the geometry of the candidate set the two models
+produce.
+
+\emph{What is not established.} Nothing here is promoted. Six definitions were
+\emph{registered} on 2026-07-26; a mandatory second-split robustness confirm and
+user approval are still pending; the best free arm's rank over its neighbour is
+resolved at only ${\sim}\num{0.9}$ half-widths of its own comparison, on one
+split. And the campaign leaves a live calibration question open: the grounding
+floor \num{0.34} was chosen to \emph{cancel} recall-destroying $H$ gains, and
+MMR is the first lever that moves music@10 the \emph{other} way, so the constant
+is currently operating outside the regime it was calibrated for.
+
+{\rightskip=0pt plus 2em \emph{Sources: \texttt{2026-\allowbreak 07-\allowbreak 22-\allowbreak session-\allowbreak holisticness-\allowbreak and-\allowbreak antieager-\allowbreak levers.md},
+and \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak mmr-\allowbreak lambda-\allowbreak frontier.md}.}\par}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{mc_mmr_geometry}
+  \caption{Sonic diversification de-eagers artists for free. \emph{Left}: the
+    greedy rule
+    $\arg\max_i \lambda\,\mathrm{rel}(i)-(1-\lambda)\max_{j\in\text{selected}}\cos(M_i,M_j)$
+    applied at $\lambda=\num{0.7}$ over a candidate pool. Each candidate keeps its
+    own artist marker \emph{shape}; a red ring marks the three candidates the
+    re-rank drops from the top eight, and all three are the \emph{same} artist as
+    an already-picked track sitting close to it. Each pick's green ring is an
+    \emph{iso-penalty contour}, not a cutoff: the penalty
+    $\max_j\cos(M_i,M_j)$ is continuous, so a sufficiently relevant candidate
+    survives inside a contour --- two do, which is the mechanism working correctly
+    rather than an inconsistency. \emph{Right}: the two resulting
+    lists --- pure relevance returns seven of eight from one artist, MMR returns
+    four artists --- with no artist term anywhere in the rule. The pool is
+    schematic (real similarity is cosine between \num{517}-dimensional vectors
+    and is not drawable in two dimensions, so planar proximity stands in) and the
+    list's own Herfindahl arithmetic is the illustration's; the \emph{measured}
+    facet moves sit in the separate callout, and they are arm B3 (single GRU,
+    \texttt{mmr\_pool} \num{200}, TIER-2 \emph{priced}), not the free arm: at
+    $\lambda$ \num{1.0}$\to$\num{0.7}, ild \num{0.4536}$\to$\num{0.5314}, artist\_conc
+    \num{0.3559}$\to$\num{0.2707}, artist\_adj \num{0.3474}$\to$\num{0.3129},
+    music@10 \num{0.4558}$\to$\num{0.4747}, with
+    $|\Delta\text{conc}|>|\Delta\text{adj}|$ in eight of eight arms at
+    \numrange{1.59}{3.06}$\times$.}
+  \label{fig:mc-mmr-geometry}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.9\textwidth]{mc_lambda_frontier}
+  \caption{The same lever is free on one model and ruinous on the other. The
+    MMR $\lambda$ frontier in (Recall@10, generation-3 $H$) space, one traced
+    curve per anchor at fixed \texttt{mmr\_pool} \num{200}: the single GRU's thick
+    trace climbs almost \emph{vertically} ($H$ \num{0.0245}$\to$\num{0.0342} over
+    $\lambda$ \num{1.0}$\to$\num{0.7}) while the champion's slides
+    \emph{sideways}, spending $-\num{0.102}$ recall to buy $+\num{0.023}$ $H$.
+    Note that the GRU trace's top end, $H$ \num{0.0342}, is arm B3 --- TIER-2
+    \emph{priced}, $\Delta$ recall CI below zero --- so the vertical climb runs
+    one step past the free region; the star is the genuinely free best arm B4 and
+    it is drawn \emph{off} the trace because it changes \texttt{mmr\_pool} to
+    \num{50} and so does not belong to the same fixed-pool sweep. Tier is encoded
+    as a ring (free / priced / rejected / $\lambda{=}1$ control), the $\lambda$
+    labels carry their pool where it differs, and both anchors' own
+    $\pm\num{0.015}$ recall floors are marked (\num{0.108} for the GRU,
+    \num{0.197} for the champion). The dashed double arrow is an eye guide between
+    the two anchors at matched $\lambda=\num{0.7}$, not a fitted curve.
+    \textbf{Nothing plotted here is promoted.}}
+  \label{fig:mc-lambda-frontier}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_mmr_tradeoff}
+  \caption{The original offline $\lambda$ sweep on the champion checkpoint,
+    which is what motivated running the native arms of Table~\ref{tab:mmr}.
+    Left axis: Recall@10 (red) falling
+    \num{0.2117}$\to$\num{0.2103}$\to$\num{0.1936}$\to$\num{0.1642}$\to$\num{0.1097}
+    across $\lambda$ off/\num{0.9}/\num{0.7}/\num{0.5}/\num{0.3}, with the
+    $\pm\num{0.015}$ tie band shaded around the $\lambda$-off point. Right axis:
+    ild@10 rising \num{0.406}$\to$\num{0.815}, artist\_adj@10 falling
+    \num{0.610}$\to$\num{0.293}, music@10 rising \num{0.454}$\to$\num{0.492} ---
+    the three-factors-together move, including the grounding factor, that
+    distinguishes this lever from the degenerate ones. \textbf{The right axis
+    carries the individual facets, each on its own $0$--$1$ scale, not $H$
+    itself} --- the figure's own axis label calls them ``holisticness metrics'',
+    which is the facet suite, and $H$ (${\sim}\num{0.01}$--$\num{0.03}$ here)
+    is nowhere on this plot. The transfer to the native runs was exact to four
+    decimals. \emph{Source:
+    \texttt{2026-\allowbreak 07-\allowbreak 22-\allowbreak session-\allowbreak holisticness-\allowbreak and-\allowbreak antieager-\allowbreak levers.md}.}}
+  \label{fig:nexttrack-mmr-tradeoff}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.9\textwidth]{mc_candidate_eigen}
+  \caption{The eigen-shape of a next-track belief, and why the champion is the
+    harder model to diversify. \textbf{Provenance first, because it is unlike
+    every other figure here: this panel is not in the record.} It is two
+    \texttt{extend} invocations run by the author for this document, on one
+    five-item seed prefix, single seed, ten \emph{generation steps} --- a
+    generation step being one round of ``rank, take the top candidate, append it
+    to the prefix, re-rank'', i.e.\ the autoregressive continuation mode rather
+    than the single-step protocol of Figure~\ref{fig:protocol}. No server run
+    record exists for either invocation and no campaign report contains these
+    numbers; they are reproducible only from
+    \texttt{docs/figures/make\_concept\_figures.py}. Read it as an illustration
+    of a mechanism, never as evidence. \emph{Left}: the participation ratio
+    $1/\sum_i s_i^2$ (Section~\ref{sec:machinery}) of the candidate-set variance
+    spectrum at each step. The champion blend falls \emph{monotonically} over
+    four successive steps (pr \num{2.35}$\to$\num{1.79}$\to$\num{1.23}$\to$\num{1.06},
+    mean over all ten \num{3.14}) while the single GRU fluctuates
+    non-monotonically without trend over the whole run
+    (\numrange{2.07}{8.64}, mean \num{5.87}) --- note that the GRU's own minimum,
+    \num{2.07} at step 3, falls \emph{below} the band drawn for it, so the
+    contrast is monotone-collapse versus no-trend, not inside-band versus
+    outside. \emph{Middle}: three spectra --- the GRU at its step-5 point
+    ($\mathrm{pr}=\num{7.11}$, leading share \num{0.256}) against the blend's
+    first and fourth steps, the latter putting \num{0.972} of the variance on a
+    single axis. \emph{Right}: what that means geometrically --- a spread cloud
+    leaves \emph{what} comes next open, a collapsed one leaves only \emph{how far}
+    along one line; each cloud's drawn aspect is the measured
+    $\sqrt{\lambda_1/\lambda_2}$. The one external check available is that the
+    blend's collapsed step reproduces the album-lock signature recorded in
+    \texttt{predictors/seq\_extend.py} (pr \num{1.23} versus \num{1.25}, leading
+    share \num{0.897} versus \num{0.89}).}
+  \label{fig:mc-candidate-eigen}
+\end{figure}
+
+\clearpage
+\section{The failures, and the measured mechanism in each case}
+\label{sec:failures}
+
+Five design axes have been refuted on this corpus. What makes them worth a
+section is not the nulls themselves --- Section~\ref{sec:power} shows the
+instrument could not have detected a moderate win anyway --- but that in four of
+the five the \emph{mechanism} was subsequently measured rather than argued.
+
+\subsection{Dual-tower view fusion: the second tower's input is measurable with respect to the first's}
+\label{sec:fail-views}
+
+\emph{Rationale and mechanism.} The failure can be stated before any run. The
+three tower views are all deterministic, strictly causal functions of the
+\emph{same} prefix, so $\sigma(\text{view}_t)\subseteq\sigma(x_0..x_t)$: tower B
+holds a lossier summary of what tower A already receives and can add
+optimization-level diversity, never new information. The second half of the
+mechanism is about the ensemble story: joint end-to-end training is precisely
+what \emph{destroys} the independence that makes combination pay. The fixed
+z-blend works because its legs are trained separately and never see each other's
+gradients; two towers trained jointly through one loss co-adapt into a single
+estimator with two halves. That is why the same corpus supports a \num{0.212}
+blend and refuses a \num{0.119} joint dual tower.
+
+\emph{Results.} Zero of the eight arms in the 2026-07-25 dual-tower scan beat the
+baseline with paired CI above zero. The best of those eight, latent/latent at
+\texttt{fusion\_layers}${}=0$, reaches \num{0.11880} (\num{170}) against
+\num{0.12299} (\num{176}), $-\num{0.00419}$
+$[-\num{0.01258},+\num{0.00419}]$, a tie. (One \emph{later} dual arm, T1-f0 in
+the 2026-07-26 batch, nominally exceeds the bar at \num{0.12369}; it also ties,
+$+\num{0.00070}$ $[-\num{0.01188},+\num{0.01328}]$, and
+Section~\ref{sec:fail-relu} explains why it is a repair rather than a win. No
+dual arm anywhere clears zero.) Capacity is ruled out by the single-GRU width
+control at \num{871017} parameters, which ties the bar at \SI{0.098}{\percent}
+parity with the \texttt{fusion\_layers}${}=1$ dual arms (\num{871872}) --- note
+that the parity is with those, not with the \num{789696}-parameter $f0$ arm just
+quoted, which the control outweighs by \SI{10}{\percent} and still only ties.
+Figure~\ref{fig:nexttrack-dualtower-matrix} gives the
+\texttt{fusion\_layers}${}=1$ view matrix. The view attribution rule makes the
+mechanism decidable: mixed cells
+containing a raw-latent tower \emph{tie} their latent/latent parent and beat only
+their weaker parent, whereas the one pair with no raw-latent tower at all beats
+\emph{both} its parents with CI above zero. Complementarity is real and measured;
+it has nothing left to contribute once a raw-latent tower is present.
+
+\emph{A citation that could not be made.} Two further diagnostics were proposed
+for this section --- a rank comparison of the concatenated two-tower
+representation against each tower alone, and a cross-prediction $R^2$ between
+identical-view towers --- and neither exists anywhere in this instance: not in
+any \texttt{experiments/*.md} report, not in \texttt{PROJECT-FACTS.md}, not in
+any run's metrics. Under this project's integrity rules the figures are omitted
+and their numbers are not printed here even as illustration. The citable
+substitute for the diversity-collapse claim is that two independently initialized
+\emph{same-view} towers fused jointly tie both the baseline and the
+parameter-matched control, buying none of the implicit-ensemble gain that
+independently trained legs demonstrably do buy.
+
+{\rightskip=0pt plus 2em \emph{Source: \texttt{2026-\allowbreak 07-\allowbreak 25-\allowbreak nexttrack-\allowbreak dual-\allowbreak tower-\allowbreak fusion-\allowbreak scan.md}.}\par}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.72\textwidth]{nexttrack_dualtower_matrix}
+  \caption{The raw latent view subsumes the engineered ones. Recall@10 for the
+    two-tower view pairing over $\{\texttt{latent},\texttt{delta},
+    \texttt{cummean}\}$, \textbf{all six cells at
+    \texttt{fusion\_layers}${}=1$}, one run each (upper triangle only; the grey
+    lower cells were not run because the pairing is symmetric). Reading the
+    diagonal is the argument: latent/latent \num{0.10273}, delta/delta
+    \num{0.05800}, cummean/cummean \num{0.06639} --- the views that discard raw
+    item identity are catastrophic even with a full recurrence over them.
+    \textbf{Every cell sits below the single-GRU baseline \num{0.12299} named in
+    the title, and the outlined best cell \emph{loses} to it}, paired $\Delta$
+    $-\num{0.02027}$ $[-\num{0.03494},-\num{0.00697}]$, CI below zero. The dual
+    arm that merely \emph{ties} the baseline is the \texttt{fusion\_layers}${}=0$
+    variant of that same view pair (\num{0.11880},
+    $-\num{0.00419}$ straddling zero), and it is \emph{not} in this matrix ---
+    which is itself the point of Section~\ref{sec:fail-head}: at fixed views,
+    removing the fusion head is worth more than any choice of views.
+    \emph{Source:
+    \texttt{2026-\allowbreak 07-\allowbreak 25-\allowbreak nexttrack-\allowbreak dual-\allowbreak tower-\allowbreak fusion-\allowbreak scan.md}.}}
+  \label{fig:nexttrack-dualtower-matrix}
+\end{figure}
+
+\subsection{The MLP pre-encoder: a rectifier deletes half of a zero-centred latent}
+\label{sec:fail-relu}
+
+\emph{Rationale.} This is the sharpest mechanism on record because the design
+left the ReLU as the only variable. A GRU's own input transform is already
+linear: each gate computes $W_i x$. Prepend a linear pre-encoder $V$ of shape
+$(\text{pre\_hidden}\times192)$ and the composition is
+$W_i(Vx)=(W_iV)x$; when $\text{pre\_hidden}\ge\text{latent\_dim}$, $V$ is
+generically full rank, so $W_iV$ ranges over exactly the same space of matrices
+as $W_i$. \textbf{A linear pre-encoder is therefore provably
+expressivity-neutral} --- it adds zero functions to the hypothesis space. The
+only thing the pre-MLP actually changes is the ReLU, and the ReLU is applied to
+PCA coordinates, which are zero-centred and near-symmetric \emph{by
+construction}: about half of every input vector's coordinates are negative, and
+half-wave rectification sets every one of them to exactly zero. Sign is not
+recoverable afterwards, so this is a permanent deletion, not a
+reparametrization. A ReLU layer is lossless on signed input only if it is
+over-complete enough to re-encode the negative half-space --- canonically
+$\mathrm{concat}[\mathrm{relu}(x),\mathrm{relu}(-x)]$ at $2\times$ width. At
+$\text{pre\_hidden}=256$ on a \num{192}-dimensional input the ratio is only
+$1.33\times$, so after rectification the layer carries \emph{fewer live
+coordinates than the input has dimensions}. Figure~\ref{fig:mc-relu-sign-loss}
+draws exactly this.
+
+\emph{Results.} The decisive single-tower ablation loses: MLP256$\to$GRU256
+scores \num{0.10901} (\num{156} of \num{1431}) against the baseline's
+\num{0.12299} (\num{176}), paired $\Delta$ $-\num{0.01398}$
+$[-\num{0.02657},-\num{0.00140}]$, CI below zero
+(Figure~\ref{fig:nexttrack-preencoder-forest}). The mechanism was then
+\emph{measured} by a counterfactual tap --- the model's own affine map with every
+ReLU deleted. Next-item genre decodability (\num{11184} probe test rows, \num{25}
+classes) reads raw latent \num{0.4033} accuracy / \num{0.7609} AUC $\to$
+pre-linear \num{0.4084} / \num{0.7667} (the affine map is \emph{neutral},
+${\sim}\num{0.8}\sigma$, exactly as $W_i(Vx)=(W_iV)x$ predicts) $\to$
+pre-ReLU \num{0.3700} / \num{0.7508} (the ReLU is the \emph{whole} loss,
+${\sim}\num{5.9}\sigma$). The zeroing is exact and quantified:
+\texttt{frac\_exact\_zero} on the rectified tap is \num{0.5327}, matching
+\texttt{frac\_negative\_coords} on the un-rectified tap to four digits, and
+$256\times(1-\num{0.5327})=\num{119.6}$ live units to carry \num{192} signed
+directions. The damage survives the recurrence: within one model, the tower fed
+rectified input reads \num{0.3929}/\num{0.7845} against its identical twin fed
+raw input at \num{0.4183}/\num{0.8004} (${\sim}\num{3.9}\sigma$), and the raw
+tower reproduces the standalone plain GRU (\num{0.4235}/\num{0.8006}). The
+repair signature confirms the direction of causation: adding a \emph{bare} tower
+alongside the pre-encoded one recovers $+\num{0.01468}$
+$[+\num{0.00278},+\num{0.02655}]$ over the single pre-encoded model yet only
+\emph{ties} the plain baseline ($+\num{0.00070}$
+$[-\num{0.01188},+\num{0.01328}]$) --- it restores an un-rectified path, it never
+exceeds it. Dose is flat and nominally negative throughout
+($\text{pre\_hidden}$ \num{0}/\num{128}/\num{256}/\num{384} $\to$
+\num{0.10273}/\num{0.09993}/\num{0.09713}/\num{0.09993}, every adjacent pair
+straddling zero, no interior peak), and placement is irrelevant --- rectifying
+both towers ties rectifying one.
+
+\emph{The honest confound.} The pre-MLP ends in Dropout, so pre-encoder arms
+receive GRU-\emph{input} dropout that the bare arms lack (the baseline drops the
+recurrent output only). Part of the measured harm may therefore be
+over-regularization. A \texttt{pre\_dropout} parameter to disentangle it is
+identified but not implemented.
+
+{\rightskip=0pt plus 2em \emph{Source: \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak pre-\allowbreak encoder-\allowbreak scan.md}.}\par}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{mc_relu_sign_loss}
+  \caption{A rectifier on a signed PCA latent is lossy compression dressed as
+    capacity. \emph{Left}: one real item's first \num{28} PCA-192 coordinates
+    (blue positive, red negative) with its rectified image overlaid --- every
+    negative coordinate is mapped to exactly \num{0} and, ReLU not being
+    injective, the sign is unrecoverable. \num{0.5046} of all
+    $\num{19402}\times\num{192}$ coordinates in this item space are negative by
+    construction, and the measured rectified \emph{tap} inside the trained model
+    reads \num{0.5327} (the two are kept distinct: the tap sits after a learned
+    affine map). \emph{Right}: the width budget --- at the built width \num{256}
+    only \num{119.6} units stay live to carry \num{192} signed directions, a
+    plain ReLU at $2\times$ width still averages under \num{192}, and only the
+    $\mathrm{concat}[\mathrm{relu}(x),\mathrm{relu}(-x)]$ split is exact, since
+    $x=\mathrm{relu}(x)-\mathrm{relu}(-x)$ needs both halves. This panel is a
+    budget, not a run measurement. It complements
+    Figure~\ref{fig:nexttrack-rectifier}, which measures the same mechanism as
+    decodability rather than drawing it.}
+  \label{fig:mc-relu-sign-loss}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_rectifier}
+  \caption{The rectifier, not the extra layer, is the whole loss. Next-item
+    genre decodability (probe accuracy; AUC printed inside each bar) across six
+    representation taps, \num{11184} probe test rows over \num{25} classes,
+    paired SE $\le\num{0.0065}$. Input side, left of the divider: raw latent
+    (gray) $\to$ the same map with every ReLU \emph{deleted} (green,
+    \num{0.4084}, neutral at ${\sim}\num{0.8}\sigma$) $\to$ the map as trained
+    (red, \num{0.3700}, ${\sim}\num{5.9}\sigma$ worse). After the recurrence,
+    right of the divider: the tower fed raw (green, \num{0.4183}) against its
+    identical twin fed rectified (red, \num{0.3929}, ${\sim}\num{3.9}\sigma$),
+    with the standalone plain GRU (blue, \num{0.4235}) reproducing the raw
+    tower. The affine map is free; the half-wave rectifier is not, and its damage
+    is still present after the GRU. \textbf{Two reading cautions.} The $y$ axis is
+    truncated to roughly \numrange{0.355}{0.445} with no break drawn, so the bar
+    \emph{heights} exaggerate what are \numrange{3}{8}\% relative differences in
+    probe accuracy; the claim rests on the annotated $\sigma$ multiples, not on
+    the visual drop. And a probe accuracy of \num{0.4033} on \num{25} classes is
+    far above chance but far from perfect --- these are decodability
+    \emph{differences}, not a statement that genre is fully recoverable from a
+    latent. \emph{Source:
+    \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak pre-\allowbreak encoder-\allowbreak scan.md}.}}
+  \label{fig:nexttrack-rectifier}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_preencoder_forest}
+  \caption{The pre-encoder axis at a glance, and the template for reading every
+    paired comparison in this document. Paired per-session bootstrap
+    $\Delta$Recall@10 against the reproduced single-GRU baseline (\num{2000}
+    resamples, rng 1337, $n=\num{1431}$), nine arms sorted by $\Delta$, with the
+    $\pm\num{0.015}$ practical tie band shaded and a black line at zero.
+    Controls are blue, pre-encoder arms red; the thick row is the decisive
+    ablation, MLP256$\to$GRU256 at $-\num{0.01398}$
+    $[-\num{0.02657},-\num{0.00140}]$ (\num{156} hits against \num{176}). Note
+    what the figure does \emph{not} show: no arm's CI clears zero on the
+    positive side, which is the shape of every architecture scan on this corpus
+    (Section~\ref{sec:power}). \emph{Source:
+    \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak pre-\allowbreak encoder-\allowbreak scan.md}.}}
+  \label{fig:nexttrack-preencoder-forest}
+\end{figure}
+
+\subsection{The fusion head is actively harmful, and the harm grows with each upstream rectifier}
+\label{sec:fail-head}
+
+\emph{Rationale.} Why would extra capacity between the encoder and the readout
+\emph{cost} accuracy? Because the retrieval geometry is fixed and external to the
+network. Training is in-batch InfoNCE over $L2$-normalized vectors and serving
+ranks the catalog by cosine to the predicted \num{192}-dimensional vector, so the
+readout's only job is to land in a \emph{direction} in a signed linear space it
+does not control. With \texttt{fusion\_layers}${}=0$ the map from
+$\mathbf{R}^{512}$ to $\mathbf{R}^{192}$ is a single unconstrained linear
+operator --- already the most general linear read of the recurrent state and
+exactly matched to the geometry it must hit. Inserting
+Linear$(512{\to}256)\to$ReLU$\to$Dropout$\to$Linear$(256{\to}192)$ does not
+restrict which directions are \emph{reachable}: the final map is unconstrained
+and $256>192$, so the image of the non-negative orthant of $\mathbf{R}^{256}$
+under a generic linear map generically \emph{positively spans} all of
+$\mathbf{R}^{192}$, and no prediction direction is lost. The cost is
+parametrization and noise, not reachability, and it comes in two parts. First,
+every direction with a negative coefficient must now be produced by
+\emph{cancellation} among non-negative activations rather than directly, so the
+loss spends gradient undoing a warp it never wanted --- and the warp is the same
+half-wave sign deletion as Section~\ref{sec:fail-relu}, now applied to the
+recurrent state instead of to the input. Second, and more concretely, the
+trailing Dropout injects multiplicative noise directly into the very vector whose
+\emph{direction} is being scored at retrieval time; a dropped unit does not
+attenuate the score, it rotates the prediction. Neither part is a claim about
+expressivity, and the argument's weight rests on the measurement below, which is
+CI-backed three times.
+
+\emph{Results.} Three independent paired measurements, all CI above zero in
+favour of \emph{removing} the head: $+\num{0.01607}$
+$[+\num{0.00210},+\num{0.03005}]$ in the redundant-view regime, $+\num{0.02027}$
+$[+\num{0.00629},+\num{0.03354}]$ in the complementary-view regime, and
+$+\num{0.02655}$ $[+\num{0.01398},+\num{0.03913}]$ with a pre-MLP on one tower.
+The head also \emph{costs} parameters to do this: \num{871872} with it against
+\num{789696} without, and \num{970432} against \num{888256} in the pre-encoder
+batch --- roughly \SI{10}{\percent} more parameters for a reliably worse result.
+\emph{On the ordering, be careful.} It is tempting to read
+$+\num{0.016}\to+\num{0.020}\to+\num{0.027}$ as a penalty growing with the number
+of upstream rectifiers, but the first two arms have \emph{no} upstream rectifier
+at all --- both are bare-tower regimes differing only in which views the towers
+read --- so that step cannot be attributed to rectifier count. All three
+intervals also overlap heavily and no pairwise test between them was run. What is
+defensible is weaker and still useful: the penalty \textbf{reproduces three times
+across three different regimes}, and the largest of the three is the one arm that
+does carry an upstream rectifier. The ordering itself is nominal.
+
+\emph{Interpretation.} The unifying observation across the whole family is
+checkable in the sources: \emph{the winning path contains zero half-wave
+rectifiers}. A GRU (sigmoid/tanh gates, sign-preserving and bounded) plus one
+\texttt{nn.Linear} to the latent dimension; and the single largest gain on
+record, the champion's content projection, is a bias-free \emph{linear} map with
+identity initialization trained by InfoNCE. Every arm that inserts a ReLU into
+that path loses --- the pooled ANN twin, which is a three-layer ReLU MLP, loses
+to the same-space GRU by $-\num{0.0245}$ $[-\num{0.039},-\num{0.011}]$. One
+counter-direction must be stated honestly: under the \emph{old} three-factor
+crown the \texttt{fusion\_layers}${}=1$ arms scored \emph{higher}, because the
+extra warp diffuses the top ten (raising ild, lowering artist\_adj) at the cost
+of exact hits. That apparent advantage disappears under the grounded composite,
+where no pre-encoder arm reaches $\Delta H$ CI above zero at all.
+
+{\rightskip=0pt plus 2em \emph{Sources: \texttt{2026-\allowbreak 07-\allowbreak 25-\allowbreak nexttrack-\allowbreak dual-\allowbreak tower-\allowbreak fusion-\allowbreak scan.md},
+and \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak pre-\allowbreak encoder-\allowbreak scan.md}.}\par}
+
+\subsection{Four learned combiners, four nulls, and an oracle that says there is nothing to learn}
+\label{sec:fail-combiners}
+
+\emph{Rationale.} The champion's fusion weights are hard-coded equal thirds,
+which looks like an obvious place to improve. It has now been attacked from four
+directions and all four fail, and the reason is best stated in the order that
+makes the weaker argument unnecessary. \textbf{First: there is nothing to learn.}
+Fit the three blend weights directly on the \emph{test} labels --- outright
+cheating, and therefore an upper bound on what \emph{any} weighting procedure
+could achieve --- and the result is statistically indistinguishable from equal
+thirds. If the optimum is a tie with the constant, then every parameter a learned
+combiner spends is pure variance with no bias left to remove, and no amount of
+data or cleverness changes that. \textbf{Second, and only then: even if there were
+something to learn, it could not be fitted here.} The count-based legs are built
+\emph{from} the train sessions, so on any train-derived validation slice they look
+near-perfect --- they are being scored on data they memorized --- and a
+weight-fitter therefore learns ``trust the count leg'', which is exactly wrong on
+a test distribution where \SI{55}{\percent} of targets have no counts at all.
+
+\emph{Results.} (1) The XGBoost stacker scores below its \emph{own} GRU base leg
+in every arm, on both splits, and each $\Delta$ is against the base leg on the
+\emph{same} split: on the canonical PCA-192 split \num{0.08526} against
+\num{0.12299}, paired $\Delta$ $-\num{0.0377}$
+$[-\num{0.056},-\num{0.020}]$; on the PCA-128 split
+\dsid{seq-20260715-030509} \num{0.0867} and \num{0.0797} against that split's
+GRU anchor of \num{0.1146}, paired $\Delta$ $-\num{0.0280}$
+$[-\num{0.045},-\num{0.011}]$ and $-\num{0.0349}$
+$[-\num{0.053},-\num{0.017}]$. All three CIs are below zero. A combiner scoring
+\emph{below its own input} needs an explanation, and there are three separable
+ones. Its
+training matrix emits exactly \emph{one} positive per train session plus \num{50}
+popularity-sampled negatives: \num{5723} positives against the GRU's
+\num{73632} teacher-forced steps over the same sessions, $12.87\times$ less
+signal. Its candidate distribution at fit time is one true item against \num{51}
+popularity-sampled candidates --- \SI{0.258}{\percent} of the catalog --- and at
+eval time it must rank all \num{19402}. And a \num{200}-round depth-6 booster is
+piecewise \emph{constant}, so ranking \num{19402} candidates with a step function
+produces large tied blocks broken arbitrarily by item index, which destroys
+ordering information the GRU leg already had; the z-blend by contrast is a
+strictly monotone continuous function of the legs' z-scores and preserves each
+leg's internal ordering exactly. (2) Reciprocal-rank fusion, which keeps only
+ranks and discards score magnitude, scores \num{0.1572}, $-\num{0.029}$ CI below
+zero --- direct evidence that the z-blend's retention of calibrated magnitude is
+the working part. (3) The \textbf{oracle}: coordinate-ascent weights fitted
+directly on the \emph{test} labels, an upper bound on any achievable weighting,
+reach \num{0.1901}, paired $\Delta$ $+\num{0.0042}$
+$[-\num{0.004},+\num{0.013}]$, straddling zero. Fitting the same weights on a
+train-val slice instead collapses to the degenerate vector $[0,1,0]$, pure
+Markov. (4) Representation-level \emph{joint end-to-end} fusion, the strongest
+form of the standing rebuttal, is Section~\ref{sec:fail-views}: eight arms, a
+\SI{0.098}{\percent} parameter-matched control, best arm a tie, six of eight
+losing outright.
+
+\emph{Interpretation.} Put the two halves together and the lane is closed from
+both ends. The combination weights would have to be estimated from \num{5723}
+sessions with one usable event each, while the things being combined were
+estimated from \num{73632} events --- and the oracle says the target of that
+estimation is statistically indistinguishable from the constant. So the z-blend
+wins because it is a \emph{zero-parameter} estimator of a quantity whose true
+value is (indistinguishably) equal thirds. The adopted corollary is that no
+further learned combiner should be proposed without a mechanism that is not
+capacity, not co-adaptation and not score-level fusion. The residual uncertainty
+is scope, not validity --- these nulls are established on one corpus with one
+very unusual property (a single user, \SI{55}{\percent} cold) and should not be
+generalized to session recommendation at large.
+
+{\rightskip=0pt plus 2em \emph{Sources: \texttt{2026-\allowbreak 07-\allowbreak 14-\allowbreak nexttrack-\allowbreak blend-\allowbreak and-\allowbreak ensemble.md},
+\texttt{2026-\allowbreak 07-\allowbreak 15c-\allowbreak nexttrack-\allowbreak phase2-\allowbreak model-\allowbreak sweep.md},
+\texttt{2026-\allowbreak 07-\allowbreak 18-\allowbreak nexttrack-\allowbreak literature-\allowbreak fit-\allowbreak campaign.md},
+and \texttt{2026-\allowbreak 07-\allowbreak 25-\allowbreak nexttrack-\allowbreak dual-\allowbreak tower-\allowbreak fusion-\allowbreak scan.md}.}\par}
+
+\subsection{Depth, width, direction: a spent lever, a weak instrument, and an objective artifact}
+\label{sec:fail-topology}
+
+\emph{Rationale.} Sessions here average \num{13.84} events, so the recurrence's
+job is to integrate ${\sim}14$ steps of a signed \num{192}-dimensional latent
+into one direction --- a short-horizon integration problem, not one that wants a
+deep feature hierarchy. Stacking layers buys hierarchy the task does not need
+while inserting more saturating stages between input and readout and adding
+inter-layer dropout.
+
+\emph{Results.} Depth is flat then falls off a cliff: 1-layer \num{0.0894},
+depth-2 \num{0.0922} (flat, in-band), depth-3 \num{0.0825} --- the only depth arm
+to lose to the first-order Markov bar, paired $\Delta$ $-\num{0.0245}$
+$[-\num{0.043},-\num{0.006}]$. A residual connection was never \emph{isolated}:
+the only residual arm is depth-2 at $h=256$ (\num{0.0908}) and no depth-2 $h=256$
+arm was run \emph{without} it, so the honest statement is only that the residual
+arm fails to beat the depth-2 $h=128$ arm (\num{0.0922}) at twice the width ---
+not that residual connections were tested and found neutral. Width is likewise closed on the rich space
+--- $h=425$ at $2.2\times$ the parameters ties $h=256$ --- \emph{but the
+instrument that established it is weaker than it looks}, and that caveat matters
+more than the result. The four PCA-192 width points read \num{176}/\num{162}/
+\num{173}/\num{179} hits for $h=$ \num{256}/\num{297}/\num{425}/\num{454}:
+non-monotone, spanning \num{0.0119} recall with no trend, and the $h=297$
+control actually \emph{lost} to $h=256$ ($-\num{0.00978}$
+$[-\num{0.01747},-\num{0.00280}]$, CI below zero) while $h=454$ tied it. So
+between-configuration jitter is ${\sim}\pm\num{0.01}$ --- roughly two-thirds of
+the tie band --- while \emph{same}-configuration reproduction is bit-identical.
+``Width is flat'' survives as a trend claim resting on the endpoints tying, not
+as a per-width measurement, and a single unreplicated param-matched control
+cannot carry a verdict. The prescribed replication (two runs on the second
+leak-free split; the path is deterministic, so this needs a second \emph{split},
+not a second seed) has not been bought.
+
+\emph{The bidirectional arm, and why it is not a directionality result.} The
+record's cleanest example of a confound that looks like a finding. A backward
+pass would let step $t$ read item $t+1$ and copy its own target, so the
+bidirectional arm could not use per-step teacher forcing at all and had to switch
+to a leak-free \emph{last-item} objective: encode the whole prefix, predict only
+the held-out next item. That reduces supervision from ${\sim}13$ targets per
+session to \num{1} --- the same \num{73632} against \num{5723} arithmetic that is
+the first mechanism behind the stacker, which is why the two worst designs on
+record share a cause. The measured collapse (Recall@10 \num{0.0482}
+$[\num{0.037},\num{0.059}]$, MRR \num{0.0225}, paired $\Delta$ versus the Markov
+bar $-\num{0.0587}$ $[-\num{0.077},-\num{0.041}]$, the largest single-arm harm on
+record) is therefore attributable to the \emph{objective}, not to
+directionality, and the report declines to close bidirectionality: a fair test
+would need a different leak-free scheme such as masked-item training. The
+two-tower family excludes bidirectional mode by construction, with the leakage
+argument written into its module docstring.
+
+{\rightskip=0pt plus 2em \emph{Sources: \texttt{2026-\allowbreak 07-\allowbreak 13-\allowbreak nexttrack-\allowbreak topology-\allowbreak scan.md},
+\texttt{2026-\allowbreak 07-\allowbreak 25-\allowbreak nexttrack-\allowbreak dual-\allowbreak tower-\allowbreak fusion-\allowbreak scan.md},
+and \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak pre-\allowbreak encoder-\allowbreak scan.md}.}\par}
+
+\clearpage
+\section{Power: at $n=\num{1431}$ the nulls are upper bounds, not proofs}
+\label{sec:power}
+
+\emph{Rationale.} Every null in Section~\ref{sec:failures} must be read against
+the resolution of the instrument that produced it, or it becomes a false closure.
+
+\emph{Results.} At this split's \num{1431} test sessions the paired-bootstrap CI
+half-width is ${\sim}\num{0.0124}$ on Recall@10 (the mean of the nine paired
+comparisons in the pre-encoder batch; \num{0.0128} for the nine in the
+dual-tower batch) and ${\sim}\num{0.0018}$ on holisticness@10. Against that, an
+entire architecture family spans very little: the ten-arm pre-encoder batch
+spans \num{0.02796} in recall (\numrange{0.09713}{0.12509}) and \num{0.003147}
+in grounded holisticness. Spread over resolution is therefore
+$\num{0.02796}/\num{0.0124}\approx\num{2.3}$ on recall and
+$\num{0.003147}/\num{0.0018}\approx\num{1.75}$ on the crown. Read that ratio as a
+count of \emph{separable tiers}: if the whole family spans $2.3$ half-widths, then
+at best about two groups of arms can be told apart, and about one on the crown ---
+a heuristic, not a theorem, but one the direct count bears out and then some.
+Those ten arms give nine adjacent gaps, and \emph{zero} of the nine adjacent
+recall gaps and \emph{zero} of the nine adjacent crown gaps exceed their own
+half-width: only the batch \emph{endpoints} separate at all. In the wider
+dual-tower batch only two of nine adjacent recall gaps clear it. Resolving a
+\num{0.005} recall difference --- a size chosen here as illustrative of a
+difference one would want to act on, not as a pre-registered threshold --- would
+need $\num{1431}\times(\num{0.0124}/\num{0.005})^2=\num{8801}$ test sessions,
+$6.2\times$ the current split, or roughly \num{44000} sessions of listening
+history at the split's \SI{20}{\percent} test fraction.
+Figure~\ref{fig:nexttrack-power} draws the curve.
+
+\emph{Interpretation --- and exactly which claims the caveat applies to.} The
+defensible statement is that \textbf{large harms were detected reliably} --- the
+pre-encoder's $-\num{0.0140}$, the fusion-head penalty's $+\num{0.0266}$,
+depth-3's $-\num{0.0245}$, the bidirectional arm's $-\num{0.0587}$, the stacker's
+\numrange{-0.038}{-0.028}, the degenerate centroid arm's $-\num{0.0566}$, all with
+CIs excluding zero --- while \textbf{moderate wins were never detectable at all}.
+Those two halves must be kept apart, because the phrase ``the nulls are
+power-limited'' is easy to over-apply. Three of the five refuted axes produced
+\emph{detections}, not nulls: the pre-encoder's harm, the fusion head's harm and
+depth-3's harm all have intervals excluding zero, and nothing about the
+instrument's resolution weakens them. What is power-limited is a different and
+narrower claim: the \emph{absence of a win} on each axis. Every one of the five
+axes ends in ``no arm cleared zero on the positive side'', and that sentence is an
+upper bound on the available gain, not a demonstration of zero --- the
+pre-encoder axis, for instance, is bounded at a tie ($+\num{0.0007}$ for its best
+arm) and no more. The same distinction applies to the \emph{tie} verdicts, which
+are the genuinely underpowered ones: the dual-tower family's best arm and the
+width closure both rest on straddling intervals that a larger split could
+resolve either way. It is \emph{not} ``these architectures do not work''.
+
+\emph{The nuance that must travel with the caveat.} The
+${\sim}\num{0.0124}$ figure is a \emph{cross-model} floor: it applies when two
+arms have separately trained weights, because then almost every test session can
+change its outcome. When two arms share \emph{bit-identical} trained weights and
+differ only in an eval-time re-rank, the pairing is far tighter and the
+instrument is \numrange{3}{33}$\times$ sharper --- across the eight MMR arms the
+\emph{measured} half-widths are $\mathrm{hw}(\Delta H)$
+\numrange{0.000382}{0.002476} and $\mathrm{hw}(\Delta\text{recall})$
+\numrange{0.004193}{0.018169}. The reason is visible in $n_{\text{disc}}$, the
+number of sessions whose hit@10 changed at all: as low as \num{9} at
+$\lambda=\num{0.9}$ against \num{188} at $\lambda=\num{0.3}$, because
+re-ranking the top of a candidate pool only flips sessions whose true item
+crosses the $k=10$ boundary. That sharpness overturned a pre-registered call ---
+one arm budgeted as ``likely unresolvable'' at \numrange{0.6}{0.8} conservative
+half-widths in fact resolved at \num{4.8} \emph{measured} ones. Two riders:
+measured half-widths \emph{grow} with distance from the control
+(\num{0.000382} at $\lambda=\num{0.9}$ to \num{0.002476} at
+$\lambda=\num{0.3}$), so the instrument is sharpest exactly where the effects
+are smallest; and holisticness@10's absolute scale differs ${\sim}3\times$
+between models (\num{0.0018} is \SI{21}{\percent} of the champion blend's $H$ but
+only \SI{7}{\percent} of the single GRU's), so the crown instrument is
+intrinsically ${\sim}3\times$ more precise on the GRU than on the champion. The
+practical rule this record now follows is to budget the minimum detectable
+effect from the \emph{pairing structure} of the comparison and to report the
+measured per-arm half-width rather than a family constant.
+
+{\rightskip=0pt plus 2em \emph{Sources: \texttt{2026-\allowbreak 07-\allowbreak 25-\allowbreak nexttrack-\allowbreak dual-\allowbreak tower-\allowbreak fusion-\allowbreak scan.md},
+\texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak pre-\allowbreak encoder-\allowbreak scan.md},
+and \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak mmr-\allowbreak lambda-\allowbreak frontier.md}.}\par}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_power}
+  \caption{The architecture nulls are power-limited, and this is the figure that
+    reframes Section~\ref{sec:failures}. Paired-bootstrap CI half-width on
+    Recall@10 against test-set size $n$ on a log axis, falling as
+    $1/\sqrt{n}$ and anchored at the measured point $n=\num{1431}$,
+    half-width \num{0.0124} (red dot). The dashed gray line at \num{0.028} is
+    the \emph{entire} spread of an architecture family; the dotted green line at
+    \num{0.005} is a difference one would want to be able to act on --- an
+    illustrative choice, not a pre-registered threshold --- and it meets the curve
+    only at $n\approx\num{8800}$ sessions, $6.2\times$ this split. The boxed
+    callout gives spread over resolution as \num{2.3} on recall, from which the
+    ``about two separable tiers'' follows as a heuristic
+    ($\text{tiers}\approx\lfloor\text{spread}/\text{half-width}\rfloor$); the
+    callout's ``eight adjacent arms'' is loose --- the batch has ten arms and
+    therefore nine adjacent gaps, none of which clears its own half-width. Read
+    with Section~\ref{sec:power}: this floor applies to \emph{separately trained}
+    arms; shared-weight eval-time comparisons such as Table~\ref{tab:mmr}'s are
+    \numrange{3}{33}$\times$ sharper. \emph{Sources:
+    \texttt{2026-\allowbreak 07-\allowbreak 25-\allowbreak nexttrack-\allowbreak dual-\allowbreak tower-\allowbreak fusion-\allowbreak scan.md},
+    and \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak pre-\allowbreak encoder-\allowbreak scan.md}.}}
+  \label{fig:nexttrack-power}
+\end{figure}
+
+\clearpage
+\section{Where the gains actually came from}
+\label{sec:gains}
+
+Read as one arc, the record says something narrower and more useful than ``the
+blend is best''. Four claims survive.
+
+\emph{Gains came from adding a signal of a different kind, never from more
+model.} The board moved three times: when a co-occurrence lookup was fused with
+a sequence model (paired $\Delta$ $+\num{0.0657}$ over the bar, on the earlier
+\dsid{seq-20260713-014226} artifact where that step was taken), when a content
+retrieval leg was added to that (${+}\num{0.0147}$, CI above zero), and when the
+metric those two content-shaped legs retrieve in was \emph{learned}
+(${+}\num{0.0259}$, CI above zero, hardened to ${+}\num{0.0426}$ on a colder
+split). It never moved for width, depth, direction, an extra tower, an extra
+nonlinearity, or a learned combiner. The mechanism is the cold half: a new
+\emph{kind} of signal can reach sessions the existing ones cannot, whereas more
+capacity only re-describes what is already reachable.
+
+\emph{The winning path is linear where it touches the retrieval geometry.} The
+loss and the serving metric both live in a fixed external space --- cosine
+retrieval over signed \num{192}-dimensional latents --- so the readout should be
+the most general map \emph{into} that space and nothing more. Every measured
+insertion of a half-wave rectifier into that path lost: on the input side
+(${-}\num{0.0140}$, with the ReLU isolated as the whole cause at
+${\sim}\num{5.9}\sigma$ of decodability), on the output side (three
+confirmations across three regimes, at \SI{10}{\percent} more parameters), and in
+the pooled ANN twin (${-}\num{0.0245}$, same space, PCA-128). The single largest win, meanwhile, is a bias-free
+linear map. ``Add a head'' is a reflex worth resisting whenever the target space
+is fixed.
+
+\emph{The combination should not be learned at this data volume, and that is
+measurable in one run.} An oracle weighting fitted on the test labels buys
+$+\num{0.0042}$ with a CI straddling zero. That single probe bounds the entire
+learned-combiner lane, and it should be the \emph{first} experiment run in such a
+lane, not the last. The transferable discipline is to count the supervision
+events available to the combiner separately from those available to the parts,
+and to check whether the candidate distribution at fit time matches the one at
+inference.
+
+\emph{The metrics are part of the result.} A composite built from list properties
+rather than correctness is maximized by a model that has stopped trying, and the
+$\pm\num{0.015}$ recall floor was the only thing standing between this record and
+a crown for a model \SI{46}{\percent} worse at its actual job. A grounding factor
+helps and is not sufficient. The counterexample that makes the metric salvageable
+rather than useless is MMR, which raises three factors \emph{including} the
+grounding one, at a recall tie --- same metric, opposite mechanism.
+
+\clearpage
+\section{What is not established}
+\label{sec:notestablished}
+
+This section exists so that no reader has to reconstruct the caveats from the
+prose.
+
+\textbf{Nothing from 2026-07-26 is promoted, and the champion is unchanged.} Six
+MMR definitions were \emph{registered}; the auto-generated
+\texttt{best-}$\langle$predictor$\rangle$-$\langle$run$\rangle$ records that
+exist for those runs are best-models group membership, not deliberate promotion.
+Of \num{77} model records only \emph{five} are deliberate promotions, and the
+recall champion remains \Rp+M+\Cp{} at \num{0.21174}. The best-models group
+currently holds nine of twelve slots, all nine marked \texttt{source: auto}. Eight
+of the nine come from the 2026-07-26 batches and the ninth (the two-leg R+M blend)
+from 2026-07-22, and two of them --- the TIER-2 \emph{priced} arms B3 and A2 ---
+have a $\Delta$ recall CI below zero. The group is nonetheless \emph{curated}, not
+an uncurated flood: \texttt{GET /api/best-models} returns per-entry
+\texttt{rank}, \texttt{metric}, \texttt{metric\_value}, \texttt{source} and
+\texttt{selected\_at}, plus a top-level list of \num{3} \texttt{pinned} model
+names and \num{75} \texttt{excluded} identifiers --- and the two TIER-3
+\emph{rejected} MMR arms are explicitly among the exclusions. What remains
+unverified is only whether the current membership reflects a deliberate curation
+pass or the server's automatic recompute; \texttt{PROJECT-FACTS.md} records that
+remote-worker completions do not fire that recompute, so the group can be silently
+stale after any offloaded batch and its \texttt{updated\_at} must be checked
+against the newest run's \texttt{finished\_at} before it is trusted.
+
+\textbf{Several nulls are underpowered rather than refuted.} See
+Section~\ref{sec:power}. In particular the width closure rests on endpoints
+tying with a jitter of ${\sim}\pm\num{0.01}$ between neighbouring widths, one
+control losing outright, and a prescribed two-run replication that has not been
+bought; and the pre-encoder result carries an unresolved dropout confound.
+
+\textbf{Several comparisons are nominal, single-run, or report-provenance only.}
+No paired CI exists for the temperature cells, the projection-rank ablation, the
+BPR cells, the anti-eager $\beta$ arms, or the canonical-split LSTM --- the
+reports call the rank-64 and LSTM gaps ties and the BPR gap a collapse, but none
+is backed by a paired bootstrap. The champion's \Rp{} and \Cp{} standalone
+figures (\num{0.1726}, \num{0.1516}) exist only as off-server-driver numbers in
+a campaign report, with no server run and no raw hit counts; only the Markov leg
+has a real canonical-split run. The warm/cold decompositions, the hit-set overlap
+counts, and the candidate-geometry measurement of
+Figure~\ref{fig:mc-candidate-eigen} are single-run observations with no
+uncertainty quantified. Two $\beta$ arms executed on a stale worker checkout and
+are not code-comparable to any current batch.
+
+\textbf{The crown metric is young and has already been revised twice}, and its
+grounding floor \num{0.34} is currently operating \emph{outside} the regime it
+was calibrated for: it was set to cancel gains bought by destroying recall, and
+MMR is the first lever that moves music@10 in the opposite direction. Stored
+holisticness values are comparable only within a generation
+(Table~\ref{tab:hgen}), the generation labels used here were re-derived from
+stored per-row facets rather than read from the API, and two runs store gen-3
+values whose re-derivation is off by ${\sim}\num{1e-3}$ because their
+\texttt{artist\_conc\_at\_k} column is missing from the metrics index --- their
+$H$ is trustworthy, their facet row is not, and their complete twins were quoted
+instead.
+
+\textbf{\texttt{seq-embed} has no numbers at all}, \texttt{seq-ann} has no
+canonical-split run, and no parameter count is recorded anywhere for
+\texttt{seq-stacker} or \texttt{seq-ann} (the stacker's is not even well defined
+--- \num{200} boosted trees at depth 6 plus a base GRU). Three parameter counts
+in Table~\ref{tab:models} were derived by instantiating the real classes at
+$\text{latent\_dim}=192$ rather than transcribed: the LSTM's \num{510144} and the
+champion's \num{431808} ($=\num{394944}+\num{36864}$, the GRU plus the shared
+projection $W$).
+
+\clearpage
+\section{Conclusions}
+\label{sec:conclusions}
+
+Six trained predictor families on one leak-free next-track split converge on a
+clear story. (1) The task's defining property is that \num{788} of \num{1431}
+test targets are \emph{cold}, capping every seen-items-only mechanism at
+Recall@10 \num{0.449336} and making retrieval in a shared content geometry the
+only route to the majority of the test set. (2) The champion is a fixed
+score-level blend, \Rp+M+\Cp{} at \num{0.21174} (\num{303} of \num{1431}), and it
+wins because its legs are correct on almost \emph{disjoint} sessions --- the
+Markov leg reads warm \num{0.2255} / cold \num{0.0102}, the GRU leg is flat
+across the split, and Jaccard overlap between their hit sets is \num{0.201}. (3)
+Fusion of unlike signals pays and fusion of like signals does not: a second
+neural leg contributes nothing, a session-kNN leg is actively harmful
+($-\num{0.038}$, CI below zero), and adding a leg only helps when it reaches
+sessions the others cannot. (4) The single largest win is a learned InfoNCE
+projection of the item space, ${+}\num{0.0259}$
+$[+\num{0.012},+\num{0.041}]$ over the unprojected crown, seed-robust across
+three seeds and \emph{wider} on a colder second split
+(${+}\num{0.0426}$ $[+\num{0.0280},+\num{0.0573}]$); it lifts both legs that
+share the geometry (content-kNN $2.2\times$, with \emph{zero} trainable
+parameters of its own) and leaves the ID-based leg untouched, and full rank ties
+rank 64 while BPR collapses \num{0.055} below InfoNCE --- so the gain is the
+\emph{supervision}, not the capacity. (5) Recurrence beats pooling
+($-\num{0.0245}$ $[-\num{0.039},-\num{0.011}]$ for the pooled twin, same space,
+byte-identical objective), and the damage concentrates on the cold half, where
+the quality of the predicted point is all there is. (6) Eval-time MMR re-ranking
+is the first honest crown lever --- eight of eight arms lift holisticness@10 with
+paired CI above zero, \emph{four} of them at a recall tie (three on the plain GRU,
+one on the champion), and it de-concentrates artists
+\numrange{1.59}{3.06}$\times$ faster than it reduces seed echo with no notion of
+artist in the rule --- but it benefits the plain GRU ($H$ \num{0.0342}) far more
+than the champion (\num{0.0153}), whose mood coherence falls twice as fast when
+diversified at matched $\lambda$ ($-\SI{8.5}{\percent}$ against
+$-\SI{4.2}{\percent}$) and collapses $-\SI{40}{\percent}$ when pushed to
+$\lambda=\num{0.3}$, and \textbf{nothing from that campaign is promoted}. (7) Five design axes are refuted with measured mechanisms: a second
+tower's input is measurable with respect to the first's, so it can add ensemble
+diversity but no information --- and joint training destroys exactly that
+diversity; a ReLU pre-encoder is provably expressivity-neutral in its linear part
+and deletes \num{0.5327} of a zero-centred latent in its nonlinear one, leaving
+\num{119.6} live units for \num{192} signed directions; an MLP fusion head is
+harmful three times over --- reproduced in three different regimes, though the
+apparent ordering among the three is nominal --- at \SI{10}{\percent} more
+parameters; four learned combiners land at
+or below their own base legs while an oracle weighting fitted on the test labels
+buys only $+\num{0.0042}$, CI straddling zero; and depth, width and direction are
+spent, with the bidirectional collapse attributable to the
+$12.87\times$ supervision cut its objective forced, not to directionality. (8)
+The record carries two primary metrics and must not silently pick one: Recall@10
+is the comparability currency, holisticness@10 is the server's declared primary,
+the two orderings are near-inverted, and the crown has had \emph{three}
+incompatible generations whose values differ by up to $6.4\times$ on identical
+predictions. (9) Under the live crown the ten separately-trained architecture arms occupy a
+band \numrange{0.02127}{0.02487} whose whole width (${\sim}\num{0.0036}$) is
+barely twice $\mathrm{hw}(\Delta H)\approx\num{0.0018}$, so their rank order
+carries no information --- while the recall champion, at \num{0.008603} far below
+that band, and the MMR arms, at \numrange{0.026761}{0.034171} above it, are
+\emph{outside} it and separated for real. (10) What is power-limited on all five refuted axes is the
+\emph{absence of a win}, not the harms: at $n=\num{1431}$ the paired half-width is
+${\sim}\num{0.0124}$ on recall against a whole-family spread of \num{0.028}, zero
+of nine adjacent gaps in the last batch exceed their own half-width, and resolving
+\num{0.005} would need \num{8801} test sessions --- so large harms were detected
+reliably with intervals excluding zero, moderate wins were never detectable, and
+each axis's closure bounds an available gain rather than demonstrating zero. The
+genuinely underpowered verdicts are the \emph{ties}: the dual-tower family's best
+arm and the single-GRU width closure. (11) Shared-weight eval-time comparisons are a different
+instrument entirely, \numrange{3}{33}$\times$ sharper because $n_{\text{disc}}$
+can be as low as \num{9} of \num{1431}, so the minimum detectable effect must be
+budgeted from the pairing structure and not from a family constant. (12) What
+actually produced every gain on this board was a new \emph{kind} of signal or a
+better shared \emph{geometry}, never more parameters, more towers, more
+nonlinearity, or a learned combination --- which is also why
+\texttt{seq-embed}'s per-item table is the one untried family the data budget
+already argues against, at a median of one observation per observed item.
+
+\clearpage
+\section{Source reports}
+\label{sec:sources}
+
+This comparison consolidates fifteen next-track campaign reports from
+\texttt{experiments/}, plus the living facts file:
+
+\begin{itemize}
+  \raggedright
+  \item \texttt{2026-\allowbreak 07-\allowbreak 13-\allowbreak nexttrack-\allowbreak sequence-\allowbreak sweep.md} --- establishes the
+  session GRU with in-batch InfoNCE as the single-model workhorse and the
+  first-order Markov lookup as the reference bar (Section~\ref{sec:board}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 13-\allowbreak nexttrack-\allowbreak topology-\allowbreak scan.md} --- depth, width and
+  direction closed on the early item space: depth-3 \textbf{loses} to the bar
+  ($-\num{0.0245}$, CI below zero), residual was never isolated at matched width,
+  and the bidirectional arm's collapse to \num{0.0482} is an \emph{objective}
+  artifact
+  (Section~\ref{sec:fail-topology}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 14-\allowbreak nexttrack-\allowbreak blend-\allowbreak and-\allowbreak ensemble.md} --- the fixed
+  z-blend of a sequence model with a co-occurrence lookup, $+\num{0.0657}$
+  $[+\num{0.049},+\num{0.083}]$ over the bar, three-seed confirmed; a second
+  neural leg is redundant (Section~\ref{sec:fusion}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 14-\allowbreak nexttrack-\allowbreak graded-\allowbreak relevance-\allowbreak and-\allowbreak new-\allowbreak legs.md} ---
+  introduces artist@$k$ / genre@$k$ / artist\_mrr as first-class graded metrics
+  (Section~\ref{sec:metrics}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 15-\allowbreak nexttrack-\allowbreak compression-\allowbreak representation-\allowbreak bakeoff.md}
+  --- the compression/representation bake-off.
+  \item \texttt{2026-\allowbreak 07-\allowbreak 15b-\allowbreak nexttrack-\allowbreak compression-\allowbreak dim-\allowbreak extension.md} --- with the
+  dimension extension, these two fix PCA-192 as the shared item space every
+  trained model reads (Section~\ref{sec:intro}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 15c-\allowbreak nexttrack-\allowbreak phase2-\allowbreak model-\allowbreak sweep.md} --- the family
+  sweep: the pooled ANN twin loses to the same-space GRU
+  ($-\num{0.0245}$, CI below zero) and the XGBoost stacker lands below its own
+  base leg (Sections~\ref{sec:recurrence} and~\ref{sec:fail-combiners}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 18-\allowbreak nexttrack-\allowbreak literature-\allowbreak fit-\allowbreak campaign.md} --- the learned
+  InfoNCE projection champion, $+\num{0.0259}$ over the prior crown, plus the
+  oracle-weight probe that bounds the learned-combiner lane at $+\num{0.0042}$,
+  CI straddling zero (Sections~\ref{sec:projection}
+  and~\ref{sec:fail-combiners}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 18b-\allowbreak nexttrack-\allowbreak projection-\allowbreak registration-\allowbreak and-\allowbreak scan.md} ---
+  registers the champion and scans its axes: InfoNCE $\gg$ BPR, full rank
+  $\approx$ rank 64, $\tau$ mildly monotone with the default \textbf{held}
+  (Section~\ref{sec:projection}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 18c-\allowbreak nexttrack-\allowbreak representation-\allowbreak exploration.md} --- six of
+  eight alternative item spaces lift the \emph{frozen} readout with CI above
+  zero and \emph{none} lifts the champion: whitening and the learned projection
+  are the same fix in two places (Section~\ref{sec:projection}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 20-\allowbreak musical-\allowbreak distance-\allowbreak metric.md} --- music@10, the graded
+  grounding metric that later made the crown salvageable
+  (Section~\ref{sec:metrics}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 22-\allowbreak session-\allowbreak holisticness-\allowbreak and-\allowbreak antieager-\allowbreak levers.md} --- the
+  holisticness suite, the weak anti-eager training knob, and the offline
+  $\lambda$ sweep that transferred to the native arms to four decimals
+  (Sections~\ref{sec:metrics} and~\ref{sec:mmr}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 25-\allowbreak nexttrack-\allowbreak dual-\allowbreak tower-\allowbreak fusion-\allowbreak scan.md} --- dual-tower
+  fusion \textbf{REFUTED}, the fourth combiner null: zero of eight arms clear
+  zero against a single-GRU width control param-matched to \SI{0.098}{\percent} of
+  the $f1$ arms, the MLP fusion
+  head is harmful twice over, and five $\Delta H$ ``wins'' all fail the recall
+  floor (Sections~\ref{sec:fail-views}, \ref{sec:fail-head}
+  and~\ref{sec:metrics}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak pre-\allowbreak encoder-\allowbreak scan.md} --- the per-step MLP
+  pre-encoder \textbf{REFUTED and actively harmful} ($-\num{0.01398}$, CI below
+  zero), with the rectifier isolated as the whole mechanism at
+  ${\sim}\num{5.9}\sigma$ of genre decodability, and the first batch in the
+  project's history to produce \emph{zero} crown candidates
+  (Section~\ref{sec:fail-relu}).
+  \item \texttt{2026-\allowbreak 07-\allowbreak 26-\allowbreak nexttrack-\allowbreak mmr-\allowbreak lambda-\allowbreak frontier.md} --- the MMR
+  $\lambda$ frontier: eight of eight arms lift holisticness@10 with paired CI
+  above zero, four free of any recall cost (three on the GRU, one on the
+  champion), six definitions
+  \textbf{registered and none promoted} (Section~\ref{sec:mmr}).
+  \item \texttt{PROJECT-FACTS.md} --- the living facts file: the noise bands,
+  the power anchors, the promotion ledger and the metric-generation history
+  (Sections~\ref{sec:power} and~\ref{sec:notestablished}).
+\end{itemize}
+
+\end{document}
