@@ -38,3 +38,6 @@ predictors/.venv
 # promoted checkpoint. Big, binary, and derived: keep them out of history.
 clients/*/public/model/
 clients/*/public/catalog.json
+
+# Tectonic build logs (docs/*.pdf that are tracked are the deliverables)
+docs/*.log
