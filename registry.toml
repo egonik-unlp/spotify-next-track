@@ -2307,6 +2307,187 @@ default = 200
 min = 1
 max = 5000
 
+# --------------------------------------------------------------------------- #
+# LEARNED item representation. Every other sequence predictor retrieves in a    #
+# FROZEN space (offline PCA/AE latents); this one can train the item embedding  #
+# table itself, used both as the GRU input and as the retrieval target. Modes:  #
+# frozen (reproduces seq-nexttrack — a gate), residual (frozen latent + trained #
+# correction, cold-capable), free (fully learned, cannot reach cold items).     #
+# predictors/seq_embed.py.                                                      #
+# --------------------------------------------------------------------------- #
+[[predictors]]
+name = "seq-embed"
+display_name = "Next-track GRU over a LEARNED item embedding (sequence)"
+language = "Python"
+framework = "PyTorch"
+description = "A GRU over a TRAINABLE item embedding table, used both as input and as the retrieval space, so the geometry is shaped by next-track adjacency instead of inherited from an offline reconstruction. embed_mode=frozen reproduces seq-nexttrack exactly (a reproduction gate); residual = frozen content latent + a trained correction, which keeps cold items retrievable; free = a fully learned table (GRU4Rec/SASRec-style), which structurally cannot reach the 55% cold targets. loss=cosine is REFUSED for the trained modes: with a learned target space it has a trivial collapse optimum. Reads a SEQUENCE artifact. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/seq_embed.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/seq_embed.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+model_sae_args = ["predictors/seq_embed.py", "model-sae", "--model", "{model}", "--dataset", "{dataset}", "--output", "{output}"]
+extend_args = ["predictors/seq_extend.py", "extend", "--model", "{model}", "--predictor", "seq-embed", "--output", "{output}", "--params", "{params}"]
+
+[[predictors.params]]
+name = "embed_mode"
+label = "item representation: frozen (= seq-nexttrack) | residual (frozen + trained correction) | free (fully learned)"
+type = "enum"
+default = "residual"
+options = ["frozen", "residual", "free"]
+
+[[predictors.params]]
+name = "embed_init"
+label = "initial table: content latents, or random (random requires embed_mode=free)"
+type = "enum"
+default = "content"
+options = ["content", "random"]
+
+[[predictors.params]]
+name = "embed_dim"
+label = "embedding width (0 = the dataset's latent_dim; only free mode may change it)"
+type = "int"
+default = 0
+min = 0
+max = 1024
+
+[[predictors.params]]
+name = "residual_scale"
+label = "init magnitude of the residual, relative to the mean latent norm"
+type = "float"
+default = 0.1
+min = 0.0
+max = 10.0
+
+[[predictors.params]]
+name = "embed_lr"
+label = "separate learning rate for the embedding table (0 = use lr); lower it when per-item data is thin"
+type = "float"
+default = 0.0
+min = 0.0
+max = 1.0
+
+[[predictors.params]]
+name = "hidden"
+label = "recurrent hidden width"
+type = "int"
+default = 256
+min = 16
+max = 1024
+
+[[predictors.params]]
+name = "arch"
+label = "recurrent cell"
+type = "enum"
+default = "gru"
+options = ["gru", "lstm"]
+
+[[predictors.params]]
+name = "num_layers"
+label = "stacked recurrent layers"
+type = "int"
+default = 1
+min = 1
+max = 8
+
+[[predictors.params]]
+name = "loss"
+label = "training objective (cosine is refused for the trained modes — collapse)"
+type = "enum"
+default = "infonce"
+options = ["infonce", "cosine"]
+
+[[predictors.params]]
+name = "tau"
+label = "InfoNCE temperature"
+type = "float"
+default = 0.07
+min = 0.001
+max = 1.0
+
+[[predictors.params]]
+name = "epochs"
+type = "int"
+default = 40
+min = 1
+max = 100000
+
+[[predictors.params]]
+name = "lr"
+label = "learning rate"
+type = "float"
+default = 0.001
+min = 0.000001
+max = 1.0
+
+[[predictors.params]]
+name = "dropout"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors.params]]
+name = "batch_size"
+label = "batch size (sessions)"
+type = "int"
+default = 128
+min = 1
+max = 8192
+
+[[predictors.params]]
+name = "patience"
+label = "early-stop patience (epochs, 0 = off)"
+type = "int"
+default = 6
+min = 0
+max = 10000
+
+[[predictors.params]]
+name = "seed"
+type = "int"
+default = 1337
+min = 0
+max = 1000000
+
+[[predictors.params]]
+name = "k"
+label = "Recall@k reported in metrics.recall_at_k"
+type = "int"
+default = 10
+min = 1
+max = 1000
+
+[[predictors.params]]
+name = "eager_beta"
+label = "anti-eager regularizer weight (0 = off)"
+type = "float"
+default = 0.0
+min = 0.0
+max = 100.0
+
+[[predictors.params]]
+name = "eager_margin"
+label = "anti-eager margin: cos(pred, current) above this is penalized"
+type = "float"
+default = 0.0
+min = -1.0
+max = 1.0
+
+[[predictors.params]]
+name = "mmr_lambda"
+label = "MMR re-rank lambda at eval (1.0 = off/identity)"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1.0
+
+[[predictors.params]]
+name = "mmr_pool"
+label = "candidate pool size the MMR re-rank operates over"
+type = "int"
+default = 200
+min = 1
+max = 5000
+
 [[predictors]]
 name = "seq-stacker"
 display_name = "Next-track XGBoost stacker (meta-learner, sequence)"

@@ -137,7 +137,7 @@ def local_z(v: np.ndarray, allowed: np.ndarray, pool_n: int = 200) -> np.ndarray
 # Which module + entry points serve each registry predictor. Each pair is
 # (loader, scorer-builder); the builder's signature differs per family so the
 # dispatch below adapts rather than forcing a false uniformity.
-DISPATCH = ("seq-nexttrack", "seq-dualgru", "seq-ann", "seq-blend",
+DISPATCH = ("seq-nexttrack", "seq-dualgru", "seq-ann", "seq-blend", "seq-embed",
             "seq-markov", "seq-popularity", "seq-recency")
 
 
@@ -351,6 +351,18 @@ def build_scorer(predictor: str, model_dir: Path, art):
         hp = mod.load_hp(str(model_dir / "hyperparams.json"))
         model = mod.load_model(model_dir, art, hp)
         score_fn = mod.ann_score_fn(model, latents)
+    elif predictor == "seq-embed":
+        # Retrieves in its OWN LEARNED table, not the dataset's frozen latents —
+        # so its score_fn takes no latents argument, and the intent readout's
+        # latent-space extras below would be measuring the wrong space.
+        import seq_embed as mod
+        hp = mod.load_hp(str(model_dir / "hyperparams.json"))
+        model = mod.load_model(model_dir, art, hp)
+        score_fn = mod.build_score_fn(model)
+        info["hyperparams"] = {k: hp[k] for k in
+                               ("embed_mode", "embed_init", "embed_dim", "hidden")
+                               if k in hp}
+        return score_fn, None, info
     else:  # seq-blend
         import seq_blend as mod
         hp = mod.load_hp(str(model_dir / "hyperparams.json"))
