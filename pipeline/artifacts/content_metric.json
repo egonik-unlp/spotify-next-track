@@ -1,0 +1,123 @@
+{
+ "collection": "spotify_tracks_content_metric",
+ "n": 23529,
+ "default_profile": "balanced",
+ "profiles": {
+  "balanced": {
+   "ae": [
+    1.0,
+    1.0
+   ],
+   "txt": [
+    0.4,
+    0.0
+   ],
+   "meta": [
+    0.3,
+    1.0
+   ],
+   "genre": [
+    0.3,
+    0.0
+   ]
+  },
+  "tight": {
+   "ae": [
+    1.0,
+    1.0
+   ],
+   "txt": [
+    0.7,
+    0.0
+   ],
+   "meta": [
+    0.3,
+    1.0
+   ],
+   "genre": [
+    0.7,
+    0.0
+   ]
+  },
+  "sonic": {
+   "ae": [
+    1.0,
+    1.0
+   ]
+  }
+ },
+ "specs": {
+  "balanced": {
+   "ae": {
+    "weight": 1.0,
+    "alpha": 1.0,
+    "median": 11.083857536234714,
+    "dim": 64
+   },
+   "txt": {
+    "weight": 0.4,
+    "alpha": 0.0,
+    "median": 1.080248652168124,
+    "dim": 384
+   },
+   "meta": {
+    "weight": 0.3,
+    "alpha": 1.0,
+    "median": 2.331488789781452,
+    "dim": 5
+   },
+   "genre": {
+    "weight": 0.3,
+    "alpha": 0.0,
+    "median": 7.230963476980833,
+    "dim": 64
+   }
+  },
+  "tight": {
+   "ae": {
+    "weight": 1.0,
+    "alpha": 1.0,
+    "median": 11.133706111121413,
+    "dim": 64
+   },
+   "txt": {
+    "weight": 0.7,
+    "alpha": 0.0,
+    "median": 1.080898446907805,
+    "dim": 384
+   },
+   "meta": {
+    "weight": 0.3,
+    "alpha": 1.0,
+    "median": 2.324617480654192,
+    "dim": 5
+   },
+   "genre": {
+    "weight": 0.7,
+    "alpha": 0.0,
+    "median": 7.217760230077367,
+    "dim": 64
+   }
+  },
+  "sonic": {
+   "ae": {
+    "weight": 1.0,
+    "alpha": 1.0,
+    "median": 11.0515836741253,
+    "dim": 64
+   }
+  }
+ },
+ "meta_fields": [
+  "artist_popularity",
+  "track_popularity",
+  "artist_followers",
+  "release_year",
+  "artist_count"
+ ],
+ "recipe": "per block: center by stored mean, W(alpha) whiten, /median, *sqrt(weight); concat; L2-normalize. genre block = per-genre mean of full-whitened AE. Euclidean on stored vectors is a proper metric == sqrt(2-2cos).",
+ "sources": {
+  "ae": "spotify_tracks_song_ae",
+  "text_and_payload": "spotify_tracks_content"
+ }
+}

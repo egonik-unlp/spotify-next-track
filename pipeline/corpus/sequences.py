@@ -20,8 +20,14 @@ Pipeline:
   5. Write the binary + json artifact under data/seq/<dataset_id>/.
 
 The ONLY correct latent source is `spotify_tracks_song_ae` (64-dim song-AE
-latent). `spotify_tracks` is a 200-dim *behavioral* embedding that soft-leaks
-replay and must never be used here.
+latent), or another leak-safe item space derived from it (the PCA/AE/metric
+collections built off `spotify_tracks_content`). `spotify_tracks` is a 200-dim
+*behavioral* embedding that soft-leaks replay and must never be used here.
+
+For a Qdrant collection that stores NAMED vectors (e.g. the musical-distance
+`spotify_tracks_content_metric` with `balanced`/`tight`/`sonic`), pass
+`--vector-name <name>` to select which named vector becomes the item latent;
+omit it for single-vector collections (the default, unchanged path).
 """
 import json
 from datetime import datetime, timezone
@@ -63,26 +69,34 @@ def _drop_consecutive_loops(uris: list[str]) -> list[str]:
 
 
 def _fetch_latents(client: QdrantClient, ids: list[int],
-                   collection: str = LATENT_COLLECTION) -> dict[int, list[float]]:
+                   collection: str = LATENT_COLLECTION,
+                   vector_name: str | None = None) -> dict[int, list[float]]:
     """Retrieve item latent vectors for the given point ids, batched. Ids without
-    a point (no latent) are simply absent from the returned dict."""
+    a point (no latent) are simply absent from the returned dict. When
+    `vector_name` is set, the collection is expected to store NAMED vectors and
+    that named vector is selected."""
     vecs: dict[int, list[float]] = {}
+    want = [vector_name] if vector_name is not None else True
     for i in range(0, len(ids), RETRIEVE_BATCH):
         batch = ids[i : i + RETRIEVE_BATCH]
         points = client.retrieve(
             collection_name=collection,
             ids=batch,
-            with_vectors=True,
+            with_vectors=want,
             with_payload=False,
         )
         for p in points:
-            if p.vector is not None:
-                vecs[int(p.id)] = p.vector
+            if p.vector is None:
+                continue
+            v = p.vector[vector_name] if vector_name is not None else p.vector
+            if v is not None:
+                vecs[int(p.id)] = v
     return vecs
 
 
 def run(latent_collection: str = LATENT_COLLECTION,
-        latent_dim: int = LATENT_DIM) -> dict:
+        latent_dim: int = LATENT_DIM,
+        vector_name: str | None = None) -> dict:
     # ---- 1. Load + non-skip filter ----
     plays = pd.read_parquet(SESSIONS_PARQUET)
     plays["ts"] = pd.to_datetime(plays["ts"], utc=True)
@@ -99,11 +113,17 @@ def run(latent_collection: str = LATENT_COLLECTION,
     client = QdrantClient(url=QDRANT_URL)
     # Derive the true latent dim from the collection config; treat the caller's
     # --latent-dim as an assertion so a mismatched flag fails loud, not silent.
-    actual_dim = client.get_collection(latent_collection).config.params.vectors.size
+    vparams = client.get_collection(latent_collection).config.params.vectors
+    if vector_name is not None:
+        actual_dim = vparams[vector_name].size
+    else:
+        actual_dim = vparams.size
     assert actual_dim == latent_dim, (
-        f"--latent-dim {latent_dim} != collection {latent_collection!r} dim {actual_dim}"
+        f"--latent-dim {latent_dim} != collection {latent_collection!r} "
+        f"{('vector '+repr(vector_name)+' ') if vector_name else ''}dim {actual_dim}"
     )
-    id_to_vec = _fetch_latents(client, list(cand_id_by_uri.values()), latent_collection)
+    id_to_vec = _fetch_latents(client, list(cand_id_by_uri.values()),
+                               latent_collection, vector_name)
 
     # Keep only uris whose id resolved to an actual vector. Sort for a stable,
     # reproducible item-index assignment.
@@ -183,6 +203,7 @@ def run(latent_collection: str = LATENT_COLLECTION,
             "name": m.get("track_name"),
             "artist": m.get("artist"),
             "genre": m.get("genre_primary"),
+            "album": m.get("album"),
             "play_count": m.get("play_count"),
         }
     with open(out_dir / "items.json", "w") as f:
@@ -216,7 +237,8 @@ def run(latent_collection: str = LATENT_COLLECTION,
     cold_rate = n_cold / len(test_idx) if test_idx else 0.0
     mean_len = float(flat.size / n_sessions) if n_sessions else 0.0
 
-    print(f"sequences: {n_sessions} sessions, {n_items} items")
+    src_label = latent_collection + (f"[{vector_name}]" if vector_name else "")
+    print(f"sequences: {n_sessions} sessions, {n_items} items (latent {src_label})")
     print(
         f"sequences: split {len(train_idx)} train / {len(test_idx)} test "
         f"(cut {cut.isoformat()})"
@@ -268,6 +290,11 @@ if __name__ == "__main__":
                          "NEVER the 200-dim behavioral spotify_tracks)")
     ap.add_argument("--latent-dim", type=int, default=LATENT_DIM,
                     help="expected latent dim; asserted against the collection config")
+    ap.add_argument("--vector-name", default=None,
+                    help="named vector to select for NAMED-vector collections "
+                         "(e.g. spotify_tracks_content_metric: balanced/tight/sonic); "
+                         "omit for single-vector collections (unchanged default)")
     a = ap.parse_args()
-    m = run(latent_collection=a.latent_collection, latent_dim=a.latent_dim)
+    m = run(latent_collection=a.latent_collection, latent_dim=a.latent_dim,
+            vector_name=a.vector_name)
     _validate(m["dataset_id"])

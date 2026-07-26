@@ -1,0 +1,8 @@
+{
+ "din": 517,
+ "latent": 192,
+ "method": "pca-reduce",
+ "source_collection": "spotify_tracks_content_metric",
+ "source_vector": "balanced",
+ "cumulative_evr": 0.9560980796813965
+}
