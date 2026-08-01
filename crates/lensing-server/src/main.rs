@@ -265,6 +265,7 @@ async fn main() -> Result<()> {
         db_sink,
         definitions: tokio::sync::Mutex::new(defs),
         live_runs: Mutex::new(Default::default()),
+        live_extends: Mutex::new(Default::default()),
         builds: Mutex::new(Default::default()),
         jobs: Mutex::new(Default::default()),
         run_slots: Arc::new(Semaphore::new(cli.max_runs)),
@@ -353,6 +354,11 @@ async fn main() -> Result<()> {
             "/models/{name}/extend",
             axum::routing::post(api::extend_model),
         )
+        // Its own top-level noun rather than nesting under /models/{name}: the
+        // progress channel is keyed by the caller's journey id and is
+        // model-agnostic, and a literal "extend" segment sitting where {name}
+        // goes is a matchit ambiguity waiting to happen.
+        .route("/extends/{id}/events", get(api::extend_events))
         .route(
             "/models/{name}/rename",
             axum::routing::post(api::rename_model),

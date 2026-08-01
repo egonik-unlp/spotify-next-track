@@ -79,6 +79,10 @@
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
+/* Any class that sets `display` outranks the UA's `[hidden] { display: none }`,
+ * so every flex container here would ignore its own hidden attribute — the dock
+ * and the ballot both shipped visible-at-rest because of it. One rule, once. */
+[hidden] { display: none !important; }
 body {
   margin: 0;
   background: var(--bg);
@@ -269,11 +273,190 @@ input[type='number'] { font-family: var(--font-mono); font-variant-numeric: tabu
 }
 .errmsg::before { content: '✕ '; font-weight: 600; }
 
+/* --------------------------------------------------------- blind ballot */
+.ballot {
+  display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4);
+  background: var(--select-tint); border: 1px solid var(--select-border);
+  border-radius: var(--radius);
+}
+.btitles { min-width: 0; flex: 1 1 22rem; }
+.ballot h2 { font-size: var(--text-title); }
+.ballot .meta { max-width: 70ch; text-wrap: pretty; }
+.bbtns { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.blindtoggle {
+  display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3);
+  font-size: var(--text-label); color: var(--ink-secondary); cursor: pointer;
+}
+.blindtoggle input { width: auto; }
+
+/* Standings: wins over appearances, one bar each. */
+.standings {
+  padding: var(--sp-4); margin-bottom: var(--sp-4);
+  background: var(--surface); border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+.shead { font-size: var(--text-title); margin-bottom: var(--sp-3); }
+.stable { display: grid; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.srowline {
+  display: grid; grid-template-columns: minmax(0, 22rem) 1fr 7rem;
+  gap: var(--sp-3); align-items: center;
+}
+.sname {
+  font-size: var(--text-label); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.sbar {
+  height: 8px; border-radius: 999px; background: var(--surface-sunken);
+  overflow: hidden;
+}
+.sbar > i { display: block; height: 100%; background: var(--accent); }
+.sfrac { font-size: var(--text-label); color: var(--ink-secondary); text-align: right; }
+
+/* ------------------------------------------------------------- mood card */
+/* The panel's headline. Four grouped bands of rows; each row is
+ * label · value · rail · verdict, and the rail is where the meaning lives:
+ * shaded 10th-90th of YOUR sessions, a median hairline, your seed as a tick,
+ * this journey as a filled dot. */
+.moodcard { padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-3); }
+.cardmeta {
+  margin: 0; font-size: 0.625rem; letter-spacing: 0.02em;
+  color: var(--ink-faint); font-family: var(--font-mono);
+}
+.nomood { margin: 0; font-size: var(--text-label); color: var(--ink-secondary); }
+.agroup { display: grid; gap: 2px; }
+.glabel {
+  font-size: 0.625rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--ink-faint);
+  margin: var(--sp-1) 0 var(--sp-1); cursor: help;
+}
+.arow {
+  display: grid; align-items: center; gap: var(--sp-2);
+  grid-template-columns: 8rem 4.2rem minmax(3.5rem, 1fr) minmax(0, 12rem);
+  padding: 1px 0;
+}
+.alabel { font-size: var(--text-label); color: var(--ink-secondary); cursor: help; }
+.aval {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: var(--text-dense); text-align: right;
+}
+.aval.missing { color: var(--ink-faint); }
+/* The verdict is the payload of the row — it wraps to a second line rather than
+ * truncating, because "deeper cuts than you ever qu…" says nothing. */
+.averdict {
+  font-size: 0.625rem; line-height: 1.25; color: var(--ink-faint);
+  text-wrap: pretty;
+}
+/* Outside your own band is NOTABLE, not wrong — so it gets weight, not red.
+ * Red is reserved for the one axis with an unambiguous bad end (skip rate). */
+.arow[data-out='1'] .averdict { color: var(--ink); font-weight: 600; }
+.arow[data-out='1'] .aval { color: var(--ink); }
+.arow[data-tone='warn'] .averdict { color: var(--bad); }
+.arow[data-tone='warn'] .aval { color: var(--bad); }
+
+.rail { position: relative; height: 14px; display: block; }
+.rail::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 6px; height: 2px;
+  background: var(--surface-sunken); border-radius: 999px;
+}
+.rband {
+  position: absolute; top: 4px; height: 6px; border-radius: 999px;
+  background: var(--hairline-strong);
+}
+.rmed {
+  position: absolute; top: 2px; width: 1px; height: 10px;
+  background: var(--ink-faint);
+}
+.rseed {
+  position: absolute; top: 0; width: 0; height: 0; margin-left: -3px;
+  border-left: 3px solid transparent; border-right: 3px solid transparent;
+  border-top: 4px solid var(--ink-secondary);
+}
+.rval {
+  position: absolute; top: 3px; width: 8px; height: 8px; margin-left: -4px;
+  border-radius: 50%; background: var(--series-a);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.rval.series-b { background: var(--series-b); }
+
+/* ---------------------------------------------------- comparative chart */
+/* One chart, both journeys. Facets stack on a shared step axis; the y gutter is
+ * HTML, not SVG text, so the non-uniform viewBox scale can't distort the labels.
+ * Strokes carry vector-effect for the same reason. */
+.compare {
+  padding: var(--sp-4); margin-bottom: var(--sp-4);
+  background: var(--surface); border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+.chead { display: grid; gap: var(--sp-1); margin-bottom: var(--sp-3); }
+.ctitle { font-size: var(--text-title); }
+.chead .meta { max-width: 80ch; text-wrap: pretty; }
+.clegend { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin-top: var(--sp-1); }
+.citem { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.cname {
+  font-size: var(--text-label); color: var(--ink-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 30ch;
+}
+.cfacet {
+  display: grid; grid-template-columns: 4.5rem 1fr; gap: 0 var(--sp-2);
+  align-items: stretch; margin-bottom: var(--sp-3);
+}
+/* Own row, full width: the ticks below it then align to the plot's real top and
+ * bottom instead of being pushed down by the label. */
+.cmetric {
+  grid-column: 1 / -1;
+  font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.05em;
+  font-weight: 600; color: var(--ink-secondary); margin-bottom: 2px;
+}
+.cgutter {
+  display: flex; flex-direction: column; justify-content: space-between;
+  align-items: flex-end; text-align: right;
+  /* Match the 3px inset the plot reserves so a tick names the value drawn on
+   * that exact pixel row. */
+  padding: 1px 0 2px;
+}
+.ctickv { font-size: 0.625rem; color: var(--ink-faint); line-height: 1; }
+.cchart {
+  display: block; max-width: 100%; height: 96px;
+  background: var(--surface-raised); border: 1px solid var(--hairline);
+  border-radius: 2px;
+}
+.cgrid { stroke: var(--hairline); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.cseed {
+  stroke: var(--ink-faint); stroke-width: 1; stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+.cline {
+  fill: none; stroke: var(--series-a); stroke-width: 1.75;
+  vector-effect: non-scaling-stroke; stroke-linejoin: round;
+}
+.cline.series-b { stroke: var(--series-b); }
+/* Non-scaling radius: the viewBox stretches on x, which would otherwise make
+ * every dot an ellipse whose width tracks the window. */
+.cdot { fill: var(--series-a); }
+.cdot.series-b { fill: var(--series-b); }
+.cxaxis { display: grid; grid-template-columns: 4.5rem 1fr; gap: var(--sp-2); }
+.cticks { display: flex; justify-content: space-between; padding: 0 2px; }
+.ctick {
+  font-family: var(--font-mono); font-size: 0.5625rem; color: var(--ink-faint);
+}
+
+/* Leaderboard facets: present, reconcilable, no longer the headline. */
+.facets {
+  border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline);
+  background: var(--surface-sunken);
+}
+.facets > summary {
+  padding: var(--sp-2) var(--sp-4); cursor: pointer;
+  font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+.facets > summary:hover { color: var(--ink-secondary); }
+
 /* Diagnostics strip: MetricStrip vocabulary — label over mono value. */
 .diag {
   display: flex; flex-wrap: wrap; gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4);
-  background: var(--surface-sunken); border-bottom: 1px solid var(--hairline);
+  padding: 0 var(--sp-4) var(--sp-3);
 }
 .dcell {
   display: grid; gap: 1px; padding: var(--sp-1) var(--sp-2);
@@ -304,7 +487,7 @@ input[type='number'] { font-family: var(--font-mono); font-variant-numeric: tabu
 .stop[data-playing='1'] { background: var(--accent-soft); }
 .srow {
   display: grid; gap: var(--sp-2); align-items: baseline;
-  grid-template-columns: 1.6rem minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 0.9fr) 3rem;
+  grid-template-columns: 1.6rem minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 0.9fr);
 }
 .snum {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
@@ -325,12 +508,43 @@ input[type='number'] { font-family: var(--font-mono); font-variant-numeric: tabu
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .sgenre { color: var(--ink-faint); }
-.smood {
-  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: var(--text-label); color: var(--ink-faint); text-align: right;
-}
 
-/* Intent row: what the model wanted, and the eigen-shape of its belief. */
+/* Mood chips: what this track IS, and how far it moved from the one before —
+ * the delta is the audible part, so it rides inside the chip it belongs to. */
+.chips {
+  display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-2);
+  margin-top: 2px; padding-left: 2.1rem;
+}
+.chip {
+  display: inline-flex; align-items: baseline; gap: 3px;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 0.625rem; color: var(--ink-secondary);
+  padding: 1px var(--sp-1); border-radius: 2px; background: var(--surface-sunken);
+}
+.chip.quiet { background: none; color: var(--ink-faint); }
+.chip b { color: var(--ink-faint); font-weight: 600; }
+.cdelta { text-decoration: none; color: var(--ink-faint); }
+.cdelta.jolt { color: var(--bad); font-weight: 600; }
+
+/* The road not taken: named runner-ups. Replaced the eigen-shape strip — same
+ * question about how much choice the model had, but these you can play. */
+.over {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--sp-1);
+  margin-top: 2px; padding-left: 2.1rem;
+  font-size: 0.625rem; color: var(--ink-faint);
+}
+.overk {
+  font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--ink-faint); margin-right: var(--sp-1); cursor: help;
+}
+.overitem { color: var(--ink-secondary); cursor: help; }
+.lone {
+  margin-left: var(--sp-2); font-family: var(--font-mono);
+  color: var(--ink-faint); cursor: help;
+}
+.lone.toss { color: var(--bad); }
+
+/* Intent row: what the model wanted, and the stylistic choice it faced. */
 .intent {
   display: flex; flex-wrap: wrap; align-items: center;
   gap: var(--sp-1) var(--sp-3); margin-top: var(--sp-1); padding-left: 2.1rem;
@@ -353,31 +567,82 @@ input[type='number'] { font-family: var(--font-mono); font-variant-numeric: tabu
 }
 .aim { font-family: var(--font-mono); font-size: 0.625rem; color: var(--link); }
 
-/* Eigen strip: variance shares as stacked segments + effective directions. */
-.eigen { display: inline-flex; align-items: center; gap: var(--sp-1); }
-.eigen-bar {
-  display: inline-flex; width: 4.5rem; height: 6px; border-radius: 999px;
-  overflow: hidden; background: var(--surface-sunken);
-}
-.eigen-bar > i { display: block; height: 100%; background: var(--series-a); opacity: 0.85; }
-.eigen-bar > i:nth-child(2) { opacity: 0.55; }
-.eigen-bar > i:nth-child(3) { opacity: 0.35; }
-.eigen-bar > i:nth-child(4) { opacity: 0.2; }
-.panel[data-slot='1'] .eigen-bar > i { background: var(--series-b); }
 .axis { font-family: var(--font-mono); font-size: 0.625rem; color: var(--ink-secondary); }
 .axis.collapsed { color: var(--bad); }
 
-/* --------------------------------------------------------------- skeleton */
-.sk {
-  display: block; border-radius: var(--radius);
-  background: linear-gradient(90deg, var(--surface-sunken) 0%,
-    var(--surface) 50%, var(--surface-sunken) 100%);
-  background-size: 200% 100%; animation: sheen 1.2s linear infinite;
+/* --------------------------------------------------------------- progress */
+/* The waiting state: a phase log with measured timings, then the journey being
+ * written a track at a time. Green = in flight, and nothing else. */
+.pstate {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ink-secondary);
 }
-.sk-title { width: 14rem; height: 0.85rem; }
-.sk-cell { width: 4.2rem; height: 2rem; }
-.sk-row { width: 100%; height: 1.1rem; }
-@keyframes sheen { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.pelapsed { font-size: var(--text-label); color: var(--ink-faint); }
+.phases { list-style: none; margin: 0; padding: var(--sp-3) var(--sp-4); display: grid; gap: 3px; }
+/* The phase NAME wins the space fight: an `auto` note column sizes to its
+ * content and starves the label down to "fetchi…", which is the one string in
+ * the row that has to stay readable. */
+.ph {
+  display: grid; grid-template-columns: 12px minmax(0, 1.7fr) minmax(0, 1fr) 2.6rem;
+  gap: var(--sp-2); align-items: baseline; font-size: var(--text-label);
+}
+.phdot {
+  width: 7px; height: 7px; border-radius: 50%; align-self: center;
+  background: var(--hairline-strong);
+}
+.ph[data-state='active'] .phdot {
+  background: var(--accent); animation: pulse 1.4s ease-in-out infinite;
+}
+.ph[data-state='done'] .phdot { background: var(--good); }
+.phmsg { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph[data-state='done'] .phmsg { color: var(--ink-secondary); }
+.phnote {
+  font-family: var(--font-mono); font-size: 0.5625rem; color: var(--ink-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.phms {
+  font-size: 0.625rem; color: var(--ink-faint); text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.livewrap {
+  padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--hairline);
+  background: var(--surface-sunken);
+}
+.livehead { display: flex; align-items: baseline; gap: var(--sp-2); }
+.livelabel {
+  font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--ink-faint); font-weight: 600;
+}
+.livecount { font-size: var(--text-label); color: var(--ink-secondary); margin-left: auto; }
+.livebar {
+  height: 3px; border-radius: 999px; background: var(--hairline);
+  overflow: hidden; margin: var(--sp-2) 0;
+}
+.livebar > i {
+  display: block; height: 100%; width: 0; background: var(--accent);
+  transition: width var(--dur-base) var(--ease-out);
+}
+/* Capped + scrolled: a 200-step journey must not push the page down for ten
+ * seconds, and the newest pick is the one worth seeing. */
+.livestops {
+  list-style: none; margin: 0; padding: 0; max-height: 13rem; overflow-y: auto;
+  scroll-behavior: smooth;
+}
+.livestop {
+  display: grid; gap: var(--sp-2); align-items: baseline;
+  grid-template-columns: 1.6rem minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.8fr);
+  padding: 1px 0; font-size: var(--text-label);
+  animation: landed var(--dur-base) var(--ease-out);
+}
+.lnum { font-size: var(--text-label); color: var(--ink-faint); text-align: right; }
+.lname { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lartist, .lgenre {
+  color: var(--ink-secondary); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.lgenre { color: var(--ink-faint); }
+@keyframes landed { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; } }
 
 /* ------------------------------------------------------------------- dock */
 .dock {
@@ -416,7 +681,12 @@ input[type='number'] { font-family: var(--font-mono); font-variant-numeric: tabu
   .legend > div { grid-template-columns: 1fr; gap: var(--sp-1); }
   .topnav { display: none; }
   .srow { grid-template-columns: 1.4rem minmax(0, 1fr) minmax(0, 1fr); }
-  .sgenre, .smood { display: none; }
+  .sgenre { display: none; }
+  /* The verdict wraps under the rail rather than truncating to nothing. */
+  .arow { grid-template-columns: 7.5rem 3.8rem minmax(3rem, 1fr); }
+  .averdict { grid-column: 2 / -1; white-space: normal; }
+  .srowline { grid-template-columns: minmax(0, 1fr) 4rem; }
+  .srowline .sbar { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

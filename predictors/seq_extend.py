@@ -26,17 +26,30 @@ owns only the two things a fair comparison requires:
      `seq_common.eval_from_scores`), computed over the GENERATED journey instead
      of a held-out test split — so a listener can check whether the metric
      agrees with their ears.
+  3. **A LEGIBLE mood report** (`mood_report`, see below). The crown's facets are
+     cosines in a 517-d fused space: comparable across models, but impossible to
+     confirm by ear, and therefore useless for deciding which generator holds a
+     vibe better. The report card restates the same journey on axes a listener
+     can check — valence / energy / tempo / era / their own play history — and
+     calibrates each one against the bands THEIR OWN REAL SESSIONS occupy, so
+     every number arrives as a verdict ("choppier than your listening") instead
+     of a bare float.
 
 INTENT ("the shape of the next track", beyond naming it) is derived from the
 SCORE DISTRIBUTION, not from the model's internals. That is deliberate: it makes
 the readout work identically for a GRU, a blend and a Markov baseline, none of
 which share an internal representation. Per step we report, over the top-M
 candidates: the softmax score mass aggregated BY GENRE and BY ARTIST (what kind
-of thing the model wants next, and how concentrated), the top-1 margin, and the
-distribution entropy (is the model committed or wandering?). Models that expose
-a predicted next-LATENT additionally get that latent's nearest genre prototypes
-in the musical-distance space — the model's target *point* rather than its
-ranked candidates.
+of thing the model wants next, and how concentrated), the top-1 margin, the
+distribution entropy (is the model committed or wandering?), the NAMED stylistic
+axis the shortlist spreads along, and `passed_over` — the runner-up tracks it
+turned down, by name, with the count of candidates that were genuinely in
+contention. That last one replaced an eigen-decomposition readout of the
+candidate cloud: same question ("how much choice did the model have"), but a
+skipped track you can play is checkable and a variance share is not. Models that
+expose a predicted next-LATENT additionally get that latent's nearest genre
+prototypes in the musical-distance space — the model's target *point* rather
+than its ranked candidates.
 
 CLI:
 
@@ -472,36 +485,21 @@ def step_intent(scores: np.ndarray, allowed: np.ndarray, artist_ids: np.ndarray,
         "pool": int(pool.size),
     }
     if latents is not None and genre_ids is not None:
-        out.update(candidate_eigen(pool, w, latents, genre_ids, genre_names))
+        out.update(candidate_axis(pool, w, latents, genre_ids, genre_names))
     return out
 
 
-def candidate_eigen(pool: np.ndarray, weights: np.ndarray, latents: np.ndarray,
-                    genre_ids: np.ndarray, genre_names: dict,
-                    keep: int = 4) -> dict:
-    """EIGEN-SHAPE of the model's next-track belief — the geometry of what it is
-    considering, which the ranked list and the genre histogram both hide.
+def candidate_axis(pool: np.ndarray, weights: np.ndarray, latents: np.ndarray,
+                   genre_ids: np.ndarray, genre_names: dict) -> dict:
+    """NAME the stylistic choice this step is facing: the two genre poles of the
+    axis along which the shortlist spreads ("ambient ←→ classic dubstep").
 
-    Take the top-M candidates' latents, weight each by its share of score mass,
-    centre them, and take the SVD. The squared singular values are the
-    eigenvalues of the weighted candidate covariance, i.e. how the model's
-    plausible continuations are distributed in the content space:
-
-      * `eigen`    : the leading eigenvalues as VARIANCE SHARES (they sum to 1).
-                     A dominant first share means the candidates lie along ONE
-                     axis — the model has a direction of travel and is choosing
-                     *how far*, not *where*. Comparable shares mean the belief is
-                     isotropic: many unrelated continuations score alike.
-      * `pr`       : participation ratio 1/Σsᵢ² — the EFFECTIVE NUMBER of
-                     directions the model is spreading over (1 = a single axis,
-                     M = fully diffuse). This is the honest "how many different
-                     things could come next" number; entropy over items conflates
-                     "many candidates" with "many kinds of candidate", and a
-                     tight cluster of 50 near-identical tracks has high entropy
-                     but pr ≈ 1.
-      * `axis`     : the leading eigenvector's genre poles — the two ends of that
-                     principal axis, so the direction of travel is nameable
-                     ("ambient ←→ classic dubstep") rather than abstract.
+    Mechanically this is still the leading eigenvector of the weighted candidate
+    covariance, but only its NAMED poles survive into the payload. The variance
+    shares and participation ratio that used to ship alongside are gone: they
+    described the same geometry in units nobody can hear, and `passed_over`
+    answers "how much choice was there" concretely instead — with the count of
+    real contenders and the skipped tracks' names.
 
     Model-agnostic: it reads only scores + item latents, so a blend and a GRU are
     described in the same terms even though they share no internals."""
@@ -516,17 +514,10 @@ def candidate_eigen(pool: np.ndarray, weights: np.ndarray, latents: np.ndarray,
         _, s, Vt = np.linalg.svd(Xc, full_matrices=False)
     except np.linalg.LinAlgError:
         return {}
-    ev = s ** 2
-    tot = float(ev.sum())
-    if tot <= 1e-18:
+    if float((s ** 2).sum()) <= 1e-18:
         return {}
-    shares = ev / tot
-    pr = float(1.0 / max(float(np.sum(shares ** 2)), 1e-12))
 
-    out = {
-        "eigen": [round(float(x), 4) for x in shares[:keep]],
-        "pr": round(pr, 2),
-    }
+    out: dict = {}
     # Name the principal axis from the CANDIDATES THEMSELVES, not from the global
     # genre prototypes. The axis is the direction along which *this shortlist*
     # spreads, so its poles are only meaningful in terms of the shortlist's own
@@ -555,6 +546,492 @@ def candidate_eigen(pool: np.ndarray, weights: np.ndarray, latents: np.ndarray,
         # pr 1.25, leading share 0.89, single-genre pool).
         out["axis_collapsed"] = means[0][0]
     return out
+
+
+def passed_over(scores: np.ndarray, pool_idx: np.ndarray, chosen: int, art,
+                mood: dict, top: int = 3, near: float = 0.5) -> dict:
+    """THE ROAD NOT TAKEN — the runner-up tracks this step passed over, by name.
+
+    This replaces the eigen/participation-ratio readout that used to describe the
+    candidate cloud's geometry. Both answer "how much choice did the model have",
+    but only one of them can be checked by a listener: an eigenvalue bar cannot
+    tell you whether the track it skipped was the better call, and the named
+    alternative can. Reported:
+
+      * `over`       : the top runner-ups (name / artist / genre / era), each with
+                       its `gap` = how far below the pick it scored, in the same
+                       pool-local z units the policy acted on. A NEGATIVE gap
+                       means it outscored the pick — which happens exactly when
+                       temperature > 0 and the step sampled instead of taking the
+                       argmax, so the sign is the sampling audit trail.
+      * `contenders` : how many candidates sat within `near` z of the pick — the
+                       honest "how many real options were there" count. 0 means
+                       the model had one obvious answer; 20 means the pick was
+                       nearly arbitrary and a re-roll would sound different.
+      * `choices`    : distinct genres / artists / decades among the top-50, so a
+                       shortlist that is 50 tracks of one artist reads as the
+                       single choice it actually is."""
+    s = scores[pool_idx]
+    win = float(scores[chosen])
+    order = np.argsort(-s)
+    runners = []
+    for j in order[: top + 6].tolist():
+        i = int(pool_idx[j])
+        if i == chosen:
+            continue
+        meta = art.items.get(str(i), {})
+        yr = mood["year"][i]
+        runners.append({
+            "name": meta.get("name"),
+            "artist": meta.get("artist"),
+            "genre": meta.get("genre"),
+            "gap": round(win - float(scores[i]), 3),
+            "year": int(yr) if np.isfinite(yr) else None,
+        })
+        if len(runners) >= top:
+            break
+
+    short = pool_idx[order[:50]]
+    decades = {int(y // 10 * 10) for y in mood["year"][short] if np.isfinite(y)}
+    return {
+        "over": runners,
+        "contenders": max(int(np.sum(s >= win - near)) - 1, 0),
+        "choices": {
+            "genres": len({(art.items.get(str(int(i)), {}) or {}).get("genre")
+                           for i in short.tolist()}),
+            "artists": len({(art.items.get(str(int(i)), {}) or {}).get("artist")
+                            for i in short.tolist()}),
+            "decades": len(decades),
+        },
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Legible mood — the vocabulary a LISTENER can actually check                  #
+# --------------------------------------------------------------------------- #
+# The crown's facets (mood_coh / ild / music_rel) are cosines in a 517-d fused
+# space: correct, comparable, and unreadable at the point of listening. "mood_coh
+# 0.42" cannot be confirmed or refuted by ear, so it cannot settle which
+# generator holds a vibe better. These features can: valence/energy/tempo are the
+# axes people describe mood WITH, and release_year / play_count / skip_rate are
+# facts about this listener's own history with the track.
+#
+# Source is the content-metric collection's payload (copied from
+# spotify_tracks_content), NOT the corpus collection — `spotify_tracks` carries no
+# af_* at all. Coverage is partial (measured 2026-07-26: 17455/23529 = 74% have
+# af_*; release_year / skip_rate / play_count are complete), and the acoustics are
+# ReccoBeats-derived and occasionally wrong (Muse's "Intro" is logged at valence
+# 0.0 / energy 0.03). Both facts are REPORTED rather than hidden: every aggregate
+# carries the item count it was computed from, so a thin axis is visibly thin.
+# They are weak as predictors — that is on the record — but this is description,
+# not prediction.
+MOOD_FIELDS = {
+    "energy": "af_energy",
+    "valence": "af_valence",
+    "tempo": "af_tempo",
+    "acousticness": "af_acousticness",
+    "danceability": "af_danceability",
+    "instrumentalness": "af_instrumentalness",
+    "year": "release_year",
+    "skip_rate": "skip_rate",
+    "completion": "completion_ratio",
+    "popularity": "track_popularity",
+    "saved": "is_saved",
+    "on_repeat": "on_repeat_count",
+}
+# Per-stop chips, in display order (key, label, format).
+STOP_MOOD = [("energy", "energy", "unit"), ("valence", "valence", "unit"),
+             ("tempo", "bpm", "bpm"), ("acousticness", "acoustic", "unit"),
+             ("year", "year", "year")]
+
+
+def load_mood_table(art) -> dict:
+    """Human-legible per-item descriptors, aligned to item index.
+
+    Returns a dict of float arrays (NaN = unknown) keyed by the MOOD_FIELDS names,
+    plus `familiarity` (the play-count percentile within this vocabulary, so
+    "top 8% most-played of your library" rather than a raw count), `loved`
+    (saved or on-repeat, 0/1) and `_acoustic` (bool mask: does this item have
+    af_* at all). Best-effort — a missing collection yields an all-NaN table and
+    every mood axis then reports itself as uncovered instead of failing."""
+    n = art.n_items
+    out = {k: np.full(n, np.nan, dtype=np.float64) for k in MOOD_FIELDS}
+    out["_acoustic"] = np.zeros(n, dtype=bool)
+
+    # play_count rides items.json, so familiarity is available even with Qdrant
+    # down. Midrank percentile: raw counts are extremely tied (most tracks played
+    # once), and a plain argsort rank would order those ties arbitrarily.
+    pc = np.zeros(n, dtype=np.float64)
+    for key, meta in art.items.items():
+        i = int(key)
+        if 0 <= i < n:
+            pc[i] = float(meta.get("play_count") or 0)
+    uniq, inv, counts = np.unique(pc, return_inverse=True, return_counts=True)
+    below = np.cumsum(counts) - counts
+    out["play_count"] = pc
+    out["familiarity"] = 100.0 * (below + counts / 2.0)[inv] / max(n, 1)
+
+    if os.environ.get("LENSING_MUSIC_METRIC_DISABLE"):
+        out["loved"] = np.full(n, np.nan)
+        return out
+    collection = os.environ.get("LENSING_MUSIC_METRIC_COLLECTION",
+                                "spotify_tracks_content_metric")
+    url = (os.environ.get("QDRANT_URL")
+           or os.environ.get("PATHFINDER_QDRANT_URL", "http://localhost:6337"))
+    try:
+        import hashlib
+
+        from qdrant_client import QdrantClient
+
+        uris: list[str | None] = [None] * n
+        for key, meta in art.items.items():
+            i = int(key)
+            if 0 <= i < n:
+                uris[i] = meta.get("uri")
+
+        def to_id(u: str) -> int:          # matches pipeline/corpus/ids.py
+            return int.from_bytes(hashlib.sha256(u.encode()).digest()[:8], "little")
+
+        ids = [to_id(u) if u else None for u in uris]
+        idmap = {pid: i for i, pid in enumerate(ids) if pid is not None}
+        client = QdrantClient(url=url, timeout=60)
+        want = [pid for pid in ids if pid is not None]
+        # Nested field selectors, not the whole payload: these points also carry
+        # the content text and sp_genres, which we never read (measured 2.7x
+        # faster per batch on the local instance).
+        fields = [f"metadata.{f}" for f in MOOD_FIELDS.values()]
+        for b in range(0, len(want), 512):
+            for r in client.retrieve(collection, ids=want[b:b + 512],
+                                     with_payload=fields, with_vectors=False):
+                i = idmap.get(r.id)
+                if i is None:
+                    continue
+                md = (r.payload or {}).get("metadata") or {}
+                for key, field in MOOD_FIELDS.items():
+                    v = md.get(field)
+                    if isinstance(v, (int, float)):
+                        out[key][i] = float(v)
+                out["_acoustic"][i] = isinstance(md.get("af_energy"), (int, float))
+        emit({"kind": "log", "msg":
+              f"mood: {int(out['_acoustic'].sum())}/{n} items carry acoustics "
+              f"from {collection!r}"})
+    except Exception as exc:               # noqa: BLE001 — descriptive, never fatal
+        emit({"kind": "log", "msg":
+              f"mood: legible features unavailable ({exc}); axes will be empty"})
+
+    saved, rep = out["saved"], out["on_repeat"]
+    loved = np.where(np.isnan(saved) & np.isnan(rep), np.nan,
+                     ((np.nan_to_num(saved) > 0)
+                      | (np.nan_to_num(rep) > 0)).astype(np.float64))
+    out["loved"] = loved
+    return out
+
+
+# Axes calibrated as LEVELS (a journey's mean) and as JUMPS (mean |Δ| between
+# consecutive tracks). The jump family is the one that answers the actual
+# question — "does this algorithm conserve mood-like behaviour" is a statement
+# about transitions, not about averages: a journey can average the seed's energy
+# exactly while alternating 0.2 and 0.9 track by track, which is precisely the
+# lurch a listener hears and the mean hides.
+LEVEL_KEYS = ("energy", "valence", "tempo", "acousticness", "familiarity",
+              "skip_rate", "loved", "year")
+JUMP_KEYS = ("energy", "valence", "tempo", "year")
+
+
+def natural_bands(art, mood: dict, music_vecs, music_mask,
+                  genre_ids: np.ndarray, max_sessions: int = 1200,
+                  cap: int = 30000, seed: int = 7) -> dict:
+    """Calibrate every axis against THIS LISTENER'S OWN REAL SESSIONS.
+
+    A raw number ("step-to-step energy jump 0.19") is unevaluable; the same number
+    against the band the listener's real listening occupies ("your own sessions
+    run 0.08–0.24") is a verdict. So we walk the artifact's TRAIN sessions — real
+    listening histories, the same data the models were fit on — and collect the
+    identical statistics we compute on a generated journey. Everything reported to
+    the UI is then a percentile within that reference.
+
+    Sampling is capped (`max_sessions` sessions, `cap` samples per measure) to
+    keep this a few hundred milliseconds; the bands are wide statistics and do not
+    move meaningfully with more."""
+    rng = np.random.default_rng(seed)
+    tr = np.asarray(art.train_sessions, dtype=np.int64)
+    if tr.size == 0:
+        return {}
+    pick = tr if tr.size <= max_sessions else rng.choice(tr, max_sessions, replace=False)
+
+    lev: dict[str, list] = {k: [] for k in LEVEL_KEYS}
+    jmp: dict[str, list] = {k: [] for k in (*JUMP_KEYS, "sonic")}
+    churn: list[float] = []
+    drift: list[float] = []
+    used = 0
+    for s in pick.tolist():
+        seq = art.session(int(s)).astype(np.int64)
+        if seq.size < 3:
+            continue
+        used += 1
+        for k in LEVEL_KEYS:
+            v = mood[k][seq]
+            v = v[np.isfinite(v)]
+            if v.size and len(lev[k]) < cap:
+                lev[k].append(float(v.mean()))
+        a, b = seq[:-1], seq[1:]
+        for k in JUMP_KEYS:
+            d = np.abs(mood[k][b] - mood[k][a])
+            d = d[np.isfinite(d)]
+            if d.size and len(jmp[k]) < cap:
+                jmp[k].append(float(d.mean()))
+        if music_vecs is not None and music_mask is not None:
+            ok = music_mask[a] & music_mask[b]
+            if ok.any() and len(jmp["sonic"]) < cap:
+                cos = np.sum(music_vecs[a[ok]] * music_vecs[b[ok]], axis=1)
+                jmp["sonic"].append(float(np.mean(1.0 - cos)))
+            d = _drift(seq, music_vecs, music_mask)
+            if d is not None:
+                drift.append(d)
+        g = genre_ids[seq]
+        churn.append(10.0 * float(np.mean(g[1:] != g[:-1])))
+
+    out = {"levels": {k: np.asarray(v) for k, v in lev.items() if v},
+           "jumps": {k: np.asarray(v) for k, v in jmp.items() if v},
+           "churn": np.asarray(churn), "drift": np.asarray(drift),
+           "n_sessions": used}
+    emit({"kind": "log", "msg":
+          f"mood: natural bands from {used} of your real sessions"})
+    return out
+
+
+def _drift(seq: np.ndarray, music_vecs, music_mask) -> float | None:
+    """Signed DRIFT: how much closer to (or further from) its own opening the
+    back third of a sequence sits. Negative = it walked away from where it
+    started; ~0 = it stayed in the neighbourhood. Measured against the opening
+    rather than against a fixed seed so it applies to real sessions too, which is
+    what makes it calibratable."""
+    ok = seq[music_mask[seq]]
+    if ok.size < 6:
+        return None
+    third = max(ok.size // 3, 2)
+    head = music_vecs[ok[:third]].mean(axis=0)
+    nrm = float(np.linalg.norm(head))
+    if nrm <= 0:
+        return None
+    head = head / nrm
+    first = float(np.mean(music_vecs[ok[:third]] @ head))
+    last = float(np.mean(music_vecs[ok[-third:]] @ head))
+    return last - first
+
+
+def _finite(v) -> float | None:
+    return float(v) if v is not None and np.isfinite(v) else None
+
+
+def _pctile(sample, v) -> float | None:
+    """Where `v` falls inside the natural reference, 0–100."""
+    if sample is None or len(sample) < 20 or v is None or not np.isfinite(v):
+        return None
+    return round(100.0 * float(np.mean(np.asarray(sample) <= v)), 1)
+
+
+def _band(sample) -> list | None:
+    if sample is None or len(sample) < 20:
+        return None
+    return [round(float(x), 4) for x in np.percentile(np.asarray(sample), [10, 50, 90])]
+
+
+def _mean(arr: np.ndarray, idx: np.ndarray) -> tuple[float | None, int]:
+    v = arr[idx]
+    v = v[np.isfinite(v)]
+    return (float(v.mean()) if v.size else None), int(v.size)
+
+
+def _step_jump(arr: np.ndarray, path: np.ndarray) -> tuple[float | None, int]:
+    d = np.abs(arr[path[1:]] - arr[path[:-1]])
+    d = d[np.isfinite(d)]
+    return (float(d.mean()) if d.size else None), int(d.size)
+
+
+def _axis(key, group, label, value, *, n=0, seed=None, band=None, pct=None,
+          fmt="unit", verdict=None, hint=None, tone=None) -> dict:
+    """One report-card row. `tone` is deliberately sparse: sitting outside your
+    natural band is INTERESTING, not wrong (a smoother-than-life journey may be
+    exactly what you wanted), so only axes with an unambiguous bad direction ever
+    carry a warning and everything else is left for the listener to judge."""
+    return {"key": key, "group": group, "label": label,
+            "value": None if value is None else round(float(value), 4),
+            "seed": None if seed is None else round(float(seed), 4),
+            "band": band, "pct": pct, "fmt": fmt, "n": int(n),
+            "verdict": verdict, "hint": hint,
+            "tone": tone, "out": bool(pct is not None and (pct < 10 or pct > 90))}
+
+
+def _vs_seed(value, seed, band, higher: str, lower: str) -> str | None:
+    """Verdict for a LEVEL axis: is the journey where the seed was? Tolerance is
+    a fraction of the natural spread rather than a fixed epsilon, so "the same
+    energy" means the same thing on a 0–1 axis and on a BPM axis."""
+    if value is None or seed is None:
+        return None
+    tol = 0.15 * (band[2] - band[0]) if band else 0.05
+    d = value - seed
+    if abs(d) <= max(tol, 1e-9):
+        return "holds the seed's level"
+    return f"{higher if d > 0 else lower} than the seed"
+
+
+def _vs_band(pct, low: str, mid: str, high: str) -> str | None:
+    if pct is None:
+        return None
+    return low if pct < 10 else (high if pct > 90 else mid)
+
+
+def mood_report(stops, seed_idx, art, mood, bands, music_vecs, music_mask,
+                genre_ids) -> dict:
+    """The report card: every axis a listener can verify, each against the band
+    their own sessions occupy. Verdicts are computed HERE, not in the UI, so the
+    client stays a renderer and the wording lives with the arithmetic."""
+    path = np.array([s["item_index"] for s in stops], dtype=np.int64)
+    if path.size == 0:
+        return {}
+    seed_idx = np.asarray(seed_idx, dtype=np.int64)
+    lb, jb = bands.get("levels", {}), bands.get("jumps", {})
+    # The seed's own last track is where the first generated step is heard FROM,
+    # so transitions are measured over seed-tail + journey: a jarring opening jump
+    # is the most audible failure and would otherwise go unmeasured.
+    full = np.concatenate([seed_idx[-1:], path]) if seed_idx.size else path
+    axes = []
+
+    # --- 1. acoustic mood: the axes people describe mood WITH ----------------
+    for key, label, fmt, hi, lo in (
+            ("energy", "Energy", "unit", "hotter", "calmer"),
+            ("valence", "Valence", "unit", "brighter", "darker"),
+            ("tempo", "Tempo", "bpm", "faster", "slower"),
+            ("acousticness", "Acoustic", "unit", "more acoustic", "more electric")):
+        v, n = _mean(mood[key], path)
+        sv, _ = _mean(mood[key], seed_idx)
+        band = _band(lb.get(key))
+        axes.append(_axis(key, "mood", label, v, n=n, seed=sv, band=band, fmt=fmt,
+                          pct=_pctile(lb.get(key), v),
+                          verdict=_vs_seed(v, sv, band, hi, lo),
+                          hint=f"mean {MOOD_FIELDS.get(key, key)} over the "
+                               f"{n} stop(s) that carry it"))
+
+    # --- 2. continuity: the transition statistics, which is what "conserves
+    #        mood-like behaviour" actually means ------------------------------
+    if music_vecs is not None and music_mask is not None:
+        ok = music_mask[full]
+        w = full[ok]
+        sj = None
+        if w.size > 1:
+            cos = np.sum(music_vecs[w[1:]] * music_vecs[w[:-1]], axis=1)
+            sj = float(np.mean(1.0 - cos))
+        pct = _pctile(jb.get("sonic"), sj)
+        axes.append(_axis("sonic_jump", "flow", "Sonic jump / step", sj,
+                          n=max(int(w.size) - 1, 0), band=_band(jb.get("sonic")),
+                          pct=pct, fmt="unit",
+                          verdict=_vs_band(pct, "smoother than you ever listen",
+                                           "natural transitions",
+                                           "choppier than your listening"),
+                          hint="mean cosine distance between CONSECUTIVE stops in "
+                               "the content-metric space, against the same "
+                               "statistic on your real sessions"))
+    for key, label, fmt in (("energy", "Energy jolt / step", "unit"),
+                            ("tempo", "BPM jump / step", "bpm")):
+        v, n = _step_jump(mood[key], full)
+        pct = _pctile(jb.get(key), v)
+        axes.append(_axis(f"{key}_jump", "flow", label, v, n=n,
+                          band=_band(jb.get(key)), pct=pct, fmt=fmt,
+                          verdict=_vs_band(pct, "flatter than your listening",
+                                           "natural", "lurching"),
+                          hint=f"mean |Δ{key}| from one stop to the next"))
+    dv = _drift(full, music_vecs, music_mask) if music_vecs is not None else None
+    pct = _pctile(bands.get("drift"), dv)
+    axes.append(_axis("drift", "flow", "Drift from the opening", dv,
+                      n=int(path.size), band=_band(bands.get("drift")), pct=pct,
+                      fmt="signed",
+                      verdict=None if dv is None else (
+                          "holds the neighbourhood" if dv > -0.02 else
+                          ("wanders off" if pct is not None and pct < 10
+                           else "drifts, as your sessions do")),
+                      hint="how much closer to its own opening the back third "
+                           "sits than the front third; negative = walked away"))
+
+    # --- 3. your own history with these tracks ------------------------------
+    v, n = _mean(mood["familiarity"], path)
+    sv, _ = _mean(mood["familiarity"], seed_idx)
+    pct = _pctile(lb.get("familiarity"), v)
+    axes.append(_axis("familiarity", "history", "Familiarity", v, n=n, seed=sv,
+                      band=_band(lb.get("familiarity")), pct=pct, fmt="pctile",
+                      verdict=_vs_band(pct, "deeper cuts than you ever queue",
+                                       "typical depth", "your greatest hits"),
+                      hint="mean play-count percentile within your library — 50 is "
+                           "a median track, 90 one of your most-played. The band "
+                           "sits HIGH by construction (a track you played 50 times "
+                           "appears in 50 real sessions), so read this A-vs-B "
+                           "rather than as a pass/fail"))
+    v, n = _mean(mood["loved"], path)
+    axes.append(_axis("loved", "history", "Saved / on repeat", v, n=n,
+                      band=_band(lb.get("loved")),
+                      pct=_pctile(lb.get("loved"), v), fmt="share",
+                      verdict=_vs_band(_pctile(lb.get("loved"), v),
+                                       "fewer keepers than usual", "typical",
+                                       "unusually many keepers"),
+                      hint="share of stops you saved or put on repeat"))
+    v, n = _mean(mood["skip_rate"], path)
+    pct = _pctile(lb.get("skip_rate"), v)
+    axes.append(_axis("skip_rate", "history", "Historical skip rate", v, n=n,
+                      band=_band(lb.get("skip_rate")), pct=pct, fmt="share",
+                      # The one axis with an unambiguous bad end: being fed tracks
+                      # you have historically bailed out of is never what you want.
+                      tone="warn" if (pct is not None and pct > 90) else None,
+                      verdict=_vs_band(pct, "you finish these", "typical",
+                                       "you have skipped these"),
+                      hint="mean rate at which you ABANDONED these tracks in the "
+                           "past — high means it is feeding you songs you bail on"))
+
+    # --- 4. era & genre movement -------------------------------------------
+    v, n = _mean(mood["year"], path)
+    sv, _ = _mean(mood["year"], seed_idx)
+    axes.append(_axis("year", "era", "Mean year", v, n=n, seed=sv,
+                      band=_band(lb.get("year")), fmt="year",
+                      pct=_pctile(lb.get("year"), v),
+                      verdict=_vs_seed(v, sv, _band(lb.get("year")),
+                                       "newer", "older"),
+                      hint="mean release year of the journey vs the seed's"))
+    v, n = _step_jump(mood["year"], full)
+    pct = _pctile(jb.get("year"), v)
+    axes.append(_axis("year_jump", "era", "Year jump / step", v, n=n,
+                      band=_band(jb.get("year")), pct=pct, fmt="years",
+                      verdict=_vs_band(pct, "tighter era than you listen in",
+                                       "natural", "time-travels"),
+                      hint="mean |Δrelease year| between consecutive stops"))
+    g = genre_ids[full]
+    churn = 10.0 * float(np.mean(g[1:] != g[:-1])) if g.size > 1 else None
+    pct = _pctile(bands.get("churn"), churn)
+    axes.append(_axis("genre_churn", "era", "Genre switches / 10", churn,
+                      n=int(full.size), band=_band(bands.get("churn")), pct=pct,
+                      fmt="count",
+                      verdict=_vs_band(pct, "stays in one lane",
+                                       "natural", "channel-hops"),
+                      hint="genre changes per 10 stops, against your own rate"))
+
+    cov = int(np.sum(mood["_acoustic"][path]))
+    return {
+        "axes": axes,
+        "coverage": {"acoustic": cov, "stops": int(path.size),
+                     "share": round(cov / max(int(path.size), 1), 3)},
+        "reference": {"sessions": int(bands.get("n_sessions", 0))},
+        "groups": [
+            {"key": "mood", "label": "Acoustic mood",
+             "note": "where the journey sits on the axes people describe mood "
+                     "with. The tick is your seed."},
+            {"key": "flow", "label": "Continuity",
+             "note": "transition statistics — the actual measure of whether an "
+                     "algorithm conserves a vibe. Inside your band is the goal, "
+                     "not zero."},
+            {"key": "history", "label": "Your history",
+             "note": "what you already did with these exact tracks."},
+            {"key": "era", "label": "Era & genre",
+             "note": "movement in time and style."},
+        ],
+    }
 
 
 def latent_intent(pred_latent: np.ndarray, latents: np.ndarray,
@@ -587,19 +1064,45 @@ def latent_intent(pred_latent: np.ndarray, latents: np.ndarray,
 # --------------------------------------------------------------------------- #
 # Generation                                                                  #
 # --------------------------------------------------------------------------- #
+def phase(key: str, msg: str, **extra) -> None:
+    """Announce a generation PHASE on stdout, which the server fans out over SSE
+    to the lab (see `api::extend_events`).
+
+    A journey takes ~8s and the bulk of it is invisible setup — loading the baked
+    artifact, pulling 19k sonic vectors, calibrating bands against real sessions.
+    A spinner for that is a lie of omission: it says "working" when the honest
+    statement is "reading your listening history to calibrate the bands". Every
+    phase below is emitted BEFORE the work it names, so the client always shows
+    the step actually in flight rather than the last one finished."""
+    emit({"kind": "phase", "phase": key, "msg": msg, **extra})
+
+
 def extend(model_dir: Path, predictor: str, prm: dict) -> dict:
     """Generate a journey and return the full lab payload (stops + diagnostics)."""
+    phase("artifact", "loading the model's baked vocabulary")
     art = load_artifact(model_dir)
     latents = art.item_latents
     artist_ids = _relevance_ids(art, "artist")
     genre_ids = _relevance_ids(art, "genre")
     genre_names = {int(k): (v.get("genre") or "—") for k, v in art.items.items()
                    if int(k) < art.n_items}
+    phase("music", f"fetching sonic vectors for {art.n_items} tracks",
+          items=art.n_items)
     music_vecs, music_mask = _load_music_vectors(art)
+    phase("mood", "reading mood features (valence / energy / tempo / era)")
+    mood = load_mood_table(art)
+    phase("bands", "calibrating against your own listening sessions")
+    bands = natural_bands(art, mood, music_vecs, music_mask, genre_ids)
 
     # Expand playlists/albums BEFORE resolution — resolve_prefix only knows
     # single tracks, so a pasted playlist URL would resolve to nothing.
+    # Named separately from `seed`: expansion is the one phase that can stall on
+    # something outside this machine (the Spotify Web API), so when a journey
+    # hangs here the readout should say so rather than blame the model.
+    if any(parse_container(t) for t in prm["seed"]):
+        phase("expand", "expanding the seed playlist / album via Spotify")
     tokens, seed_info = expand_seed(list(prm["seed"]))
+    phase("seed", "resolving the seed against the model's vocabulary")
     seed_idx, unknown = resolve_prefix(art, tokens)
     if seed_idx.size == 0:
         raise SystemExit(
@@ -608,6 +1111,7 @@ def extend(model_dir: Path, predictor: str, prm: dict) -> dict:
             f"library the model was trained on; seed with tracks from it, or "
             f"with a playlist that overlaps it.")
 
+    phase("scorer", f"loading the {predictor} weights")
     score_fn, predict_latent_fn, info = build_scorer(predictor, model_dir, art)
     core_idx, anchor = dominant_core(seed_idx, music_vecs)
     use_anchor = (anchor is not None
@@ -634,19 +1138,42 @@ def extend(model_dir: Path, predictor: str, prm: dict) -> dict:
           f"({len(unknown)} unknown), core {core_idx.size}, "
           f"anchor {'on' if use_anchor else 'off'}, steps {prm['steps']}"})
 
-    rng = np.random.default_rng(int(prm["seed_rng"]))
-    # Generation runs from the CORE when anchoring (the app's `begin()` rule), but
-    # every loaded seed counts as used so nothing is replayed.
-    seq = (core_idx if use_anchor else seed_idx).astype(np.int64).tolist()
-    used = set(seed_idx.tolist())
-    used_artists: list[int] = [int(artist_ids[i]) for i in seed_idx.tolist()]
+    stops = rollout(art, score_fn, predict_latent_fn, seed_idx, core_idx, use_anchor,
+                    anchor, prm, artist_ids, genre_ids, genre_names, latents,
+                    music_vecs, music_mask, mood, mood_ref)
 
-    # Title identity for the dedupe constraint: the same recording appears in the
-    # vocab under multiple releases (single + album + edit), each its own item
-    # index, so index-level next-distinct does not stop a replay. Key on
-    # (normalized title, artist id).
-    title_key = np.full(art.n_items, -1, dtype=np.int64)
-    _tvocab: dict[tuple, int] = {}
+    phase("scoring", "scoring the journey against your bands")
+    return {
+        "model_dir": str(model_dir),
+        "predictor": predictor,
+        "info": info,
+        "seed": {
+            "resolved": int(seed_idx.size),
+            "submitted": len(tokens),
+            "unknown": unknown[:20],
+            "unknown_count": len(unknown),
+            "core": int(core_idx.size),
+            "anchored": bool(use_anchor),
+            **seed_info,
+        },
+        "params": prm,
+        "stops": stops,
+        "diagnostics": journey_diagnostics(stops, seed_idx, art, artist_ids,
+                                          music_vecs, music_mask, mood_ref),
+        # The listener-facing read: same journey, described in terms that can be
+        # confirmed or refuted by ear, each against this listener's own bands.
+        "mood_report": mood_report(stops, seed_idx, art, mood, bands,
+                                   music_vecs, music_mask, genre_ids),
+    }
+
+
+def title_keys(art, artist_ids: np.ndarray) -> np.ndarray:
+    """Title identity for the dedupe constraint: the same recording appears in the
+    vocab under multiple releases (single + album + edit), each its own item index,
+    so index-level next-distinct does not stop a replay. Key on
+    (normalized title, artist id)."""
+    keys = np.full(art.n_items, -1, dtype=np.int64)
+    vocab: dict[tuple, int] = {}
     for key, meta in art.items.items():
         i = int(key)
         if not (0 <= i < art.n_items):
@@ -656,9 +1183,33 @@ def extend(model_dir: Path, predictor: str, prm: dict) -> dict:
             continue
         # Strip the usual release-variant suffixes so "X" and "X - edit" collide.
         base = re.split(r"\s*[-–(\[]\s*", name)[0].strip() or name
-        k = (base, int(artist_ids[i]))
-        cid = _tvocab.setdefault(k, len(_tvocab))
-        title_key[i] = cid
+        keys[i] = vocab.setdefault((base, int(artist_ids[i])), len(vocab))
+    return keys
+
+
+def rollout(art, score_fn, predict_latent_fn, seed_idx, core_idx, use_anchor,
+            anchor, prm, artist_ids, genre_ids, genre_names, latents,
+            music_vecs, music_mask, mood, mood_ref, narrate: bool = True) -> list:
+    """THE autoregressive generation loop + the shared retrieval policy.
+
+    Factored out of `extend` so that the offline rollout EVALUATION
+    (`seq_continuation_eval.py rollout`) drives the identical code path instead of
+    reimplementing the policy. A second implementation is the specific failure this
+    module exists to prevent — see the module docstring: if the evaluator's policy
+    drifted from the lab's, an offline rollout score would not describe the
+    journeys anyone actually hears, and comparing two models would silently compare
+    two policies.
+
+    `narrate=False` silences the per-step SSE events for batch evaluation, where
+    thousands of steps of progress chatter is noise rather than a readout."""
+    rng = np.random.default_rng(int(prm["seed_rng"]))
+    # Generation runs from the CORE when anchoring (the app's `begin()` rule), but
+    # every loaded seed counts as used so nothing is replayed.
+    seq = (core_idx if use_anchor else seed_idx).astype(np.int64).tolist()
+    used = set(seed_idx.tolist())
+    used_artists: list[int] = [int(artist_ids[i]) for i in seed_idx.tolist()]
+
+    title_key = title_keys(art, artist_ids)
     played_titles: set[int] = {int(title_key[i]) for i in seed_idx.tolist()
                                if title_key[i] >= 0}
 
@@ -747,11 +1298,34 @@ def extend(model_dir: Path, predictor: str, prm: dict) -> dict:
             "score_z": round(float(scores[choice]), 5),
             "score_raw": round(float(raw[choice]), 5),
             "intent": intent,
+            # What it picked, in listener vocabulary, and what it turned down.
+            "mood": {k: _finite(mood[k][choice])
+                     for k, _label, _fmt in STOP_MOOD},
+            "passed": passed_over(scores, pool_idx, choice, art, mood),
         }
+        # Δ from the track this one is heard AFTER — the audible quantity. The
+        # reference for step 1 is the last seed track, so the opening transition
+        # is measured like every other one.
+        prev = seq[-1] if seq else None
+        if prev is not None:
+            stop["delta"] = {}
+            for k, _label, _fmt in STOP_MOOD:
+                a, b = mood[k][prev], mood[k][choice]
+                stop["delta"][k] = (round(float(b - a), 4)
+                                    if np.isfinite(a) and np.isfinite(b) else None)
         # Per-stop grounding: how close this pick is to the seed's mood centroid.
         if mood_ref is not None and music_mask is not None and music_mask[choice]:
             stop["mood_sim"] = round(float(music_vecs[choice] @ mood_ref), 4)
         stops.append(stop)
+        # The generation loop is the longest phase and used to be silent. Naming
+        # each pick as it lands turns the wait into the thing being waited for —
+        # you watch the journey get written, and a model that locks onto one
+        # artist is visible while it happens instead of 8 seconds later.
+        if narrate:
+            emit({"kind": "step", "step": step + 1, "of": int(prm["steps"]),
+                  "name": stop["name"], "artist": stop["artist"],
+                  "genre": stop["genre"], "energy": _finite(mood["energy"][choice]),
+                  "year": _finite(mood["year"][choice])})
 
         seq.append(choice)
         used.add(choice)
@@ -759,24 +1333,7 @@ def extend(model_dir: Path, predictor: str, prm: dict) -> dict:
         if title_key[choice] >= 0:
             played_titles.add(int(title_key[choice]))
 
-    return {
-        "model_dir": str(model_dir),
-        "predictor": predictor,
-        "info": info,
-        "seed": {
-            "resolved": int(seed_idx.size),
-            "submitted": len(tokens),
-            "unknown": unknown[:20],
-            "unknown_count": len(unknown),
-            "core": int(core_idx.size),
-            "anchored": bool(use_anchor),
-            **seed_info,
-        },
-        "params": prm,
-        "stops": stops,
-        "diagnostics": journey_diagnostics(stops, seed_idx, art, artist_ids,
-                                           music_vecs, music_mask, mood_ref),
-    }
+    return stops
 
 
 def journey_diagnostics(stops, seed_idx, art, artist_ids, music_vecs,

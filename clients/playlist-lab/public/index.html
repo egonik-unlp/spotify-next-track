@@ -67,6 +67,10 @@
       </div>
       <p class="help">Both slots run the same seed and the same policy, so the
         only difference is the algorithm.</p>
+      <label class="blindtoggle" for="blind">
+        <input type="checkbox" id="blind">
+        <span>Blind A/B — hide the names, listen, then vote</span>
+      </label>
     </fieldset>
 
     <fieldset class="ctl ctl-knobs">
@@ -96,38 +100,75 @@
     </fieldset>
   </form>
 
+  <section id="ballot" class="ballot" hidden>
+    <div class="btitles">
+      <h2>Which one holds the mood?</h2>
+      <p class="meta">Names are hidden and the sides were shuffled. Play both,
+        then vote — the tally below is the only measurement here that isn't the
+        models grading themselves.</p>
+    </div>
+    <div class="bbtns">
+      <button id="voteL" class="btn-primary" type="button">Left</button>
+      <button id="voteR" class="btn-primary" type="button">Right</button>
+      <button id="voteT" class="btn-quiet" type="button">Too close to call</button>
+      <button id="voteSkip" class="btn-quiet" type="button">Just reveal</button>
+    </div>
+  </section>
+
+  <section id="standings" class="standings" hidden></section>
+
   <section id="empty" class="empty">
     <h2>How to read a journey</h2>
     <dl class="legend">
       <div>
-        <dt>Intent</dt>
-        <dd>What the model wanted next, not just what it took: score mass by
-          genre, how committed it is (<span class="mono">ent</span> 0 = one
-          narrow pocket, 1 = wandering), whether it is reaching for a single
-          artist (<span class="mono">conc</span>), and the top-1/top-2 gap
-          (<span class="mono">margin</span>). <span class="mono">aim</span> is
-          the predicted latent's nearest genres — the target point itself, which
-          only the next-latent families expose.</dd>
+        <dt>Mood card</dt>
+        <dd>The primary readout: where the journey sits on axes you can hear —
+          energy, valence, tempo, era, and your own history with these exact
+          tracks. Each row's rail shades the <strong>10th–90th percentile of the
+          same statistic measured on your real listening sessions</strong>, marks
+          your median, and ticks your seed. A value inside the band means the
+          generator moves the way you actually listen; outside is not
+          automatically wrong, but it is the thing to go listen for. Acoustics
+          cover ~74% of the corpus, so every row prints the count it used.</dd>
       </div>
       <div>
-        <dt>Diagnostics</dt>
-        <dd>The crown's own facets, computed on the journey you are hearing
-          rather than a held-out split — so <span class="mono">H</span> here is
-          comparable to the leaderboard's.</dd>
+        <dt>Continuity</dt>
+        <dd>The group that answers <em>does this algorithm conserve a vibe</em>.
+          It is about transitions, not averages: a journey can average your
+          seed's energy exactly while alternating 0.2 and 0.9 track by track,
+          which is the lurch you hear and the mean hides.</dd>
       </div>
       <div>
-        <dt>Flags</dt>
-        <dd><span class="mono">maxrun</span> and <span class="mono">hhi</span>
-          measure journey-internal repetition, which
-          <span class="mono">artist_adj</span> cannot see: it only counts the
-          <em>seed's</em> artist, so a generator looping on some other artist
-          scores a perfect 0. Cells turn red when a run reaches 3 or
-          concentration reaches 0.25.</dd>
+        <dt>Journey shape</dt>
+        <dd>The same movement as a picture: one chart, both journeys overlaid on
+          shared axes (energy, valence, tempo, era) against your seed's dashed
+          baseline. Flat holds the mood, sawtooth lurches. Hover any point for
+          the track it belongs to.</dd>
+      </div>
+      <div>
+        <dt>Over</dt>
+        <dd>The runner-up tracks each step turned down, by name, with how many
+          candidates were genuinely in contention. <em>no real contest</em> means
+          the step had one obvious answer; a dozen in contention means the pick
+          was near-arbitrary and a re-roll would sound different. Hover a name
+          for its genre, year and how far it scored from the pick.</dd>
+      </div>
+      <div>
+        <dt>Leaderboard facets</dt>
+        <dd>Folded away under each panel: <span class="mono">H</span>,
+          <span class="mono">mood_coh</span>, <span class="mono">ild</span> and
+          the repetition flags, computed on the journey you are hearing so they
+          reconcile with what the leaderboard ranks on. Cosines in a 517-d fused
+          space — comparable across models, unconfirmable by ear, which is why
+          they are no longer the headline.</dd>
       </div>
     </dl>
     <p class="meta">Pick a seed and press Generate. One journey costs about one
-      artifact load (~4&nbsp;s) regardless of length.</p>
+      artifact load (~8&nbsp;s, including the calibration pass over your own
+      sessions) regardless of length.</p>
   </section>
+
+  <section id="compare" class="compare" hidden></section>
 
   <div id="panels" class="panels" aria-live="polite"></div>
 </main>
@@ -156,30 +197,38 @@
       <span class="spacer"></span>
       <button class="handoff btn-quiet" type="button">Hand off →</button>
     </header>
-    <div class="diag" role="table" aria-label="Journey diagnostics"></div>
+    <div class="moodcard"></div>
+    <details class="facets">
+      <summary>Leaderboard facets</summary>
+      <div class="diag" role="table" aria-label="Journey diagnostics"></div>
+    </details>
     <ol class="stops"></ol>
   </section>
 </template>
 
-<template id="skeleton-tpl">
-  <section class="panel skeleton" aria-hidden="true">
+<!-- The waiting state is a READOUT, not a shimmer: a journey takes ~8s and the
+     predictor narrates its own phases and picks over SSE, so the panel shows what
+     is actually happening (and where the time goes) while it happens. -->
+<template id="progress-tpl">
+  <section class="panel progress">
     <header class="panel-head">
-      <span class="series-dot"></span>
-      <div class="panel-titles"><span class="sk sk-title"></span></div>
+      <span class="series-dot" aria-hidden="true"></span>
+      <div class="panel-titles">
+        <h2 class="pname mono"></h2>
+        <span class="pstate meta"></span>
+      </div>
+      <span class="spacer"></span>
+      <span class="pelapsed mono" aria-hidden="true"></span>
     </header>
-    <div class="diag">
-      <span class="sk sk-cell"></span><span class="sk sk-cell"></span>
-      <span class="sk sk-cell"></span><span class="sk sk-cell"></span>
-      <span class="sk sk-cell"></span><span class="sk sk-cell"></span>
+    <ol class="phases"></ol>
+    <div class="livewrap" hidden>
+      <div class="livehead">
+        <span class="livelabel">writing the journey</span>
+        <span class="livecount mono"></span>
+      </div>
+      <div class="livebar"><i></i></div>
+      <ol class="livestops"></ol>
     </div>
-    <ol class="stops">
-      <li class="stop"><span class="sk sk-row"></span></li>
-      <li class="stop"><span class="sk sk-row"></span></li>
-      <li class="stop"><span class="sk sk-row"></span></li>
-      <li class="stop"><span class="sk sk-row"></span></li>
-      <li class="stop"><span class="sk sk-row"></span></li>
-      <li class="stop"><span class="sk sk-row"></span></li>
-    </ol>
   </section>
 </template>
 

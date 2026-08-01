@@ -1687,10 +1687,40 @@ pub async fn predict_model(
     }
 }
 
+/// Live progress for one extend journey: the predictor's own phase and per-step
+/// events, fanned out while the blocking `POST .../extend` runs.
+///
+/// The channel is created by whoever arrives first — this subscription or the
+/// POST — so a client may (and should) open the stream before firing the request
+/// without racing it. History is replayed on connect, so a late subscriber still
+/// sees every phase it missed. The stream ends on the `{"kind":"done"}` line the
+/// POST pushes when the journey resolves; a caller that opens a channel and never
+/// POSTs leaves an entry that `extend_channel` evicts once nobody is listening.
+pub async fn extend_events(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let handle = state.extend_channel(&id);
+    let (history, rx) = handle.snapshot_and_subscribe();
+    let stream = stream::iter(history)
+        .chain(BroadcastStream::new(rx).filter_map(|r| async move { r.ok() }))
+        // `scan` rather than `take_while`: the terminal line carries the outcome
+        // the client is waiting for, so it must be DELIVERED and then end the
+        // stream. take_while would swallow it.
+        .scan(false, |stopped, line| {
+            let end = *stopped;
+            *stopped = line.contains(r#""kind": "done""#) || line.contains(r#""kind":"done""#);
+            async move { if end { None } else { Some(line) } }
+        })
+        .map(|line| Ok(Event::default().data(line)));
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
 /// Autoregressively EXTEND a seed session into a journey — the playlist lab's
 /// generation endpoint. Body = the extend params (`seed`, `steps`, plus the
-/// shared retrieval policy), passed through to the predictor verbatim; response =
-/// the journey report (stops + per-step intent + journey diagnostics).
+/// shared retrieval policy), passed through to the predictor verbatim, plus an
+/// optional `progress_id` naming an `extend_events` channel to narrate on;
+/// response = the journey report (stops + per-step intent + journey diagnostics).
 pub async fn extend_model(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,

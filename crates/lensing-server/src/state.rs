@@ -37,6 +37,14 @@ pub struct AppState {
     pub definitions: tokio::sync::Mutex<crate::definitions::Definitions>,
     /// Live (running) runs: run_id → handle.
     pub live_runs: Mutex<HashMap<String, Arc<RunHandle>>>,
+    /// In-flight session-extend journeys: caller-chosen progress_id → handle.
+    /// A journey is a single blocking POST that takes ~8s, most of it invisible
+    /// setup, so the lab subscribes to the predictor's own phase/step events
+    /// over SSE while it waits. Keyed by the CALLER's id rather than a
+    /// server-minted one because the subscription must be openable before — or
+    /// concurrently with — the POST that produces the events; whichever side
+    /// arrives first creates the channel (see `extend_channel`).
+    pub live_extends: Mutex<HashMap<String, Arc<RunHandle>>>,
     /// In-flight dataset builds: build_id → status.
     pub builds: Mutex<HashMap<String, BuildStatus>>,
     /// In-flight heavy async jobs (analyze, export): job_id → status.
@@ -67,6 +75,29 @@ impl AppState {
     }
     pub fn models_dir(&self) -> PathBuf {
         self.root.join("data/models")
+    }
+
+    /// Get-or-create the progress channel for an extend journey. Either side
+    /// may arrive first — the subscriber (SSE) or the producer (the POST) — and
+    /// both must land on the SAME handle, so creation happens here under one
+    /// lock rather than in whichever caller happens to be earlier.
+    ///
+    /// Bounded: a client that opens channels and never POSTs (or a POST whose
+    /// id nobody subscribes to) would otherwise leak an entry per attempt. The
+    /// cap is generous next to the two-per-journey real usage and only ever
+    /// evicts channels no subscriber is holding a receiver for.
+    pub fn extend_channel(&self, id: &str) -> Arc<RunHandle> {
+        let mut map = self.live_extends.lock().unwrap();
+        if map.len() >= 64 {
+            map.retain(|_, h| h.has_subscribers());
+        }
+        map.entry(id.to_string())
+            .or_insert_with(|| Arc::new(RunHandle::new()))
+            .clone()
+    }
+
+    pub fn drop_extend_channel(&self, id: &str) {
+        self.live_extends.lock().unwrap().remove(id);
     }
 }
 
@@ -119,6 +150,12 @@ impl RunHandle {
     pub fn snapshot_and_subscribe(&self) -> (Vec<String>, broadcast::Receiver<String>) {
         let p = self.inner.lock().unwrap();
         (p.history.clone(), p.tx.subscribe())
+    }
+
+    /// Whether anyone is currently listening — used to evict abandoned
+    /// extend-progress channels without disturbing live ones.
+    pub fn has_subscribers(&self) -> bool {
+        self.inner.lock().unwrap().tx.receiver_count() > 0
     }
 
     pub fn request_stop(&self) {

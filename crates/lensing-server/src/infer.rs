@@ -83,6 +83,7 @@ pub async fn run(
         db_sink: None, // read-only role: never mirrors writes
         definitions: tokio::sync::Mutex::new(definitions::Definitions::default()),
         live_runs: Mutex::new(Default::default()),
+        live_extends: Mutex::new(Default::default()),
         builds: Mutex::new(Default::default()),
         jobs: Mutex::new(Default::default()),
         run_slots: Arc::new(Semaphore::new(max_concurrent)),

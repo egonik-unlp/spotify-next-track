@@ -766,11 +766,24 @@ impl From<anyhow::Error> for PredictError {
 /// sampling temperature) stays owned by `predictors/seq_extend.py` and shared by
 /// every model — the lab must compare algorithms, not policies. The response is
 /// the predictor's report verbatim (stops + per-step intent + diagnostics).
+///
+/// An optional `progress_id` in the body names an SSE channel
+/// (`GET /api/extends/{id}/events`) that the predictor's own phase and
+/// per-step events are fanned out on while this request blocks — the journey
+/// narrates itself instead of the caller staring at a spinner for ~8s.
 pub async fn extend(
     state: Arc<AppState>,
     name: String,
-    params: serde_json::Value,
+    mut params: serde_json::Value,
 ) -> Result<serde_json::Value, PredictError> {
+    // `progress_id` is a TRANSPORT concern, not a generation parameter. Removed
+    // from the params before they reach the predictor so it never lands in `prm`
+    // and gets echoed back in the payload as if it had shaped the journey.
+    let progress_id = params
+        .as_object_mut()
+        .and_then(|o| o.remove("progress_id"))
+        .and_then(|v| v.as_str().map(str::to_string))
+        .filter(|s| !s.is_empty() && s.len() <= 128);
     let model_dir = state.models_dir().join(&name);
     let record = read_record(&model_dir).map_err(|_| PredictError::NotFound)?;
     let predictor = state
@@ -834,12 +847,27 @@ pub async fn extend(
         ],
     );
 
+    let channel = progress_id.as_deref().map(|id| state.extend_channel(id));
     let result = async {
+        // The queue wait is itself worth narrating: with both slots busy a journey
+        // can sit here for seconds having emitted nothing, and "queued" is a very
+        // different diagnosis from "slow model".
+        if let Some(ch) = &channel {
+            ch.push(
+                serde_json::json!({"kind":"phase","phase":"queue","msg":"waiting for a free predictor slot"})
+                    .to_string(),
+            );
+        }
         // Same slots as training/predict: a burst of journeys can't oversubscribe
         // CPU (the registered 85x-throughput-collapse pitfall).
         let _permit = state.run_slots.clone().acquire_owned().await?;
+        let sink = |line: &str| {
+            if let Some(ch) = &channel {
+                ch.push(line.to_string());
+            }
+        };
         let (exit_code, stderr_tail) =
-            runs::spawn_and_capture(&command, &args, &state.root, &|_line| {}).await?;
+            runs::spawn_and_capture(&command, &args, &state.root, &sink).await?;
         if exit_code != 0 {
             bail!("extend exited {exit_code}: {}", stderr_tail.trim());
         }
@@ -851,6 +879,17 @@ pub async fn extend(
     }
     .await;
     let _ = std::fs::remove_dir_all(&work_dir);
+    // Terminal event before teardown: an SSE subscriber otherwise cannot tell a
+    // finished journey from a stalled one, and a failed one should say why.
+    if let Some(id) = &progress_id {
+        if let Some(ch) = state.live_extends.lock().unwrap().get(id) {
+            ch.push(match &result {
+                Ok(_) => serde_json::json!({"kind":"done","ok":true}).to_string(),
+                Err(e) => serde_json::json!({"kind":"done","ok":false,"error":e.to_string()}).to_string(),
+            });
+        }
+        state.drop_extend_channel(id);
+    }
     Ok(result?)
 }
 
