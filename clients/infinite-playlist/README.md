@@ -4,6 +4,28 @@ Seed with **any** song(s) — even a whole Spotify playlist — and travel an en
 journey **through your own library** that holds the mood while the songs and
 artists keep changing.
 
+**Seeding is a library navigator.** *Browse my Spotify* signs you in and opens a
+browsing panel over your own account — playlists, saved albums, liked songs, top
+tracks, recently played, plus Spotify-wide search. Open a playlist or album to
+see its tracks; add songs, albums or whole playlists to a **queue** (cart). When
+you hit *Launch the model*, the queue is expanded (playlists/albums → their
+tracks), optionally **interspersed** round-robin instead of one block after
+another, deduped, capped (120 tracks per item, 300 total), cold-started for
+anything the model has never seen, and handed to the GRU as its seed sequence.
+Pasting a link still works (collapsed under the button) and needs no login.
+
+**Spotify's own mixes are not reachable.** Since Spotify's November 2024 Web API
+change, Spotify-*owned* algorithmic and editorial playlists — Daily Mix,
+Discover Weekly, Release Radar, On Repeat, the artist/genre mixes, and editorial
+lists like Today's Top Hits — return **404** to any app without extended quota
+mode, for both client-credentials and user tokens (verified against this app's
+credentials: user-owned playlists 200, `37i9dQZF1DX…`/`37i9dQZF1E3…` 404). There
+is no code-level workaround; the app says so on the Playlists tab and points at
+the one that works — copy a mix into a playlist of your own and it appears in
+the navigator. The supported approximation is the **Top tracks** tab, whose
+listening-window chips (last 4 weeks / 6 months / all time) are the same
+`me/top/tracks` signal Spotify builds On Repeat from.
+
 The engine is the lab's **anti-eager next-track GRU** (`seq-nexttrack`,
 `eager_beta 0.1`), exported to ONNX and run in the browser via onnxruntime-web:
 seed → the GRU predicts the next-track latent → nearest unplayed **library**
@@ -23,7 +45,8 @@ keeps playing in an unfocused/background tab. See *Full-track playback* below.
 ```
 public/            static app (index.html, app.js, styles.css) + baked model assets
   model/           gru.onnx · latents.i16 · catalog.json · manifest.json · projector.bin
-worker/index.ts    CF Worker: POST /api/resolve (Spotify expansion + cold-start), serves public/
+worker/index.ts    CF Worker: POST /api/resolve (link expansion + cold-start),
+                   POST /api/embed (cold-start bare uris from the navigator), serves public/
 worker-core/       Rust → WASM: the cold-start projector (bge-m3 + metadata → PCA-192 seed latent)
 tools/             offline bakers (export_onnx.py, bake_gru.py, build_discovery.py,
                    bake_projector.py) + gen_test.py (headless journey check)
@@ -38,6 +61,12 @@ space. Tracks already in your library skip all that (URI match → baked latent)
 
 `POST /api/resolve  { url }` → `{ name, kind, tracks: [{uri,name,artist, latent?,
 genre?}], counts }` — `latent` present only for tracks cold-started on the fly.
+
+`POST /api/embed  { uris }` → `{ tracks: [{uri, latent, genre}], counts }` — the
+same cold-start without the expansion, for the navigator: the browser walks the
+user's **own** account with their user token (private playlists and liked songs
+are invisible to client-credentials) and sends back only the uris that aren't in
+the baked catalog. Known uris are dropped; ≤120 uris are embedded per call.
 
 ## Run locally
 
@@ -63,7 +92,10 @@ it and the app plays the GRU's next pick.
 
 - **Auth** reuses the browser PKCE flow, requesting the wider scope
   `streaming user-read-email user-read-private user-modify-playback-state` (plus
-  the existing `playlist-modify-*`). A **refresh token** is kept so a long
+  the navigator's read scopes — `user-library-read playlist-read-private
+  playlist-read-collaborative user-top-read user-read-recently-played` — and the
+  existing `playlist-modify-*`; the full scope is a superset of the browse scope,
+  so one consent covers browsing, saving and playback). A **refresh token** is kept so a long
   session survives past the 1-hour access-token lifetime — the point of an
   *infinite* playlist. First enable re-runs consent for the new scopes.
 - **Requirements & limits:** needs **Spotify Premium** (free accounts get a

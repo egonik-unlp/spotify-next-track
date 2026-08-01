@@ -14,17 +14,15 @@
   <main class="wrap">
     <header class="hero">
       <h1>Infinite&nbsp;Playlist</h1>
-      <p class="tag">Seed with <em>any</em> songs — even a whole playlist. Then travel an endless journey <em>through your own library</em> that holds the mood while the songs and artists keep changing.</p>
+      <p class="tag">Queue up <em>anything</em> from your Spotify — songs, albums, whole playlists. Then travel an endless journey <em>through your own library</em> that holds the mood while the songs and artists keep changing.</p>
       <a class="hero-link" href="./how">How it works&nbsp;→</a>
     </header>
 
     <section class="seedbox" aria-label="Seed the journey">
-      <label class="seed-label" for="paste">Paste a Spotify playlist
-        <span>— album or track links work too. The more songs you give it, the better it reads your mood.</span></label>
-      <textarea id="paste" class="paste" spellcheck="false"
-                placeholder="https://open.spotify.com/playlist/…"></textarea>
-      <div class="controls">
-        <button id="load" class="go" type="button">Load playlist</button>
+      <label class="seed-label">Build the seed from your own Spotify
+        <span>— browse your playlists, albums and liked songs, drop what you feel like into a queue, then launch the model on all of it.</span></label>
+      <div class="controls first-row">
+        <button id="browse" class="go" type="button">Browse my Spotify</button>
         <button id="surprise" class="ghost" type="button">Surprise me</button>
         <span id="loadmsg" class="hint"></span>
       </div>
@@ -32,7 +30,16 @@
       <div id="seeds" class="seeds" aria-label="Seed tracks"></div>
 
       <details class="loadbox">
-        <summary>or add individual songs</summary>
+        <summary>or paste a Spotify link (works without signing in)</summary>
+        <textarea id="paste" class="paste" spellcheck="false"
+                  placeholder="https://open.spotify.com/playlist/…"></textarea>
+        <div class="controls">
+          <button id="load" class="ghost" type="button">Load link</button>
+        </div>
+      </details>
+
+      <details class="loadbox">
+        <summary>or add individual songs from your library</summary>
         <div class="search">
           <input id="q" type="search" autocomplete="off" spellcheck="false"
                  placeholder="Search any song or artist…" aria-label="Search tracks" />
@@ -46,10 +53,23 @@
           <input type="checkbox" id="fulltoggle" checked /> <span>Full tracks</span>
           <em class="premium-note">Premium</em>
         </label>
-        <label class="variety" title="How hard to avoid repeating an artist">
-          variety
-          <input id="penalty" type="range" min="0" max="1.5" step="0.1" value="0.5" />
+        <label class="variety" title="Which model drives the journey. Both run in your browser over the same track vectors, so switching costs one small download. Dual-tower measured better at holding the seed's mood while covering more genres, and it moves at the pace you really listen at; GRU — original is the previous behaviour, kept for comparison.">
+          engine
+          <select id="engine">
+            <option value="dual" selected>Dual-tower — more variety, holds the vibe</option>
+            <option value="gru">GRU — original</option>
+          </select>
         </label>
+        <label class="variety" title="How many tracks one artist may take in the journey. Explore crosses your library; Continue follows the artist pairings you actually make.">
+          shape
+          <select id="artistcap">
+            <option value="1" selected>Explore — one track per artist</option>
+            <option value="3">Continue — up to 3 per artist</option>
+            <option value="2">Balanced — up to 2 per artist</option>
+            <option value="0">Blocks — uncapped (can sit on one artist)</option>
+          </select>
+        </label>
+        <button id="permalink" class="linkbtn" type="button" title="Copy a link that reproduces this exact journey — the seeds, engine and shape. Both engines walk deterministically, so anyone opening it gets the same playlist.">link</button>
         <span id="playmsg" class="hint"></span>
       </div>
     </section>
@@ -70,7 +90,7 @@
     </div>
 
     <section id="journey" class="journey" aria-live="polite">
-      <p class="empty">Paste a playlist above — or hit <b>Surprise me</b> — to begin.</p>
+      <p class="empty">Queue up some music from your Spotify above — or hit <b>Surprise me</b> — to begin.</p>
     </section>
 
 
@@ -92,6 +112,54 @@
       <span id="meta"></span> · mood-coherent, from your library, no repeats, no eager same-artist runs · 30-second previews, or full tracks on Spotify Premium · <a href="./how">how it works ↗</a>
     </footer>
   </main>
+
+  <!-- the library navigator: browse your Spotify account, accumulate a queue -->
+  <div id="lib" class="lib" hidden role="dialog" aria-modal="true" aria-label="Your Spotify">
+    <div class="lib-shell">
+      <header class="lib-head">
+        <nav class="lib-tabs" id="lib-tabs" aria-label="Source">
+          <button type="button" class="tab on" data-src="playlists">Playlists</button>
+          <button type="button" class="tab" data-src="albums">Albums</button>
+          <button type="button" class="tab" data-src="liked">Liked songs</button>
+          <button type="button" class="tab" data-src="top">Top tracks</button>
+          <button type="button" class="tab" data-src="recent">Recent</button>
+          <button type="button" class="tab" data-src="search">Search</button>
+        </nav>
+        <button id="lib-close" class="ghost small" type="button" aria-label="Close">close ✕</button>
+      </header>
+
+      <div class="lib-body">
+        <section class="lib-main">
+          <div class="lib-bar">
+            <button id="lib-back" class="ghost small" type="button" hidden>‹ back</button>
+            <span id="lib-crumb" class="lib-crumb"></span>
+            <input id="lib-q" class="lib-q" type="search" hidden spellcheck="false"
+                   placeholder="Search all of Spotify — songs, albums, playlists…" aria-label="Search Spotify" />
+            <button id="lib-addall" class="ghost small addall" type="button" hidden>+ add all</button>
+          </div>
+          <div id="lib-types" class="lib-types" hidden></div>
+          <div id="lib-list" class="lib-list"></div>
+          <div class="lib-foot">
+            <button id="lib-more" class="ghost" type="button" hidden>Load more</button>
+            <span id="lib-msg" class="hint"></span>
+          </div>
+        </section>
+
+        <aside class="cart" aria-label="Queue">
+          <h3>Queue <span id="cart-count" class="cart-count">0 tracks</span></h3>
+          <div id="cart-items" class="cart-items">
+            <p class="cart-empty">Nothing queued yet. Add songs, albums or whole playlists — they all become the model's input.</p>
+          </div>
+          <label class="cart-opt" title="Interleave the items round-robin instead of playing them one block after another">
+            <input type="checkbox" id="cart-mix" /> <span>Intersperse items</span>
+          </label>
+          <button id="cart-go" class="go" type="button" disabled>Launch the model</button>
+          <span id="cart-msg" class="hint"></span>
+        </aside>
+      </div>
+    </div>
+  </div>
+
   <script src="./app.js" type="module"></script>
 </body>
 </html>

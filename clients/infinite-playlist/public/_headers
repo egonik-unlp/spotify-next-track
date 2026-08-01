@@ -1,0 +1,19 @@
+# Cloudflare static-asset headers.
+#
+# The baked model assets are immutable for a given bake, so cache them hard — engine
+# graphs and latents are the bulk of what a first visit downloads. manifest.json itself
+# must NOT be cached, or clients would never learn about a new bake.
+/model/dualgru.onnx
+  Cache-Control: public, max-age=604800
+
+/model/latents.i16
+  Cache-Control: public, max-age=604800
+
+/model/gru.onnx
+  Cache-Control: public, max-age=604800
+
+/model/catalog.json
+  Cache-Control: public, max-age=604800
+
+/model/manifest.json
+  Cache-Control: public, max-age=0, must-revalidate

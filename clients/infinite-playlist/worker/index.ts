@@ -1,11 +1,16 @@
 // Infinite Playlist — Cloudflare Worker backend.
 //
-// Serves the static app (public/, via the ASSETS binding) and one endpoint the
+// Serves the static app (public/, via the ASSETS binding) and the two things the
 // browser can't do on its own:
 //
 //   POST /api/resolve  { url }  → { name, kind, tracks: [{uri,name,artist, latent?, genre?}] }
+//   POST /api/embed    { uris } → { tracks: [{uri, latent, genre}] }
 //
 // Expands a Spotify playlist/album/track link (client-credentials, secret env).
+// /api/embed is the same cold-start, minus the expansion: the library browser
+// walks the user's OWN account with their user token (private playlists, liked
+// songs — things client-credentials can't see) and sends back only the track
+// uris that aren't in the baked catalog.
 // Tracks already in the app's catalog return just their uri (the browser maps
 // them to a baked latent). Tracks the user doesn't own are cold-started into the
 // model's PCA-192 space: Spotify meta + ReccoBeats acoustics → contentDoc →
@@ -334,6 +339,31 @@ async function resolve(env: Env, url: string): Promise<any> {
   return { name, kind: link.kind, tracks: out, counts: { total: tracks.length, embedded, dropped } };
 }
 
+// ---- /api/embed ------------------------------------------------------------
+// Cold-start a bare list of track uris (the library browser already knows the
+// names — it fetched them with the user's own token). Known uris are dropped:
+// the browser maps those to baked latents itself.
+async function embedUris(env: Env, uris: unknown): Promise<any> {
+  if (!Array.isArray(uris)) throw new ApiError(400, "expected { uris: string[] }");
+  const known = KNOWN ?? new Set<string>();
+  const seen = new Set<string>();
+  const wanted: Basic[] = [];
+  for (const u of uris) {
+    if (typeof u !== "string" || !u.startsWith("spotify:track:")) continue;
+    if (known.has(u) || seen.has(u)) continue;
+    seen.add(u);
+    if (wanted.length < MAX_EMBED) wanted.push({ uri: u, name: "", artist: "" });
+  }
+  let embeds = new Map<string, { latent: number[]; genre: string }>();
+  try {
+    embeds = await coldStartBatch(env, wanted);
+  } catch (e) {
+    console.warn("embed cold-start failed:", String(e));
+  }
+  const tracks = [...embeds.entries()].map(([uri, e]) => ({ uri, latent: e.latent, genre: e.genre }));
+  return { tracks, counts: { requested: uris.length, unknown: wanted.length, embedded: tracks.length } };
+}
+
 // ---- entry -----------------------------------------------------------------
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -355,13 +385,15 @@ export default {
     if (pathname === "/api/config") {
       return json({ spotify_client_id: env.SPOTIFY_CLIENT_ID ?? null });
     }
-    if (pathname === "/api/resolve") {
+    if (pathname === "/api/resolve" || pathname === "/api/embed") {
       if (req.method === "OPTIONS") return json({}, 204);
       if (req.method !== "POST") return json({ error: "POST only" }, 405);
       try {
         await ensureReady(env);
-        const body = (await req.json().catch(() => ({}))) as { url?: string };
-        const data = await resolve(env, body.url ?? "");
+        const body = (await req.json().catch(() => ({}))) as { url?: string; uris?: string[] };
+        const data = pathname === "/api/embed"
+          ? await embedUris(env, body.uris)
+          : await resolve(env, body.url ?? "");
         return json(data);
       } catch (e) {
         const status = e instanceof ApiError ? e.status : 500;

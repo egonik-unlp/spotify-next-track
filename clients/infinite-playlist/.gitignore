@@ -3,3 +3,4 @@ node_modules/
 .wrangler/
 worker-core/target/
 worker-core/pkg/
+public/wasm/
