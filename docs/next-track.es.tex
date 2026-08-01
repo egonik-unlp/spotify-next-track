@@ -89,7 +89,30 @@ familia de arquitectura completa abarca solo \num{0.028}, así que los daños
 grandes se detectaron con fiabilidad mientras las victorias moderadas nunca
 fueron detectables --- y \emph{holisticness@10} existe en tres generaciones de
 código mutuamente no comparables, razón por la cual esta síntesis mantiene su
-tablero denominado en Recall@10.
+tablero denominado en Recall@10. Una última campaña de medición cambia luego la
+\emph{superficie} y no el modelo: el producto despachado sirve una
+\emph{caminata autorregresiva} (walk), mientras holisticness@10 puntúa un
+top-10 de un solo disparo cuya \texttt{mood\_coh} se ancla a un centroide de
+prefijo que \emph{crece}, de modo que la deriva del viaje era invisible por
+construcción (y la composición es $\num{5.5}\times$ más sensible a su factor de
+relevancia que al de eagerness). Cuatro métricas a nivel de caminata calibradas
+contra la escucha real del propio usuario (\num{73632} transiciones consecutivas
+reales, coseno de paso mediano \num{0.261}, \SI{27.0}{\percent} de ellas
+negativas) muestran que el motor despachado camina $\num{2.5}\times$ más ceñido
+que la persona a la que imita (paso mediano \num{0.661}), y tres controles
+deterministas en tiempo de recuperación --- un ancla de semilla, un término de
+zancada (stride) y un tope duro por artista que \emph{no puede ser superado por
+puntuación} (dos particiones disjuntas: $\Delta$artist\_conc $-\num{0.527}$ con
+$\Delta$music@10 $+\num{0.026}$, ambos con IC lejos de cero) --- hacen
+simultáneamente alcanzables una zancada de escucha real y un vibe sostenido.
+Sobre \num{40} sesiones held-out idénticas y con bootstrap pareado, la familia de
+\emph{torre doble} que tres campañas habían refutado en recall es la ganadora
+sobre el objetivo enunciado (\texttt{latent/cummean}: error de zancada
+$-\num{0.2545}$, géneros $+\num{1.50}$, deriva $+\num{0.0351}$, todos con IC
+lejos de cero y el vibe \emph{sostenido}), mientras empujar la GRU única o el
+campeón a la misma zancada \emph{cuesta} vibe --- pero \texttt{ground} cruza el
+cero en todas las ramas, así que solo queda establecida la \emph{forma} del
+viaje, y la métrica principal sigue sin cambios.
 \end{abstract}
 
 \section{Introducción}
@@ -2080,9 +2103,574 @@ generación.
 \emph{Fuentes: \texttt{2026-07-25-nexttrack-dual-tower-fusion-scan.md},
 \texttt{2026-07-26-nexttrack-pre-encoder-scan.md}.}
 
+\section{La superficie de la caminata: medir lo que el producto realmente sirve}
+\label{sec:walk}
+\emph{Motivación.} Todo veredicto hasta este punto --- incluidos el tablero de
+la corona de la Tabla~\ref{tab:lb} y las tres generaciones de holisticidad de la
+Sección~\ref{sec:power-generations} --- se calcula sobre un \textbf{top-10 de un
+solo disparo} (one-shot): el modelo ve un prefijo held-out, ordena el catálogo
+una vez y se puntúa contra un único objetivo. Pero el artefacto que este
+laboratorio despacha, \texttt{clients/infinite-playlist}, sirve una
+\textbf{caminata autorregresiva} (walk): elige una pista, la añade a la sesión,
+vuelve a puntuar y repite tantos pasos como pida quien escucha. Son superficies
+distintas, y \texttt{domain.toml} lo ha dicho en prosa desde el principio --- su
+bloque \texttt{[metrics]} enuncia el objetivo como «\emph{sesiones}
+mood-coherentes y no-eager, no acertar la pista siguiente literal». La intención
+declarada y la métrica implementada habían divergido. Esta sección cierra esa
+brecha: define cuatro métricas a nivel de caminata calibradas contra la escucha
+real del propio usuario, añade tres controles de \emph{tiempo de recuperación}
+(retrieval) y ejecuta un cara a cara de muestra emparejada. Es también el único
+lugar de este documento donde una refutación documentada queda
+\emph{revertida} sobre un objetivo nuevo, y por eso se reporta con extensión en
+vez de plegarse dentro de las secciones de campaña anteriores.
+
+\subsection{El desajuste de superficie, y por qué la deriva era invisible}
+\label{sec:walk-mismatch}
+Dos hechos mecánicos explican por qué nada de lo anterior podría haber detectado
+una caminata a la deriva.
+
+\textbf{Primero, el ancla crece.} La faceta \texttt{mood\_coh} de
+holisticness@10 mide el coseno de cada candidato al centroide del
+\emph{prefijo} (\texttt{seq\_common.py:558}). En una evaluación de un solo
+disparo el prefijo es fijo y eso es una lectura razonable de «¿se mantiene esta
+lista en el mismo mood?». En una caminata el prefijo \emph{es} el viaje
+recorrido, así que el punto de referencia viaja con el modelo: un viaje que
+abandona su región de partida mediante mil pasos individualmente legales puntúa
+bien \emph{en cada paso}, porque cada paso se compara con un centroide que ya se
+ha desplazado casi todo el camino hasta allí. \textbf{La deriva es invisible por
+construcción} --- no está subponderada: es inmedible en esta formulación.
+
+\textbf{Segundo, la composición está dominada por la relevancia.} Derivar la
+composición de generación 3 en el punto de operación del campeón da
+$\partial H/\partial\,\texttt{music@10} = +\num{0.206}$ frente a
+$\partial H/\partial\,\texttt{eager} = -\num{0.038}$: holisticness@10 es
+$\num{5.5}\times$ más sensible a su factor de relevancia que a su factor de
+eagerness. Así que incluso el término \emph{pensado} para poner precio a la
+calidad de la sesión termina reportando sobre todo relevancia graduada. Es la
+misma asimetría que la Sección~\ref{sec:power-generations} observó desde fuera,
+donde el multiplicador ${\sim}0.3$ del factor de anclaje hacía que todo valor de
+generación 2 quedara por debajo de todo valor de generación 1; aquí queda
+cuantificada en la derivada.
+
+\subsection{Cuatro métricas de caminata, calibradas contra las sesiones del propio usuario}
+\label{sec:walk-metrics}
+El nuevo instrumento (\texttt{tools/walk\_eval.py}) genera viajes a partir de
+sesiones \emph{reales} held-out --- una semilla de 5 pistas tomada de la sesión,
+luego 20 pasos autorregresivos, con los ítems del prefijo excluidos y como
+máximo una pista por artista salvo indicación en contra --- y los puntúa en
+cuatro ejes:
+
+\begin{description}
+  \item[1. Ajuste de transiciones (principal).] ¿Se parecen las distancias
+  paso a paso de la caminata a la escucha \emph{real} de este usuario? Esto
+  sigue directamente el hallazgo de playlist-lab: medir \emph{transiciones}, no
+  promedios, y calibrar contra las sesiones propias del usuario. Promediar una
+  distancia a un centroide tiene la forma equivocada --- penaliza un cambio de
+  género legítimo y premia quedarse quieto. Se reporta como la distancia
+  1-Wasserstein ($W_1$, menor es mejor) entre la distribución de cosenos de
+  pares consecutivos del viaje y la real, más dos lecturas legibles: el coseno
+  de paso mediano y la fracción de pasos dentro de la banda p10--p90 real.
+  \item[2. Vibe y deriva.] El coseno \emph{anclado a la semilla}: coseno medio
+  de las pistas generadas al centroide del núcleo de la semilla (\texttt{vibe},
+  mayor es mejor) y la diferencia entre el último cuarto y el primero
+  (\texttt{drift}, mejor cuanto más cerca de cero). El ancla queda fija en la
+  semilla y \emph{no} crece, que es precisamente el defecto de
+  \texttt{mood\_coh} que identifica la Sección~\ref{sec:walk-mismatch}.
+  \item[3. La variedad como crédito.] Artistas distintos y géneros distintos en
+  el viaje, contados como \emph{crédito} y no como el coste al que
+  \texttt{artist\_adj}/\texttt{artist\_conc} les ponen precio. Cohesión no es un
+  solo género: los géneros distintos son bienvenidos si preservan el vibe, así
+  que un viaje que cubre más géneros con el mismo vibe es mejor, no peor.
+  \item[4. Anclaje a la verdad (grounding).] Relevancia graduada (mejor coseno
+  sónico, en el espacio balanceado de distancia musical de la
+  Sección~\ref{sec:music}) entre cada pista generada y lo que el usuario
+  \emph{realmente} reprodujo después en esa sesión. Es la barandilla: sin ella
+  gana una deriva agradable pero inconexa, que es exactamente la lección que la
+  corona aprendió cuando se añadió \texttt{music\_rel}.
+\end{description}
+
+\paragraph{La calibración, y el número que reencuadró el proyecto.} La
+distribución de referencia son los cosenos de pares consecutivos del propio
+usuario sobre las \num{5723} sesiones de \emph{entrenamiento} de
+\dsid{seq-20260715-131139}: \textbf{\num{73632} pares, mediana \num{0.261},
+p10--p90 $[-\num{0.192}, \num{0.830}]$ y \SI{27.0}{\percent} de los pasos
+reales \emph{negativos}}. La escucha real se mueve --- cambia de dirección más
+de una cuarta parte de las veces. Frente a eso, el motor que el showcase
+realmente despachó (una GRU única como \texttt{gru.onnx} con un ancla de semilla
+de \num{0.4}) camina con un paso mediano de \textbf{\num{0.661}},
+aproximadamente $\num{2.5}\times$ más ceñido de lo que camina el usuario
+(Figura~\ref{fig:nexttrack-walk-transitions}). La queja de que el showcase se
+sentía «plano a pesar de tener muchos artistas» ya tiene una medición detrás:
+muchos movimientos pequeños y seguros. El campeón de blend tiene el fallo
+opuesto --- su paso mediano, \num{0.317}, se sitúa esencialmente sobre la
+mediana real, pero su \texttt{vibe} es de solo \num{0.187}, porque su proyección
+InfoNCE (Sección~\ref{sec:projection}) codifica «qué sigue a esto» y no «qué
+suena como esto», de modo que un ancla de mood aplicada \emph{dentro} de ese
+espacio proyectado se topa con un techo de \num{0.44} mientras la misma ancla en
+el espacio PCA-192 crudo alcanza \num{0.58}. La Tabla~\ref{tab:walk-arms} es la
+primera lectura completa.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_walk_transitions}
+  \caption{El argumento central de esta sección, en una figura. Los
+  \num{73632} cosenos de transición consecutiva del propio usuario (espacio de
+  ítems PCA-192, solo sesiones de entrenamiento) forman una distribución
+  \emph{ancha}: mediana \num{0.261}, p10--p90
+  $[-\num{0.192}, \num{0.830}]$, \SI{27.0}{\percent} de pasos negativos. El
+  motor que el showcase despachó camina con un paso mediano de \num{0.661} ---
+  unas $\num{2.5}\times$ más ceñido que la persona a la que imita --- y ninguna
+  métrica de un solo disparo podía verlo, porque holisticness@10 puntúa un
+  top-10 y su \texttt{mood\_coh} se ancla a un centroide de prefijo que crece
+  con la caminata. El campeón de blend (\num{0.317}) iguala el paso real pero no
+  logra sostener un vibe. Recuentos por bin transcritos del bloque de
+  calibración de \texttt{tools/walk\_eval.py}.}
+  \label{fig:nexttrack-walk-transitions}
+\end{figure}
+
+\begin{table}[ht]
+  \centering
+  \caption{Primera lectura a nivel de caminata de los dos motores despachados.
+  \num{40} sesiones held-out, semilla de 5 pistas, \num{20} pasos
+  autorregresivos cada una; \texttt{cap} es el límite por artista dentro del
+  viaje. $W_1$ y $|$paso mediano $-$ \num{0.261}$|$ menor es mejor;
+  \texttt{vibe}, fracción en banda, artistas, géneros y \texttt{ground} mayor es
+  mejor; \texttt{drift} mejor cuanto más cerca de cero. La última fila es la
+  referencia contra la que se calibran las métricas (su fracción en banda es
+  \SI{80}{\percent} por construcción). Mejor celda por columna en negrita entre
+  las ramas de modelo. \emph{Fuente: \texttt{tools/walk\_eval.py}.}}
+  \label{tab:walk-arms}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{lccccccccc}
+    \toprule
+    Rama & $W_1$ & paso med. & en banda & vibe & drift & artistas & géneros & ground \\
+    \midrule
+    GRU $+$ancla \num{0.4}, cap 1 (\textbf{despachada}) & 0.320 & 0.661 & \SI{80.6}{\percent} & 0.609 & $-$0.089 & 20.0 & 9.93 & 0.345 \\
+    GRU $+$ancla \num{0.4}, cap 3 & 0.341 & 0.681 & \SI{76.7}{\percent} & \best{0.610} & \best{$-$0.075} & 13.2 & 6.53 & \best{0.393} \\
+    GRU sin ancla, cap 1 & 0.263 & 0.574 & \SI{85.2}{\percent} & 0.302 & $-$0.277 & 20.0 & 8.78 & 0.276 \\
+    Campeón (\Rp+M+\Cp), cap 1 & \best{0.078} & \best{0.317} & \best{\SI{90.3}{\percent}} & 0.187 & $-$0.186 & 20.0 & \best{10.33} & 0.289 \\
+    Campeón (\Rp+M+\Cp), cap 3 & 0.147 & 0.452 & \SI{84.8}{\percent} & 0.193 & $-$0.224 & 11.1 & 5.33 & 0.306 \\
+    \midrule
+    \emph{las sesiones reales del usuario} & 0.000 & 0.261 & \SI{80.0}{\percent} & --- & --- & --- & --- & --- \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\paragraph{$W_1$ no es emparejable, y eso importó.} El $W_1$ distribucional se
+calcula sobre una muestra \emph{agrupada} (pooled) de pasos, así que no tiene
+valor por sesión y no puede entrar en un bootstrap pareado --- el estadístico
+sobre el que descansa todo otro veredicto de este documento. Por eso los dos
+primeros barridos compararon ramas medidas en muestras \emph{distintas} (20
+sesiones $\times$ 20 pasos para la frontera, 12 $\times$ 15 para la sonda de
+torre doble), y una diferencia de vibe de \num{0.588} frente a \num{0.624} cae
+holgadamente dentro de lo que ese desajuste por sí solo puede producir: no se
+había establecido nada. El cara a cara (Sección~\ref{sec:walk-h2h}) sustituye
+por tanto $W_1$ por \texttt{stride\_err} $=$ $|$paso mediano $-$ \num{0.261}$|$,
+una cantidad por sesión que sí empareja, al coste de describir solo el centro de
+la distribución.
+
+\subsection{Tres controles en tiempo de recuperación, y dos refutados}
+\label{sec:walk-controls}
+Ninguno de los tres controles siguientes toca el entrenamiento. Todos se aplican
+en tiempo de \emph{recuperación}, sobre las puntuaciones que el modelo ya
+produce, y eso es lo que los hace baratos de desplegar y baratos de re-ajustar.
+
+\begin{description}
+  \item[ANCLA ($a$).] Sumar $a\cdot\cos(\text{candidato},\ \text{centroide de la
+  semilla})$ a la puntuación de cada candidato. Sostiene el geist tirando de la
+  caminata hacia la región desde la que quien escucha la sembró. En el campeón
+  el término se z-normaliza sobre los candidatos admisibles, porque su
+  puntuación base es a su vez un z-blend de tres ramas y sumar un coseno crudo a
+  un z-blend descuadra las escalas.
+  \item[ZANCADA (STRIDE, $s$).] Restar $s\cdot\cos(\text{candidato},\
+  \text{pista anterior})$. \emph{Agranda} cada paso sin permitir que la caminata
+  abandone el vecindario de la semilla, porque el ancla sigue aplicándose --- los
+  dos términos son ortogonales por diseño, uno tirando hacia un punto fijo y
+  otro empujando lejos del último punto. Es deliberadamente
+  \emph{determinista}: el muestreo también aflojaría la zancada, pero el
+  showcase sirve permalinks y «misma receta $\Rightarrow$ mismo viaje» es ya una
+  promesa, así que un decodificador estocástico quedó descartado, no sin probar.
+  \item[TOPE (CAP).] Un límite \emph{duro} por artista aplicado al orden
+  (\texttt{seq\_common.artist\_cap\_order}), después de MMR, tanto en
+  \texttt{eval\_from\_scores} como en
+  \texttt{rank\_topk}/\texttt{predict\_ranking}, de modo que evaluación y
+  serving coinciden por construcción. Es de mejor esfuerzo y no absoluto: donde
+  el espacio de candidatos admisibles de un prefijo se agota, los huecos
+  restantes se rellenan con ítems diferidos en vez de devolver menos de $k$. Por
+  defecto \texttt{None}, así que todo run y modelo preexistente es idéntico bit
+  a bit; y como no necesita vectores sónicos es la única palanca de diversidad
+  aquí que se porta sin cambios a un cliente ligero.
+\end{description}
+
+\paragraph{Por qué un tope y no una penalización --- los dos controles
+refutados.} Ambas palancas anti-eager blandas de la
+Sección~\ref{sec:holisticness} fallan por una razón compartida: una penalización
+blanda en el espacio de puntuación pierde contra un gradiente de relevancia
+pronunciado. \texttt{eager\_beta}, el regularizador de tiempo de entrenamiento,
+está \emph{mal especificado}: pivota sobre el valor absoluto de
+$\cos(\text{predicción},\ \text{pista actual})$, que una predicción InfoNCE
+cubierta (hedged) nunca lleva por encima de ${\sim}0.6$, mientras que la
+eagerness es una propiedad de \emph{ordenamiento} --- si los ítems del mismo
+artista ocupan los primeros puestos --- y no una propiedad de una similitud
+absoluta. \texttt{mmr\_lambda}, el re-ranking en evaluación, era además
+\emph{solo de evaluación} hasta que se corrigió la ruta de serving, así que la
+frontera de $\lambda$ nunca había sido una palanca desplegable; e incluso
+corregida se mide inerte en el caso patológico. En la playlist real
+\texttt{rock chabon ahre} el modelo ordena \num{59} de sus \num{60} primeros
+candidatos como un mismo artista y el siguiente artista no aparece hasta el
+\textbf{puesto \num{75}}, mientras todo el presupuesto de diversidad de MMR ahí
+vale $\num{0.3}\times\num{0.26}\approx\num{0.078}$ de puntuación normalizada ---
+ni de lejos suficiente para pagar una caída de 70 puestos de relevancia. Un tope
+no compite en puntuación en absoluto: \emph{no puede ser superado por
+puntuación}, la misma propiedad en la que ya se apoyaba el
+\texttt{artist\_cooldown} de \texttt{seq\_extend}. La penalización blanda de
+artista del propio showcase resultó ser efectivamente \textbf{binaria} de la
+misma manera --- en \num{0} producía bloques de artista con rachas de hasta
+\num{13}, y con \emph{cualquier} valor $\ge\num{0.25}$ cada caminata de 30 pasos
+devolvía \num{30} artistas distintos, racha máxima \num{1}, concentración
+\num{0.000} --- así que el deslizador no alcanzaba el término medio en absoluto,
+y un tope duro expuesto como forma del viaje (Explore / Balanced / Continue /
+Blocks) es lo que sí lo alcanza.
+
+\paragraph{El tope en la superficie de un solo disparo, para el registro.} La
+Tabla~\ref{tab:walk-cap} es el tope medido donde mide el resto de este
+documento: el top-10 de un solo disparo de la partición canónica, emparejado
+sobre puntuaciones cacheadas idénticas bit a bit. Recorta
+\texttt{artist\_conc@10} de \num{0.692} a \num{0.123} con cap 3 y eleva la
+holisticness@10 de generación 3 de \num{0.008603} a \num{0.033862}, a un coste
+de \num{73} de \num{1431} aciertos exactos. El resultado que \emph{no} se
+predijo es que \textbf{\texttt{music@10} sube, con IC por encima de cero, en
+todos los topes y en los dos modelos probados} ($+\num{0.011}$ a
+$+\num{0.023}$): el modo de fallo pre-registrado --- des-eagerizar degradándose
+hacia relleno genérico --- no ocurre, porque los ítems promovidos desde el
+puesto 75 y más allá son \emph{más} aptos musicalmente para la continuación
+verdadera que las pistas del mismo artista que desplazan. El tope cambia
+relevancia \emph{literal} por relevancia \emph{graduada}. Sobre el campeón más
+\texttt{markov\_gate} (una compuerta en tiempo de serving que suprime la rama de
+Markov donde el ítem actual no tiene soporte de bigrama; su propia campaña,
+fechada 2026-07-27c, aún no está consolidada en esta síntesis) el mismo cap 3 da \texttt{artist\_conc}
+\num{0.598}$\to$\num{0.113} y holisticness@10
+\num{0.018699}$\to$\num{0.048063}, reproducido dígito a dígito por tres runs
+registrados de confirmación (\runid{run-20260730-235524-0ec1d-seq-blend} con el
+tope apagado, \runid{run-20260730-235524-93d38-seq-blend} con cap 3,
+\runid{run-20260730-234635-a6252-seq-blend} con cap 5), y \textbf{endurece en la
+partición disjunta con 0.64 de fríos} \dsid{seq-20260718-211238} sobre dos
+piernas pre-registradas: $\Delta$\texttt{artist\_conc} $-\num{0.52699}$
+$[-\num{0.54546}, -\num{0.50825}]$ con IC bajo cero \emph{y}
+$\Delta$\texttt{music@10} $+\num{0.02644}$
+$[+\num{0.01919}, +\num{0.03368}]$ con IC sobre cero, y con la ganancia de
+relevancia \emph{mayor} en la ventana más fría. Dos cautelas viajan con esto: el
+recall exacto es la única métrica que regresa en todos los topes, y el umbral
+absoluto de \texttt{music@10} $\ge\num{0.43}$ de la partición canónica
+\textbf{no} se traslada --- el control propio de la segunda partición se sitúa
+en \num{0.4295} sobre una ventana legítimamente más fría, así que los umbrales
+deben derivarse por línea base y el pre-registro debe hacerse sobre el $\Delta$
+pareado.
+
+\begin{table}[ht]
+  \centering
+  \caption{El tope duro por artista en la superficie de un solo disparo, sobre
+  el campeón desplegado (\Rp+M+\Cp, sin compuerta), partición canónica
+  \dsid{seq-20260715-131139}, $n=\num{1431}$. Medición fuera de run: las
+  puntuaciones se calculan una vez por modelo y se memoizan, así que cada rama
+  de tope ve vectores de puntuación idénticos bit a bit y el emparejamiento es
+  exacto, no meramente apareado (\num{2000} remuestreos, rng \num{1337}).
+  holisticness@10 es de generación 3
+  (Sección~\ref{sec:power-generations}). \texttt{artist\_conc} y
+  \texttt{artist\_adj} menor es mejor; el resto mayor es mejor. \emph{Fuente:
+  \texttt{2026-07-30c-artist-cap-measurement.md}.}}
+  \label{tab:walk-cap}
+  {\footnotesize\setlength{\tabcolsep}{4.2pt}\begin{tabular}{lcccccccc}
+    \toprule
+    cap & R@10 & aciertos & MRR & artist\_conc & artist\_adj & ild & music@10 & H@10 (gen-3) \\
+    \midrule
+    off & \best{0.211740} & \best{303} & \best{0.121985} & 0.691653 & 0.609713 & 0.406374 & 0.453790 & 0.008603 \\
+    5   & 0.178896 & 256 & 0.119693 & 0.252613 & 0.337247 & 0.563417 & 0.474291 & 0.027258 \\
+    3   & 0.160727 & 230 & 0.116915 & 0.122975 & 0.215304 & 0.613641 & \best{0.476787} & 0.033862 \\
+    2   & 0.138365 & 198 & 0.112313 & \best{0.061946} & \best{0.150384} & \best{0.639717} & 0.474317 & \best{0.036331} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\paragraph{La frontera ancla $\times$ zancada.} Con los dos controles de espacio
+de puntuación en la mano, la pregunta pasa a ser si la \emph{conjunción} es
+alcanzable en absoluto: una zancada de escucha real \emph{y} un vibe sostenido.
+La Tabla~\ref{tab:walk-frontier} barre \num{24} celdas --- \num{16} en la GRU,
+\num{8} en el campeón, todas con cap 1 --- contra una ventana objetivo
+pre-registrada antes del barrido: paso mediano dentro del centro de la banda
+real ($\numrange{0.20}{0.38}$) \emph{y} \texttt{vibe} $\ge\num{0.50}$.
+Exactamente dos celdas caen dentro, una por motor
+(Figura~\ref{fig:nexttrack-walk-frontier}). La estructura de la rejilla es el
+hallazgo: los dos controles son genuinamente ortogonales --- a ancla fija,
+subir la zancada baja el paso mediano de forma monótona mientras el vibe decae
+mucho más despacio --- de modo que la ventana solo es alcanzable con ambos
+activos, y ninguna de las configuraciones despachadas estaba dentro. El ancla
+del campeón además debe aplicarse en el espacio PCA-192 \emph{crudo} y no en su
+propia geometría proyectada, y por eso la frontera llega a \num{0.503} donde la
+primera sonda se topaba con \num{0.44}.
+
+\begin{table}[ht]
+  \centering
+  \caption{La frontera ancla ($a$) $\times$ zancada ($s$), \num{20} sesiones
+  held-out $\times$ \num{20} pasos, cap 1, en ambos motores. $W_1$ menor es
+  mejor; «paso med.» se compara contra el \num{0.261} real del usuario;
+  \texttt{vibe}, géneros y \texttt{ground} mayor es mejor; \texttt{drift} mejor
+  cuanto más cerca de cero. La ventana es paso mediano
+  $\in[\num{0.20},\num{0.38}]$ \emph{y} \texttt{vibe} $\ge\num{0.50}$,
+  pre-registrada antes del barrido; las dos filas que la satisfacen van en
+  negrita. La configuración GRU despachada es $a=\num{0.4}$, $s=\num{0}$; el
+  campeón tal como se despliega es $a=\num{0}$, $s=\num{0}$.
+  \emph{Fuente: \texttt{tools/walk\_frontier.py}.}}
+  \label{tab:walk-frontier}
+  {\footnotesize\setlength{\tabcolsep}{5pt}\begin{tabular}{llcccccc}
+    \toprule
+    Motor & $a$ / $s$ & $W_1$ & paso med. & vibe & drift & géneros & ground \\
+    \midrule
+    GRU & 0.0 / 0.0 & 0.287 & 0.607 & 0.286 & $-$0.328 & 9.70 & 0.270 \\
+    GRU & 0.0 / 0.3 & 0.273 & $-$0.018 & 0.200 & $-$0.157 & 8.95 & 0.291 \\
+    GRU & 0.0 / 0.6 & 0.564 & $-$0.374 & 0.123 & $-$0.102 & 12.00 & 0.244 \\
+    GRU & 0.0 / 1.0 & 0.702 & $-$0.557 & 0.084 & $-$0.036 & 15.80 & 0.224 \\
+    GRU & 0.2 / 0.0 & 0.323 & 0.663 & 0.563 & $-$0.124 & 9.40 & 0.345 \\
+    GRU & 0.2 / 0.3 & 0.186 & 0.094 & 0.426 & $-$0.098 & 11.05 & 0.335 \\
+    GRU & 0.2 / 0.6 & 0.473 & $-$0.251 & 0.330 & $-$0.067 & 13.25 & 0.303 \\
+    GRU & 0.2 / 1.0 & 0.675 & $-$0.522 & 0.185 & $-$0.077 & 15.05 & 0.253 \\
+    GRU & 0.4 / 0.0 \emph{(despachada)} & 0.361 & 0.709 & 0.639 & $-$0.090 & 9.95 & 0.349 \\
+    \best{GRU} & \best{0.4 / 0.3} & \best{0.104} & \best{0.297} & \best{0.588} & \best{$-$0.076} & \best{11.05} & \best{0.358} \\
+    GRU & 0.4 / 0.6 & 0.356 & $-$0.127 & 0.437 & $-$0.044 & 12.55 & 0.303 \\
+    GRU & 0.4 / 1.0 & 0.588 & $-$0.405 & 0.302 & $-$0.027 & 15.20 & 0.287 \\
+    GRU & 0.8 / 0.0 & 0.364 & 0.713 & 0.678 & $-$0.067 & 11.00 & 0.352 \\
+    GRU & 0.8 / 0.3 & 0.190 & 0.506 & 0.672 & $-$0.070 & 12.15 & 0.351 \\
+    GRU & 0.8 / 0.6 & 0.122 & 0.176 & 0.605 & $-$0.038 & 12.60 & 0.358 \\
+    GRU & 0.8 / 1.0 & 0.420 & $-$0.188 & 0.460 & $-$0.016 & 14.65 & 0.335 \\
+    \midrule
+    Campeón & 0.0 / 0.0 \emph{(desplegado)} & 0.062 & 0.318 & 0.185 & $-$0.203 & 11.00 & 0.275 \\
+    Campeón & 0.0 / 0.5 & 0.240 & $-$0.032 & 0.104 & $+$0.002 & 12.15 & 0.266 \\
+    Campeón & 1.0 / 0.0 & 0.239 & 0.577 & 0.551 & $-$0.138 & 8.95 & 0.327 \\
+    \best{Campeón} & \best{1.0 / 0.5} & \best{0.072} & \best{0.282} & \best{0.503} & \best{$-$0.130} & \best{9.55} & \best{0.324} \\
+    Campeón & 2.0 / 0.0 & 0.276 & 0.596 & 0.625 & $-$0.060 & 8.90 & 0.359 \\
+    Campeón & 2.0 / 0.5 & 0.170 & 0.472 & 0.615 & $-$0.105 & 9.45 & 0.338 \\
+    Campeón & 4.0 / 0.0 & 0.300 & 0.645 & 0.669 & $-$0.051 & 9.85 & 0.338 \\
+    Campeón & 4.0 / 0.5 & 0.236 & 0.544 & 0.664 & $-$0.085 & 9.70 & 0.340 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_walk_frontier}
+  \caption{Los dos controles en tiempo de recuperación son ortogonales, y solo
+  su \emph{conjunción} alcanza la ventana objetivo (sombreada: paso mediano
+  $\in[\num{0.20},\num{0.38}]$ y \texttt{vibe} $\ge\num{0.50}$). Cada línea une
+  un ancla fija a medida que crece la zancada, lo que mueve el viaje hacia la
+  izquierda (pasos más grandes) mientras el vibe decae despacio --- así que el
+  compromiso es real pero suave. Ninguna configuración despachada está dentro de
+  la ventana: la GRU con $a=\num{0.4}$, $s=\num{0}$ sostiene un vibe de
+  \num{0.639} pero camina a \num{0.709}, y el campeón tal como se despliega
+  camina a \num{0.318} con un vibe de \num{0.185}. \num{20} sesiones held-out
+  $\times$ \num{20} pasos, cap 1 (\texttt{tools/walk\_frontier.py}).}
+  \label{fig:nexttrack-walk-frontier}
+\end{figure}
+
+\subsection{El cara a cara de muestra emparejada}
+\label{sec:walk-h2h}
+\emph{Motivación.} Cada uno de los dos barridos anteriores encontró una celda
+dentro de la ventana, pero en muestras distintas, y $W_1$ no puede emparejarse
+--- así que las finalistas tenían que volver a correr una contra otra sobre
+material \emph{idéntico} antes de poder afirmar nada.
+\texttt{tools/walk\_headtohead.py} camina cinco ramas sobre las mismas \num{40}
+sesiones held-out desde las mismas semillas de 5 pistas, con cap 1, y reporta
+diferencias de bootstrap pareado (\num{2000} remuestreos, rng \num{1337}) contra
+la configuración \textbf{despachada} --- la GRU única con ancla \num{0.4},
+zancada \num{0} --- sobre cinco métricas por sesión: \texttt{vibe} (mayor
+mejor), \texttt{stride\_err} (menor mejor), \texttt{drift} (más cerca de cero),
+\texttt{genres} (mayor) y \texttt{ground} (mayor).
+
+\emph{Resultados.} La Tabla~\ref{tab:walk-means} da las medias y la
+Tabla~\ref{tab:walk-paired} las diferencias pareadas; la
+Figura~\ref{fig:nexttrack-walk-headtohead} grafica estas últimas con un panel
+por métrica, cada uno en su propia escala.
+
+\begin{table}[ht]
+  \centering
+  \caption{Medias de las métricas de caminata sobre las \num{40} sesiones
+  held-out idénticas ($\num{20}$ pasos, cap 1). \texttt{stride\_err} $=$
+  $|$paso mediano $-$ \num{0.261}$|$ (menor mejor); \texttt{vibe},
+  \texttt{genres} y \texttt{ground} mayor es mejor; \texttt{drift} mejor cuanto
+  más cerca de cero. Mejor celda por columna en negrita.
+  \emph{Fuente: \texttt{tools/walk\_headtohead.py}.}}
+  \label{tab:walk-means}
+  {\footnotesize\setlength{\tabcolsep}{6pt}\begin{tabular}{lccccc}
+    \toprule
+    Rama & vibe & stride\_err & drift & genres & ground \\
+    \midrule
+    GRU despachada, $a$\num{0.4} $s$\num{0.0} & 0.609 & 0.399 & $-$0.089 & 9.925 & 0.345 \\
+    GRU ajustada, $a$\num{0.4} $s$\num{0.3} & 0.568 & \best{0.129} & $-$0.080 & 10.450 & \best{0.357} \\
+    dual latent/latent f0, $a$\num{0.8} $s$\num{0.4} & \best{0.638} & 0.157 & $-$0.063 & 10.975 & 0.351 \\
+    \best{dual latent/cummean f0, $a$\num{0.8} $s$\num{0.5}} & 0.610 & 0.144 & \best{$-$0.053} & \best{11.425} & 0.351 \\
+    Campeón (\Rp+M+\Cp), $a$\num{1.0} $s$\num{0.5} & 0.476 & 0.135 & $-$0.131 & 9.600 & 0.334 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Diferencias pareadas por sesión contra la GRU \textbf{despachada}
+  ($a$\num{0.4} $s$\num{0.0}) sobre las mismas \num{40} sesiones, \num{2000}
+  remuestreos de bootstrap, rng \num{1337}. El «veredicto» lee el IC respecto de
+  la dirección buena de cada métrica: \texttt{stride\_err} es menor-mejor, así
+  que un IC bajo cero es una \emph{victoria}; \texttt{drift} arranca negativo en
+  todas las ramas, así que un $\Delta$ positivo lo acerca a cero. Victorias en
+  negrita. \emph{Fuente: \texttt{tools/walk\_headtohead.py}.}}
+  \label{tab:walk-paired}
+  {\footnotesize\setlength{\tabcolsep}{6pt}\begin{tabular}{llcl}
+    \toprule
+    Rama & Métrica & $\Delta$ [IC 95\%] & Veredicto \\
+    \midrule
+    GRU ajustada $a$\num{0.4} $s$\num{0.3} & vibe & $-$0.0409 [$-$0.0602, $-$0.0221] & IC$<$0: \emph{cuesta vibe} \\
+     & stride\_err & \best{$-$0.2695 [$-$0.3058, $-$0.2358]} & \best{IC$<$0: victoria} \\
+     & drift & $+$0.0089 [$-$0.0255, $+$0.0420] & cruza el cero \\
+     & genres & $+$0.525 [$-$0.475, $+$1.500] & cruza el cero \\
+     & ground & $+$0.0116 [$-$0.0143, $+$0.0408] & cruza el cero \\
+    \midrule
+    dual latent/latent f0 & vibe & \best{$+$0.0297 [$+$0.0146, $+$0.0468]} & \best{IC$>$0: victoria} \\
+    $a$\num{0.8} $s$\num{0.4} & stride\_err & \best{$-$0.2423 [$-$0.2790, $-$0.2053]} & \best{IC$<$0: victoria} \\
+     & drift & $+$0.0259 [$-$0.0011, $+$0.0521] & cruza el cero \\
+     & genres & \best{$+$1.050 [$+$0.250, $+$1.876]} & \best{IC$>$0: victoria} \\
+     & ground & $+$0.0060 [$-$0.0172, $+$0.0314] & cruza el cero \\
+    \midrule
+    \best{dual latent/cummean f0} & vibe & $+$0.0013 [$-$0.0151, $+$0.0180] & cruza el cero: \emph{sostenido} \\
+    \best{$a$\num{0.8} $s$\num{0.5}} & stride\_err & \best{$-$0.2545 [$-$0.2962, $-$0.2127]} & \best{IC$<$0: victoria} \\
+     & drift & \best{$+$0.0351 [$+$0.0071, $+$0.0627]} & \best{IC$>$0: victoria} \\
+     & genres & \best{$+$1.500 [$+$0.500, $+$2.500]} & \best{IC$>$0: victoria} \\
+     & ground & $+$0.0059 [$-$0.0163, $+$0.0285] & cruza el cero \\
+    \midrule
+    Campeón (\Rp+M+\Cp) & vibe & $-$0.1327 [$-$0.1629, $-$0.1041] & IC$<$0: \emph{cuesta vibe} \\
+    $a$\num{1.0} $s$\num{0.5} & stride\_err & \best{$-$0.2638 [$-$0.3120, $-$0.2155]} & \best{IC$<$0: victoria} \\
+     & drift & $-$0.0422 [$-$0.0983, $+$0.0093] & cruza el cero \\
+     & genres & $-$0.325 [$-$1.500, $+$0.876] & cruza el cero \\
+     & ground & $-$0.0115 [$-$0.0467, $+$0.0236] & cruza el cero \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_walk_headtohead}
+  \caption{El cara a cara de muestra emparejada, un panel por métrica en su
+  propia escala --- deliberadamente sin eje doble, que insinuaría una
+  comparabilidad que estas cinco cantidades no tienen. El verde es un IC
+  enteramente en el lado bueno de la métrica, el rojo enteramente en el lado
+  malo, el gris cruza el cero. Todas las ramas compran la zancada real; solo las
+  ramas de torre doble la compran sin pagar vibe, y \texttt{ground} cruza el
+  cero en \emph{todas} las ramas.}
+  \label{fig:nexttrack-walk-headtohead}
+\end{figure}
+
+\emph{Interpretación.} Lea primero la columna \texttt{stride\_err}: las cuatro
+ramas ajustadas la recortan en ${\sim}\num{0.25}$ con el IC bajo cero, que es
+simplemente el control de zancada funcionando --- el error de \num{0.399} del
+motor despachado era ${\sim}\num{2.6}\times$ el de la siguiente peor rama. La
+variación interesante es lo que cada rama \emph{paga} por ello. Empujar la GRU
+única a una zancada real \textbf{cuesta vibe} ($-\num{0.0409}$, IC bajo cero) y
+el campeón paga mucho más ($-\num{0.1327}$, IC bajo cero): para estos dos
+motores zancada y vibe están en tensión, exactamente como predecía la pendiente
+suave pero real de la frontera. Ambas ramas de torre doble escapan del
+compromiso. \texttt{latent/latent} con $a\num{0.8}$ $s\num{0.4}$ \emph{gana}
+vibe ($+\num{0.0297}$, IC sobre cero) y géneros ($+\num{1.05}$, IC sobre cero)
+igualando la zancada; \texttt{latent/cummean} con $a\num{0.8}$ $s\num{0.5}$
+sostiene el vibe ($+\num{0.0013}$, cruzando el cero --- sostenido, no
+canjeado) y es la única rama con \emph{tres} victorias, añadiendo \num{1.5}
+géneros (IC sobre cero) y la única mejora significativa de deriva
+($+\num{0.0351}$, IC sobre cero, es decir: el viaje termina más cerca de donde
+empezó). Sobre el objetivo tal como está enunciado --- secuencias que sostienen
+un mood y exploran géneros --- \texttt{latent/cummean} es la ganadora, y la GRU
+única que de hecho se despachó no está siquiera en la frontera.
+
+\subsection{La reversión de la torre doble, y lo que el registro ya sabía}
+\label{sec:walk-reversal}
+Vale la pena decirlo sin rodeos, porque es el resultado metodológico más
+consecuente de este documento: \textbf{la familia de torre doble fue cerrada por
+tres campañas por motivos de recall y es la ganadora sobre el objetivo
+enunciado.} La Sección~\ref{sec:dualtower} la refutó en toda la matriz de vistas
+$\{$\texttt{latent},\texttt{delta},\texttt{cummean}$\}^2$; la rama
+\texttt{cummean/cummean} llegó incluso a marcarse como \emph{degenerada} por
+encabezar la holisticidad de generación 1 con Recall@10 \num{0.066}. Todos esos
+juicios se emitieron sobre exactitud de pista siguiente de un solo disparo, y
+ninguno es erróneo en esa superficie --- la reversión no corrige los veredictos
+de recall, sino que demuestra que respondían a otra pregunta. El análisis de
+potencia de la Sección~\ref{sec:power-stats} hace compatibles ambas lecturas en
+lugar de contradictorias: lo que la campaña de torre doble estableció fue la
+ausencia de una ganancia \emph{grande} de recall, lo cual es plenamente
+consistente con que la familia sea mejor en algo que la métrica de recall no
+mide.
+
+\textbf{La corroboración ya estaba en el registro, archivada como negativa.} La
+nota de interpretabilidad en \texttt{predictors/seq\_dualgru.py:113} recoge que
+la torre \texttt{cummean} «añadió direcciones lineales reales (CKA \num{0.458})
+pero \textbf{cero} conceptos de siguiente ítem que la torre A no tuviera».
+Leído como resultado de pista siguiente eso es peso muerto, y así quedó
+anotado. Leído en la superficie de la caminata es la parte útil: una torre cuyo
+contenido es ortogonal a la predicción del siguiente ítem es exactamente una
+torre que transporta \emph{estado de sesión} en vez de adyacencia. Dos hechos
+estructurales completan la explicación. La familia recupera en el espacio de
+latentes de ítem \emph{crudo}, sin proyección aprendida, así que un ancla de
+mood en espacio crudo es nativa a su geometría --- a diferencia del campeón,
+cuya proyección InfoNCE despoja precisamente la estructura de similitud sonora
+que un ancla necesita. Y una de las ramas promovidas lee la \emph{media causal}
+del prefijo, que estructuralmente es una señal de promedio móvil.
+
+\textbf{Una sub-hipótesis queda refutada.} La predicción natural a partir de lo
+anterior --- que la torre \texttt{cummean} sostiene un vibe de forma
+\emph{nativa} --- es falsa: con los dos controles apagados su vibe es
+\num{0.236}, estadísticamente indistinguible del \num{0.234} de
+\texttt{latent/latent}. La arquitectura no aporta el sostén del mood por sí
+sola; solo se convierte en el mejor anfitrión para uno una vez aplicados el
+ancla y la zancada. Es una afirmación más débil y más interesante que la que
+sugería el argumento estructural, y es la que la medición respalda.
+
+\subsection{Despliegue, y lo que no queda establecido}
+\label{sec:walk-limits}
+La rama de torre doble ajustada es ahora el \textbf{motor por defecto} del
+showcase, exportada como \texttt{dualgru.onnx} (\num{3.16}\,MB) con una paridad
+ONNX frente a torch de \num{1e-7} en toda longitud de prefijo $T = 1\ldots40$
+--- la suma acumulada de \texttt{cummean} era el riesgo del trazado, y es la
+razón por la que la comprobación de paridad barrió $T$ en vez de muestrearlo. La
+GRU única se conserva al lado para comparación, y el ancla/zancada ajustados
+viven en el manifiesto de despliegue y no en el código, así que re-ajustar es
+un re-horneado y no una edición de código. El campeón de blend fue retirado del
+showcase de extremo a extremo: servido desde un Worker su caminata costaba
+${\sim}\SI{0.94}{\second}$ de CPU por lote de 8, unas $100\times$ el tope de CPU
+de \SI{10}{\milli\second} del plan gratuito en el que el showcase está
+desplegado, y el loteo no puede rescatar un paso único que ya cuesta
+${\sim}\SI{117}{\milli\second}$.
+
+\paragraph{Lo que esta sección \emph{no} establece.} Cuatro límites, dichos sin
+rodeos. \textbf{(1)} \texttt{ground} cruza el cero en \emph{todas} las ramas
+(Tabla~\ref{tab:walk-paired}), así que ninguna rama queda establecida como mejor
+prediciendo la continuación real --- las victorias son sobre la \emph{forma} del
+viaje, y la barandilla de anclaje solo confirma que ninguna rama se degradó
+hacia una irrelevancia agradable. \textbf{(2)} Una partición, una semilla,
+\num{40} sesiones de \num{20} pasos; las métricas de caminata no han tenido
+endurecimiento en segunda partición del tipo que la
+Sección~\ref{sec:projection-hardening} aplica a la corona de recall, y la ventana
+objetivo misma se eligió a partir de la dispersión del primer barrido.
+\textbf{(3)} Nada de esto se ha \emph{escuchado}. Toda afirmación es una
+afirmación geométrica sobre cosenos en un espacio PCA-192, y «sostiene un mood»
+está operacionalizado como «se mantiene cerca de un centroide de semilla», que
+es una hipótesis sobre la percepción y no una medición de ella. \textbf{(4)} La
+métrica principal del proyecto está \textbf{sin cambios}: holisticness@10 sigue
+siendo \texttt{[metrics].primary} y el tablero de este documento sigue
+denominado en Recall@10 (Sección~\ref{sec:power-generations}). Si las métricas de
+caminata deben pasar a ser principales es una decisión abierta, no zanjada --- y
+hasta que se zanje, el resumen honesto es que la superficie de la caminata ya es
+\emph{medible}, y que sobre ella gana una familia refutada.
+\emph{Fuentes: \texttt{2026-07-30c-artist-cap-measurement.md},
+\texttt{PROJECT-FACTS.md} (roll-up 2026-07-31b),
+\texttt{tools/walk\_eval.py}, \texttt{tools/walk\_frontier.py},
+\texttt{tools/walk\_dualgru.py}, \texttt{tools/walk\_headtohead.py}.}
+
 \section{Conclusiones}
 \label{sec:conclusions}
-Catorce campañas (jul 2026) sobre la tarea de recuperación de pista siguiente
+Quince campañas (jul 2026) sobre la tarea de recuperación de pista siguiente
 convergen en una historia clara. (1) Un modelo de secuencias de sesión, incluso
 en su mejor forma (GRU-infonce), solo \emph{empata} con la barra de Markov de
 co-escucha de primer orden en recall@10 y pierde en MRR: predecir un latente del
@@ -2214,9 +2802,55 @@ concentración de artista), cuyas diferencias empequeñecen a toda diferencia en
 modelos y bajo todas las cuales el campeón servible queda \emph{último} --- así
 que esta síntesis mantiene su tablero denominado en Recall@10 y etiqueta cada
 columna de holisticidad con su generación (Tabla~\ref{tab:hgen}).
+(14) Por último, una campaña sobre la \emph{superficie} y no sobre el modelo
+descubre que el tablero anterior había estado puntuando la superficie
+equivocada (Sección~\ref{sec:walk}). Todo lo demás en este documento es un
+top-10 de un solo disparo, mientras el producto despachado sirve una
+\emph{caminata} autorregresiva --- y la \texttt{mood\_coh} de
+\texttt{holisticness@10} se ancla al centroide del \emph{prefijo}, que en una
+caminata crece con el viaje, así que una serie de pasos individualmente legales
+que acaba en la región opuesta del espacio puntúa bien en cada paso: la deriva
+era invisible por construcción, y la composición es además $\num{5.5}\times$ más
+sensible a la relevancia que a la eagerness. Calibrado contra las \num{73632}
+transiciones consecutivas del propio usuario (coseno de paso mediano \num{0.261},
+\SI{27.0}{\percent} negativas), el motor que el showcase despachó camina
+$\num{2.5}\times$ demasiado ceñido (paso mediano \num{0.661}) --- «plano a pesar
+de tener muchos artistas» eran muchos movimientos pequeños y seguros --- mientras
+el campeón de blend iguala la zancada real pero no logra sostener un mood, porque
+su proyección InfoNCE codifica qué \emph{sigue} y no qué \emph{suena parecido}.
+Tres controles deterministas en tiempo de recuperación arreglan la
+alcanzabilidad: un ancla de semilla, un término de zancada (determinista a
+propósito --- el muestreo rompería la garantía del permalink) y un tope
+\emph{duro} por artista, que triunfa exactamente donde fallaron las dos palancas
+anti-eager blandas porque no puede ser superado por puntuación (en la playlist
+patológica \num{59} de los \num{60} primeros candidatos son un mismo artista y el
+siguiente artista está en el puesto \num{75}, contra un presupuesto de diversidad
+de MMR que vale ${\approx}\num{0.078}$ de puntuación normalizada;
+\texttt{eager\_beta} está mal especificado sobre un coseno absoluto cuando la
+eagerness es una propiedad de \emph{ordenamiento}). El tope endurece en dos
+particiones disjuntas y, de forma inesperada, \emph{eleva} \texttt{music@10} en
+todos sus ajustes: cambia relevancia literal por relevancia graduada. Y sobre
+\num{40} sesiones held-out idénticas con bootstrap pareado, \textbf{la familia de
+torre doble, cerrada por tres campañas por motivos de recall, es la ganadora
+sobre el objetivo enunciado} --- \texttt{latent/cummean} con ancla \num{0.8} y
+zancada \num{0.5} logra error de zancada $-\num{0.2545}$, géneros $+\num{1.50}$
+y deriva $+\num{0.0351}$ con todos los IC lejos de cero mientras \emph{sostiene}
+el vibe, donde la GRU única ($-\num{0.0409}$) y el campeón ($-\num{0.1327}$)
+pagan vibe por la misma zancada. La corroboración ya estaba en el registro como
+\emph{negativa} (\texttt{seq\_dualgru.py:113}: la torre \texttt{cummean} «añadió
+direcciones lineales reales (CKA \num{0.458}) pero cero conceptos de siguiente
+ítem que la torre A no tuviera») --- peso muerto para predecir la pista siguiente
+es exactamente estado de sesión para sostener un mood, aunque la lectura fuerte
+queda refutada: \texttt{cummean} \emph{no} sostiene un vibe de forma nativa
+(\num{0.236} frente a \num{0.234}), solo aloja uno una vez aplicados los
+controles. Está desplegada como motor por defecto del showcase; y
+\texttt{ground} cruza el cero en todas las ramas, así que lo establecido es la
+\emph{forma} del viaje, no la verdad de la pista siguiente, sobre una partición,
+una semilla y \num{40} sesiones, sin que nada se haya escuchado todavía y con la
+métrica principal sin cambios.
 
 \section{Informes fuente}
-Esta síntesis consolida catorce informes de campaña de pista siguiente de
+Esta síntesis consolida quince informes de campaña de pista siguiente de
 \texttt{experiments/}:
 \begin{itemize}
   \item \texttt{2026-07-13-nexttrack-sequence-sweep.md} --- la campaña
@@ -2295,6 +2929,22 @@ Esta síntesis consolida catorce informes de campaña de pista siguiente de
     \texttt{frac\_negative\_coords} $=$ \num{0.5327}), más el análisis de potencia
     medido y las tres generaciones de holisticidad
     (Secciones~\ref{sec:preencoder} y~\ref{sec:power}).
+  \item \texttt{2026-07-30c-artist-cap-measurement.md} --- el \emph{tope duro
+    por artista}, la primera palanca de des-eagerización que funciona, y funciona
+    porque no puede ser superada por puntuación: \texttt{artist\_conc@10}
+    \num{0.692}$\to$\num{0.123} con \texttt{music@10} \emph{subiendo} (IC sobre
+    cero) en todos sus ajustes, endurecida en una segunda partición disjunta con
+    0.64 de fríos, junto con las refutaciones de las dos palancas blandas a las
+    que sustituye (Sección~\ref{sec:walk-controls}). El material a nivel de
+    caminata de la Sección~\ref{sec:walk} --- el desajuste de superficie, las
+    cuatro métricas de caminata, la frontera ancla $\times$ zancada, el cara a
+    cara de muestra emparejada y la reversión de la torre doble --- está
+    transcrito del roll-up de \texttt{PROJECT-FACTS.md} de 2026-07-31b y de las
+    cuatro herramientas de medición que este cita
+    (\texttt{tools/walk\_eval.py}, \texttt{walk\_frontier.py},
+    \texttt{walk\_dualgru.py}, \texttt{walk\_headtohead.py}), cuyos docstrings de
+    módulo son la autoridad sobre cómo se calcula cada métrica; ese material aún
+    no tiene informe de campaña propio.
 \end{itemize}
 
 \end{document}

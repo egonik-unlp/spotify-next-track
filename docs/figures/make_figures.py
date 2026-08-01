@@ -1508,6 +1508,188 @@ def fig_nexttrack_power():
     save(fig, "nexttrack_power.pdf")
 
 
+# Fig 30: THE CORE ARGUMENT of the walk-surface campaign. The user's OWN
+# consecutive-transition cosines in the PCA-192 item space -- 73,632 pairs over the
+# 5,723 train sessions of seq-20260715-131139 -- are a broad distribution: median
+# 0.261, p10-p90 [-0.192, 0.830], and 27.0% of real steps are NEGATIVE. Real
+# listening moves. The engine the showcase actually shipped (single GRU + anchor
+# 0.4, gru.onnx) walks with a median step of 0.661, 2.5x tighter than the user
+# does: "lots of artists but flat" was many small safe moves, and no one-shot
+# metric could see it because holisticness@10 is computed on a top-10 and its
+# mood_coh anchors to the GROWING prefix centroid. The blend champion sits at
+# 0.317, right on the real median -- but cannot hold a vibe (0.187).
+# Bin counts (40 bins of width 0.05 over [-1,1]) transcribed from the
+# calibration block of tools/walk_eval.py run on the canonical artifact.
+# (PROJECT-FACTS.md roll-up 2026-07-31b; tools/walk_eval.py.)
+def fig_nexttrack_walk_transitions():
+    edges = np.linspace(-1.0, 1.0, 41)
+    counts = np.array([
+        0, 0, 0, 0, 0, 0, 1, 0, 13, 39, 120, 337, 679, 1248, 2020, 2461, 2994,
+        3074, 3482, 3439, 3491, 3428, 3071, 3084, 3145, 3008, 3013, 2973, 2829,
+        2843, 2712, 2509, 2337, 2425, 2343, 2094, 1660, 1357, 1392, 4011,
+    ])
+    n_real = int(counts.sum())          # 73,632
+    real_med = 0.261
+    p10, p90 = -0.192, 0.830
+    frac_neg = 0.270
+    gru_med = 0.661                     # shipped GRU + anchor 0.4, 40 held-out sessions
+    champ_med = 0.317                   # blend champion, same 40 sessions
+    centers = (edges[:-1] + edges[1:]) / 2
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.0))
+    ax.axvspan(p10, p90, color=ACCENT, alpha=0.09, lw=0,
+               label=f"real p10--p90 [{p10:.3f}, {p90:.3f}]")
+    ax.bar(centers, counts, width=0.048, color=ACCENT, alpha=0.55,
+           edgecolor="white", linewidth=0.3, label=f"the user's real steps (n={n_real:,})")
+    ax.axvline(0.0, color=MUTED, lw=0.9, ls="-")
+    ax.axvline(real_med, color=ACCENT, lw=2.0, ls="-",
+               label=f"real median step {real_med:.3f}")
+    ax.axvline(champ_med, color=GOOD, lw=1.6, ls="--",
+               label=f"blend champion walk {champ_med:.3f}")
+    ax.axvline(gru_med, color=BAD, lw=2.2, ls="-",
+               label=f"SHIPPED GRU walk {gru_med:.3f}")
+
+    ax.annotate(f"{frac_neg:.0%} of real steps\nare NEGATIVE -- the user\nchanges direction",
+                xy=(-0.22, 2100), xytext=(-0.73, 1150), fontsize=7.0, color="#374151",
+                arrowprops=dict(arrowstyle="->", color="#6b7280", lw=0.9))
+    ax.annotate("shipped engine:\n2.5$\\times$ TIGHTER\nthan the user",
+                xy=(gru_med, 2450), xytext=(0.705, 2750), fontsize=7.2, color=BAD,
+                ha="left", arrowprops=dict(arrowstyle="->", color=BAD, lw=1.1))
+    ax.set_xlim(-0.75, 1.0)
+    ax.set_ylim(0, 4400)
+    ax.set_xlabel("cosine between consecutive tracks (PCA-192 item space)")
+    ax.set_ylabel("real consecutive pairs per 0.05 bin")
+    ax.legend(loc="upper left", fontsize=6.8)
+    ax.set_title("Calibrated against the user's own listening: real sessions MOVE, and the\n"
+                 "engine the showcase shipped was walking far too tight to be one of them")
+    save(fig, "nexttrack_walk_transitions.pdf")
+
+
+# Fig 31: the anchor x stride frontier. Two orthogonal, DETERMINISTIC retrieval-time
+# controls -- anchor (pull toward the seed-core centroid, holds the geist) and stride
+# (subtract s*cos(candidate, previous track), enlarges each step) -- sweep 16 GRU cells
+# and 8 champion cells on 20 held-out sessions x 20 steps, cap 1. Sampling was
+# deliberately NOT used: it would loosen the stride too but break the permalink's
+# same-recipe-same-journey guarantee. The shaded box is the pre-registered target
+# window: median step inside the real band's middle (0.20-0.38) AND vibe >= 0.50.
+# Neither shipped configuration is in it (GRU a0.4 s0.0 holds the vibe but strides
+# 0.709; champion a0.0 s0.0 strides 0.318 but has vibe 0.185); the conjunction is
+# reachable only once BOTH controls are on. Lines join a fixed anchor as stride grows.
+# (tools/walk_frontier.py, /tmp/walk_frontier.json; PROJECT-FACTS.md 2026-07-31b.)
+def fig_nexttrack_walk_frontier():
+    # (anchor, stride, med_step, vibe)
+    gru = [
+        (0.0, 0.0, 0.607, 0.286), (0.0, 0.3, -0.018, 0.200),
+        (0.0, 0.6, -0.374, 0.123), (0.0, 1.0, -0.557, 0.084),
+        (0.2, 0.0, 0.663, 0.563), (0.2, 0.3, 0.094, 0.426),
+        (0.2, 0.6, -0.251, 0.330), (0.2, 1.0, -0.522, 0.185),
+        (0.4, 0.0, 0.709, 0.639), (0.4, 0.3, 0.297, 0.588),
+        (0.4, 0.6, -0.127, 0.437), (0.4, 1.0, -0.405, 0.302),
+        (0.8, 0.0, 0.713, 0.678), (0.8, 0.3, 0.506, 0.672),
+        (0.8, 0.6, 0.176, 0.605), (0.8, 1.0, -0.188, 0.460),
+    ]
+    champ = [
+        (0.0, 0.0, 0.318, 0.185), (0.0, 0.5, -0.032, 0.104),
+        (1.0, 0.0, 0.577, 0.551), (1.0, 0.5, 0.282, 0.503),
+        (2.0, 0.0, 0.596, 0.625), (2.0, 0.5, 0.472, 0.615),
+        (4.0, 0.0, 0.645, 0.669), (4.0, 0.5, 0.544, 0.664),
+    ]
+    tgt_x, tgt_vibe = (0.20, 0.38), 0.50
+    real_med = 0.261
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.3))
+    ax.add_patch(plt.Rectangle((tgt_x[0], tgt_vibe), tgt_x[1] - tgt_x[0], 1.0 - tgt_vibe,
+                               fc=GOOD, ec=GOOD, alpha=0.13, lw=1.0, zorder=0))
+    ax.text(0.29, 0.955, "target window\nreal stride AND held vibe", ha="center",
+            va="top", fontsize=6.8, color=GOOD)
+    ax.axvline(real_med, color=ACCENT, lw=1.4, ls=":",
+               label=f"the user's real median step {real_med:.3f}")
+    ax.axhline(tgt_vibe, color=MUTED, lw=0.8, ls=":")
+
+    for pts, col, mk, lbl in ((gru, ACCENT, "o", "single GRU (gru.onnx)"),
+                              (champ, BAD, "s", "blend champion")):
+        for a in sorted({p[0] for p in pts}):
+            leg = sorted([p for p in pts if p[0] == a], key=lambda p: p[1])
+            ax.plot([p[2] for p in leg], [p[3] for p in leg], "-", color=col,
+                    lw=0.8, alpha=0.45, zorder=1)
+        ax.plot([p[2] for p in pts], [p[3] for p in pts], mk, color=col, ms=5.0,
+                mec="white", mew=0.6, label=lbl, zorder=3)
+
+    def tag(p, text, dx, dy, col, weight="normal", fs=6.6):
+        ax.annotate(text, xy=(p[2], p[3]), xytext=(p[2] + dx, p[3] + dy), fontsize=fs,
+                    color=col, fontweight=weight,
+                    arrowprops=dict(arrowstyle="->", color=col, lw=0.8))
+
+    tag(gru[8], "SHIPPED GRU\na0.4 s0.0", -0.21, 0.22, BAD, "bold", 7.0)
+    tag(gru[9], "GRU a0.4 s0.3\nIN THE WINDOW", -0.42, 0.18, GOOD, "bold")
+    tag(champ[0], "champion as-is\na0.0 s0.0", -0.62, -0.14, BAD)
+    tag(champ[3], "champion a1.0 s0.5\nIN THE WINDOW", 0.06, -0.23, GOOD, "bold")
+    ax.annotate("a0.8 s0.6 just misses\n(step 0.176)", xy=gru[14][2:], fontsize=6.2,
+                color=MUTED, xytext=(gru[14][2] - 0.44, gru[14][3] + 0.09),
+                arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.7))
+
+    ax.set_xlim(-0.65, 0.86)
+    ax.set_ylim(0.0, 1.0)
+    ax.set_xlabel("median step cosine of the generated journey  (stride grows $\\rightarrow$ leftward)")
+    ax.set_ylabel("vibe: mean cosine to the seed-core centroid")
+    ax.legend(loc="lower right", fontsize=6.9)
+    ax.set_title("Anchor and stride are orthogonal, and only their CONJUNCTION reaches the\n"
+                 "target window -- neither shipped configuration was inside it")
+    save(fig, "nexttrack_walk_frontier.pdf")
+
+
+# Fig 32: the matched-sample head-to-head. Every arm walked the SAME 40 held-out
+# sessions from the same 5-track seeds, so the differences are PAIRED (2000
+# bootstrap resamples, rng 1337) against the shipped GRU (anchor 0.4, stride 0).
+# One panel per metric, each on its OWN scale -- a dual axis would imply a
+# comparability these five quantities do not have. Reading: pushing the single GRU
+# to a real stride COSTS vibe and the champion costs much more, while both
+# dual-tower arms buy the stride at no vibe cost and add genres; `ground` straddles
+# for EVERY arm, so no arm is established as better at predicting the real
+# continuation -- only at journey SHAPE.
+# (tools/walk_headtohead.py, /tmp/walk_headtohead.json; PROJECT-FACTS.md 2026-07-31b.)
+def fig_nexttrack_walk_headtohead():
+    arms = ["GRU tuned\na0.4 s0.3", "dual l/l f0\na0.8 s0.4",
+            "dual l/cummean f0\na0.8 s0.5", "champion\na1.0 s0.5"]
+    # metric -> (better-direction sign, [(delta, lo, hi) per arm])
+    data = {
+        "$\\Delta$vibe": (+1, [(-0.0409, -0.0602, -0.0221), (+0.0297, +0.0146, +0.0468),
+                               (+0.0013, -0.0151, +0.0180), (-0.1327, -0.1629, -0.1041)]),
+        "$\\Delta$stride err": (-1, [(-0.2695, -0.3058, -0.2358), (-0.2423, -0.2790, -0.2053),
+                                       (-0.2545, -0.2962, -0.2127), (-0.2638, -0.3120, -0.2155)]),
+        "$\\Delta$drift": (+1, [(+0.0089, -0.0255, +0.0420), (+0.0259, -0.0011, +0.0521),
+                                (+0.0351, +0.0071, +0.0627), (-0.0422, -0.0983, +0.0093)]),
+        "$\\Delta$genres": (+1, [(+0.525, -0.475, +1.500), (+1.050, +0.250, +1.876),
+                                 (+1.500, +0.500, +2.500), (-0.325, -1.500, +0.876)]),
+        "$\\Delta$ground": (+1, [(+0.0116, -0.0143, +0.0408), (+0.0060, -0.0172, +0.0314),
+                                 (+0.0059, -0.0163, +0.0285), (-0.0115, -0.0467, +0.0236)]),
+    }
+    y = np.arange(len(arms))[::-1]
+
+    fig, axes = plt.subplots(1, 5, figsize=(7.4, 3.1))
+    for ax, (name, (sign, rows)) in zip(axes, data.items()):
+        ax.axvline(0.0, color="#374151", lw=1.0)
+        for yi, (d, lo, hi) in zip(y, rows):
+            better = (lo > 0) if sign > 0 else (hi < 0)
+            worse = (hi < 0) if sign > 0 else (lo > 0)
+            col = GOOD if better else (BAD if worse else MUTED)
+            ax.errorbar([d], [yi], xerr=[[d - lo], [hi - d]], fmt="o", ms=4.5,
+                        color=col, ecolor=col, elinewidth=1.4, capsize=2.4)
+        ax.set_yticks(y)
+        ax.set_yticklabels(arms if ax is axes[0] else [], fontsize=6.2)
+        ax.set_ylim(-0.7, len(arms) - 0.3)
+        ax.set_title(name + ("  ($\\downarrow$)" if sign < 0 else "  ($\\uparrow$)"),
+                     fontsize=7.6)
+        ax.tick_params(axis="x", labelsize=6.2)
+        ax.xaxis.set_major_locator(plt.MaxNLocator(3))
+        ax.grid(axis="y", visible=False)
+    axes[0].set_ylabel("vs the SHIPPED GRU", fontsize=7.0)
+    fig.suptitle("Matched-sample walk head-to-head: 40 identical held-out sessions, paired bootstrap.\n"
+                 "Green = CI on the better side, red = CI on the worse side, grey = straddles zero",
+                 fontsize=8.4)
+    save(fig, "nexttrack_walk_headtohead.pdf")
+
+
 if __name__ == "__main__":
     fig_ae_latent_knn()
     fig_svm_mae_vs_r2()
@@ -1538,3 +1720,6 @@ if __name__ == "__main__":
     fig_nexttrack_preencoder_forest()
     fig_nexttrack_rectifier()
     fig_nexttrack_power()
+    fig_nexttrack_walk_transitions()
+    fig_nexttrack_walk_frontier()
+    fig_nexttrack_walk_headtohead()

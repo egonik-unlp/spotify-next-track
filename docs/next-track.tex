@@ -81,7 +81,28 @@ Recall@10 while a whole architecture family spans only \num{0.028}, so large
 harms were detected reliably while moderate wins were never detectable at all ---
 and \emph{holisticness@10} exists in three mutually non-comparable code
 generations, which is why this synthesis keeps its board denominated in
-Recall@10.
+Recall@10. A final measurement campaign then changes the
+\emph{surface} rather than the model: the shipped product serves an
+\emph{autoregressive walk}, while holisticness@10 scores a one-shot top-10 whose
+\texttt{mood\_coh} anchors to a \emph{growing} prefix centroid, so journey drift
+was invisible by construction (and the composite is $\num{5.5}\times$ more
+sensitive to its relevance factor than to its eagerness factor). Four
+walk-level metrics calibrated against the user's own listening (\num{73632} real
+consecutive transitions, median step cosine \num{0.261}, \SI{27.0}{\percent} of
+them negative) show the shipped engine walking $\num{2.5}\times$ tighter than
+the listener it imitates (median step \num{0.661}), and three deterministic
+retrieval-time controls --- a seed anchor, a stride term, and a hard per-artist
+cap that \emph{cannot be outscored} (two disjoint splits:
+$\Delta$artist\_conc $-\num{0.527}$ with $\Delta$music@10 $+\num{0.026}$, both
+CI clear of zero) --- make a real-listening stride and a held vibe
+simultaneously reachable. On \num{40} identical held-out sessions under paired
+bootstrap the \emph{dual-tower} family that three campaigns had refuted on
+recall is the winner on the stated objective (\texttt{latent/cummean}: stride
+error $-\num{0.2545}$, genres $+\num{1.50}$, drift $+\num{0.0351}$, all CI
+clear of zero, vibe \emph{held}), while pushing the single GRU or the champion
+to the same stride \emph{costs} vibe --- but \texttt{ground} straddles zero for
+every arm, so only journey \emph{shape} is established, and the primary metric
+is unchanged.
 \end{abstract}
 
 \section{Introduction}
@@ -1946,9 +1967,545 @@ reported throughout as a labelled, generation-tagged diagnostic column.
 \emph{Sources: \texttt{2026-07-25-nexttrack-dual-tower-fusion-scan.md},
 \texttt{2026-07-26-nexttrack-pre-encoder-scan.md}.}
 
+\section{The walk surface: measuring what the product actually serves}
+\label{sec:walk}
+\emph{Rationale.} Every verdict up to this point --- including the crown board
+of Table~\ref{tab:lb} and all three holisticness generations of
+Section~\ref{sec:power-generations} --- is computed on a \textbf{one-shot
+top-10}: the model sees one held-out prefix, ranks the catalog once, and is
+scored against one target. But the artifact this lab ships,
+\texttt{clients/infinite-playlist}, serves an \textbf{autoregressive walk}: it
+picks a track, appends it to the session, re-scores, and repeats for as many
+steps as the listener asks for. Those are different surfaces, and
+\texttt{domain.toml} has said so in prose the whole time --- its
+\texttt{[metrics]} block states the goal as ``mood-coherent, non-eager
+\emph{sessions}, not guessing the literal next track.'' The stated intent and
+the implemented metric had diverged. This section closes that gap: it defines
+four walk-level metrics calibrated against the user's own listening, adds three
+\emph{retrieval-time} controls, and runs a matched-sample head-to-head. It is
+also the one place in this document where a documented refutation is
+\emph{reversed} on a new objective, which is why it is reported at length rather
+than folded into the campaign sections above.
+
+\subsection{The surface mismatch, and why drift was invisible}
+\label{sec:walk-mismatch}
+Two mechanical facts explain why nothing above could have caught a drifting
+journey.
+
+\textbf{First, the anchor grows.} The \texttt{mood\_coh} facet of
+holisticness@10 measures each candidate's cosine to the \emph{prefix} centroid
+(\texttt{seq\_common.py:558}). On a one-shot evaluation the prefix is fixed and
+that is a reasonable read of ``does this list stay on vibe.'' On a walk the
+prefix \emph{is} the journey so far, so the reference point travels with the
+model: a journey that leaves its starting region by a thousand individually
+legal steps scores well \emph{at every step}, because each step is compared to a
+centroid that has already moved most of the way there. \textbf{Drift is
+invisible by construction} --- not under-weighted, but unmeasurable in this
+formulation.
+
+\textbf{Second, the composite is dominated by relevance.} Differentiating the
+generation-3 composite at the champion's operating point gives
+$\partial H/\partial\,\texttt{music@10} = +\num{0.206}$ against
+$\partial H/\partial\,\texttt{eager} = -\num{0.038}$: holisticness@10 is
+$\num{5.5}\times$ more sensitive to its relevance factor than to its eagerness
+factor. So even the term that was \emph{meant} to price session quality is
+mostly re-reporting graded relevance. This is the same asymmetry that
+Section~\ref{sec:power-generations} observed from the outside, where the
+grounding factor's ${\sim}0.3$ multiplier made every generation-2 value rank
+below every generation-1 value; here it is quantified at the derivative.
+
+\subsection{Four walk-level metrics, calibrated against the user's own sessions}
+\label{sec:walk-metrics}
+The new instrument (\texttt{tools/walk\_eval.py}) generates journeys from
+held-out \emph{real} sessions --- a 5-track seed taken from the session, then 20
+autoregressive steps, prefix items excluded, at most one track per artist unless
+stated --- and scores them on four axes:
+
+\begin{description}
+  \item[1. Transition match (primary).] Do the walk's step-to-step distances
+  look like this user's \emph{real} listening? This follows the playlist-lab
+  finding directly: measure \emph{transitions}, not averages, and calibrate
+  against the user's own sessions. Averaging a distance-to-centroid is the wrong
+  shape --- it penalizes a legitimate genre move and rewards standing still.
+  Reported as the 1-Wasserstein distance ($W_1$, lower better) between the
+  journey's consecutive-pair cosine distribution and the real one, plus two
+  legible reads: the median step cosine and the share of steps inside the real
+  p10--p90 band.
+  \item[2. Vibe and drift.] The \emph{seed-anchored} cosine: mean cosine of the
+  generated tracks to the fixed seed-core centroid (\texttt{vibe}, higher
+  better), and the end-quarter minus start-quarter difference (\texttt{drift},
+  nearer zero better). The anchor is fixed at the seed and does \emph{not} grow,
+  which is precisely the defect of \texttt{mood\_coh} that
+  Section~\ref{sec:walk-mismatch} identifies.
+  \item[3. Variety as credit.] Distinct artists and distinct genres in the
+  journey, counted as a \emph{credit} rather than as the cost that
+  \texttt{artist\_adj}/\texttt{artist\_conc} price. Cohesion is not one genre:
+  different genres are welcome if they preserve the vibe, so a journey covering
+  more of them at equal vibe is better, not worse.
+  \item[4. Grounding.] Graded relevance (best sonic cosine, in the balanced
+  musical-distance space of Section~\ref{sec:music}) between each generated
+  track and what the user \emph{actually} played next in that session. This is
+  the guard-rail: without it a pleasant unrelated drift wins, which is exactly
+  the lesson the crown learned when \texttt{music\_rel} was added.
+\end{description}
+
+\paragraph{The calibration, and the single number that reframed the project.}
+The reference distribution is the user's own consecutive-pair cosines over the
+\num{5723} \emph{train} sessions of \dsid{seq-20260715-131139}:
+\textbf{\num{73632} pairs, median \num{0.261}, p10--p90
+$[-\num{0.192}, \num{0.830}]$, and \SI{27.0}{\percent} of real steps
+\emph{negative}}. Real listening moves --- it changes direction more than a
+quarter of the time. Against that, the engine the showcase actually shipped (a
+single GRU as \texttt{gru.onnx} with a seed anchor of \num{0.4}) walks with a
+median step of \textbf{\num{0.661}}, roughly $\num{2.5}\times$ tighter than the
+user does (Figure~\ref{fig:nexttrack-walk-transitions}). The complaint that the
+showcase felt ``flat despite lots of artists'' now has a measurement behind it:
+many small, safe moves. The blend champion has the opposite failure --- its
+median step, \num{0.317}, sits essentially on the real median, but its
+\texttt{vibe} is only \num{0.187}, because its InfoNCE projection
+(Section~\ref{sec:projection}) encodes ``what follows this,'' not ``what sounds
+like this,'' so a mood anchor applied \emph{in} that projected space caps at
+\num{0.44} while the same anchor in the raw PCA-192 space reaches \num{0.58}.
+Table~\ref{tab:walk-arms} is the full first read.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_walk_transitions}
+  \caption{The core argument of this section, in one figure. The user's own
+  \num{73632} consecutive-transition cosines (PCA-192 item space, train sessions
+  only) are a \emph{broad} distribution: median \num{0.261}, p10--p90
+  $[-\num{0.192}, \num{0.830}]$, \SI{27.0}{\percent} of steps negative. The
+  engine the showcase shipped walks at a median step of \num{0.661} --- about
+  $\num{2.5}\times$ tighter than the listener it is imitating --- and no one-shot
+  metric could see it, because holisticness@10 scores a top-10 and its
+  \texttt{mood\_coh} anchors to a prefix centroid that grows with the walk. The
+  blend champion (\num{0.317}) matches the real stride but cannot hold a vibe.
+  Bin counts transcribed from the calibration block of
+  \texttt{tools/walk\_eval.py}.}
+  \label{fig:nexttrack-walk-transitions}
+\end{figure}
+
+\begin{table}[ht]
+  \centering
+  \caption{First walk-level read of the two shipped engines. \num{40} held-out
+  sessions, 5-track seed, \num{20} autoregressive steps each; \texttt{cap} is the
+  per-artist limit inside the journey. $W_1$ and $|$median step $-$ \num{0.261}$|$
+  lower-better; \texttt{vibe}, in-band share, artists, genres and \texttt{ground}
+  higher-better; \texttt{drift} nearer zero better. The last row is the reference
+  the metrics are calibrated against (its in-band share is \SI{80}{\percent} by
+  construction). Best cell per column bolded among the model arms.
+  \emph{Source: \texttt{tools/walk\_eval.py}.}}
+  \label{tab:walk-arms}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{lccccccccc}
+    \toprule
+    Arm & $W_1$ & med.\ step & in-band & vibe & drift & artists & genres & ground \\
+    \midrule
+    GRU $+$anchor \num{0.4}, cap 1 (\textbf{shipped}) & 0.320 & 0.661 & \SI{80.6}{\percent} & 0.609 & $-$0.089 & 20.0 & 9.93 & 0.345 \\
+    GRU $+$anchor \num{0.4}, cap 3 & 0.341 & 0.681 & \SI{76.7}{\percent} & \best{0.610} & \best{$-$0.075} & 13.2 & 6.53 & \best{0.393} \\
+    GRU no anchor, cap 1 & 0.263 & 0.574 & \SI{85.2}{\percent} & 0.302 & $-$0.277 & 20.0 & 8.78 & 0.276 \\
+    Champion (\Rp+M+\Cp), cap 1 & \best{0.078} & \best{0.317} & \best{\SI{90.3}{\percent}} & 0.187 & $-$0.186 & 20.0 & \best{10.33} & 0.289 \\
+    Champion (\Rp+M+\Cp), cap 3 & 0.147 & 0.452 & \SI{84.8}{\percent} & 0.193 & $-$0.224 & 11.1 & 5.33 & 0.306 \\
+    \midrule
+    \emph{the user's real sessions} & 0.000 & 0.261 & \SI{80.0}{\percent} & --- & --- & --- & --- & --- \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\paragraph{$W_1$ is not pairable, and that mattered.} The distributional $W_1$ is
+computed over a \emph{pooled} sample of steps, so it has no per-session value and
+cannot enter a paired bootstrap --- the statistic every other verdict in this
+document rests on. The first two sweeps therefore compared arms measured on
+\emph{different} samples (20 sessions $\times$ 20 steps for the frontier, 12
+$\times$ 15 for the dual-tower probe), and a vibe gap of \num{0.588} against
+\num{0.624} is well inside what that mismatch alone can produce: nothing was
+established. The head-to-head (Section~\ref{sec:walk-h2h}) therefore replaces
+$W_1$ with \texttt{stride\_err} $=$ $|$median step $-$ \num{0.261}$|$, a
+per-session quantity that pairs, at the cost of describing only the
+distribution's centre.
+
+\subsection{Three retrieval-time controls, and two refuted ones}
+\label{sec:walk-controls}
+None of the three controls below touches training. All are applied at
+\emph{retrieval} time, on the scores the model already produces, which is what
+makes them cheap to ship and cheap to re-tune.
+
+\begin{description}
+  \item[ANCHOR ($a$).] Add $a\cdot\cos(\text{candidate},\ \text{seed centroid})$
+  to every candidate's score. It holds the geist by pulling the walk back toward
+  the region the listener seeded it from. For the champion the term is
+  z-normalized over the admissible candidates, because its base score is itself a
+  z-blend of three legs and adding a raw cosine to a z-blend is scale-mismatched.
+  \item[STRIDE ($s$).] Subtract $s\cdot\cos(\text{candidate},\ \text{previous
+  track})$. It \emph{enlarges} each step without letting the walk leave the
+  seed's neighbourhood, because the anchor still applies --- the two terms are
+  orthogonal by design, one pulling toward a fixed point and one pushing off the
+  last point. It is deliberately \emph{deterministic}: sampling would also loosen
+  the stride, but the showcase ships permalinks, and ``same recipe $\Rightarrow$
+  same journey'' is now a promise, so a stochastic decoder was ruled out rather
+  than untried.
+  \item[CAP.] A \emph{hard} per-artist limit applied to the ordering
+  (\texttt{seq\_common.artist\_cap\_order}), after MMR, in both
+  \texttt{eval\_from\_scores} and \texttt{rank\_topk}/\texttt{predict\_ranking},
+  so evaluation and serving agree by construction. Best-effort rather than
+  absolute: where a prefix's admissible candidate space is exhausted the
+  remaining slots are backfilled with deferred items instead of returning fewer
+  than $k$. Default \texttt{None}, so every pre-existing run and model is
+  byte-identical; and because it needs no sonic vectors it is the only diversity
+  lever here that ports to a thin client unchanged.
+\end{description}
+
+\paragraph{Why a cap and not a penalty --- the two refuted controls.} Both soft
+anti-eager levers of Section~\ref{sec:holisticness} fail for one shared reason: a
+soft penalty in score space loses to a steep relevance gradient.
+\texttt{eager\_beta}, the training-time regularizer, is \emph{mis-specified}: it
+hinges on the absolute value of $\cos(\text{prediction},\ \text{current
+track})$, which a hedged InfoNCE prediction never drives above ${\sim}0.6$,
+whereas eagerness is a \emph{ranking} property --- whether same-artist items
+occupy the top slots --- not a property of an absolute similarity.
+\texttt{mmr\_lambda}, the eval-time re-rank, was additionally \emph{eval-only}
+until the serving path was fixed, so the $\lambda$ frontier had never been a
+deployable lever at all; and even fixed it measures inert on the pathological
+case. On the real playlist \texttt{rock chabon ahre} the model ranks \num{59} of
+its top \num{60} candidates as one artist and the next artist first appears at
+\textbf{rank \num{75}}, while MMR's entire diversity budget there is worth
+$\num{0.3}\times\num{0.26}\approx\num{0.078}$ of normalized score --- nowhere
+near enough to pay for a 70-rank relevance drop. A cap does not compete on score
+at all: it \emph{cannot be outscored}, the same property \texttt{seq\_extend}'s
+\texttt{artist\_cooldown} already relied on. The showcase's own soft artist
+penalty turned out to be effectively \textbf{binary} in the same way --- at
+\num{0} it produced artist blocks with runs up to \num{13}, and at \emph{any}
+value $\ge\num{0.25}$ every 30-step walk returned \num{30} distinct artists, max
+run \num{1}, concentration \num{0.000} --- so the slider could not reach the
+middle at all, and a hard cap exposed as a journey shape (Explore / Balanced /
+Continue / Blocks) is what reaches it.
+
+\paragraph{The cap on the one-shot surface, for the record.}
+Table~\ref{tab:walk-cap} is the cap measured where the rest of this document
+measures: the canonical split's one-shot top-10, paired on bit-identical cached
+scores. It cuts \texttt{artist\_conc@10} from \num{0.692} to \num{0.123} at cap
+3 and raises the generation-3 holisticness@10 from \num{0.008603} to
+\num{0.033862}, at a cost of \num{73} of \num{1431} exact hits. The result that
+was \emph{not} predicted is that \textbf{\texttt{music@10} goes up, CI above
+zero, at every cap on both models tested} ($+\num{0.011}$ to $+\num{0.023}$):
+the pre-registered failure mode --- de-eagering by degrading into generic filler
+--- does not occur, because the items promoted from rank 75 and beyond are
+\emph{more} musically apt to the true continuation than the same-artist tracks
+they displace. The cap trades \emph{literal} relevance for \emph{graded}
+relevance. On the champion plus \texttt{markov\_gate} (a serving-time gate that
+suppresses the Markov leg where the current item has no bigram support; its own
+campaign, dated 2026-07-27c, is not yet consolidated into this synthesis) the same cap 3 gives \texttt{artist\_conc}
+\num{0.598}$\to$\num{0.113} and holisticness@10
+\num{0.018699}$\to$\num{0.048063}, reproduced to every digit by three
+registered confirming runs (\runid{run-20260730-235524-0ec1d-seq-blend} at cap
+off, \runid{run-20260730-235524-93d38-seq-blend} at cap 3,
+\runid{run-20260730-234635-a6252-seq-blend} at cap 5), and it \textbf{hardens on
+the disjoint 0.64-cold split} \dsid{seq-20260718-211238} on two pre-registered
+legs: $\Delta$\texttt{artist\_conc} $-\num{0.52699}$
+$[-\num{0.54546}, -\num{0.50825}]$ CI below zero \emph{and}
+$\Delta$\texttt{music@10} $+\num{0.02644}$
+$[+\num{0.01919}, +\num{0.03368}]$ CI above zero, with the relevance gain
+\emph{larger} on the colder window. Two cautions travel with it: exact recall is
+the only regressing metric at every cap, and the canonical split's absolute
+\texttt{music@10} $\ge\num{0.43}$ floor does \textbf{not} transfer --- the
+second split's own control sits at \num{0.4295} on a legitimately colder window,
+so floors must be derived per baseline and pre-registration must be on the
+paired $\Delta$.
+
+\begin{table}[ht]
+  \centering
+  \caption{The hard per-artist cap on the one-shot surface, on the deployed
+  champion (\Rp+M+\Cp, ungated), canonical split \dsid{seq-20260715-131139},
+  $n=\num{1431}$. Off-run measurement: scores are computed once per model and
+  memoized, so every cap arm sees bit-identical score vectors and the pairing is
+  exact rather than merely matched (\num{2000} resamples, rng \num{1337}).
+  holisticness@10 is generation 3 (Section~\ref{sec:power-generations}).
+  \texttt{artist\_conc}, \texttt{artist\_adj} lower-better; the rest
+  higher-better. \emph{Source:
+  \texttt{2026-07-30c-artist-cap-measurement.md}.}}
+  \label{tab:walk-cap}
+  {\footnotesize\setlength{\tabcolsep}{4.2pt}\begin{tabular}{lcccccccc}
+    \toprule
+    cap & R@10 & hits & MRR & artist\_conc & artist\_adj & ild & music@10 & H@10 (gen-3) \\
+    \midrule
+    off & \best{0.211740} & \best{303} & \best{0.121985} & 0.691653 & 0.609713 & 0.406374 & 0.453790 & 0.008603 \\
+    5   & 0.178896 & 256 & 0.119693 & 0.252613 & 0.337247 & 0.563417 & 0.474291 & 0.027258 \\
+    3   & 0.160727 & 230 & 0.116915 & 0.122975 & 0.215304 & 0.613641 & \best{0.476787} & 0.033862 \\
+    2   & 0.138365 & 198 & 0.112313 & \best{0.061946} & \best{0.150384} & \best{0.639717} & 0.474317 & \best{0.036331} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\paragraph{The anchor $\times$ stride frontier.} With the two score-space
+controls in hand the question becomes whether the \emph{conjunction} is
+reachable at all: a real-listening stride \emph{and} a held vibe.
+Table~\ref{tab:walk-frontier} sweeps \num{24} cells --- \num{16} on the GRU,
+\num{8} on the champion, all at cap 1 --- against a target window
+pre-registered before the sweep: median step inside the real band's middle
+($\numrange{0.20}{0.38}$) \emph{and} \texttt{vibe} $\ge\num{0.50}$. Exactly two
+cells land inside it, one per engine (Figure~\ref{fig:nexttrack-walk-frontier}).
+The structure of the grid is the finding: the two controls are genuinely
+orthogonal --- along a fixed anchor, raising the stride walks the median step
+down monotonically while the vibe decays much more slowly --- so the window is
+reachable only with both on, and neither shipped configuration was inside it.
+The champion's anchor also has to be applied in the \emph{raw} PCA-192 space
+rather than its own projected geometry, which is why the frontier reaches
+\num{0.503} where the first probe capped at \num{0.44}.
+
+\begin{table}[ht]
+  \centering
+  \caption{The anchor ($a$) $\times$ stride ($s$) frontier, \num{20} held-out
+  sessions $\times$ \num{20} steps, cap 1, both engines. $W_1$ lower-better;
+  ``med.\ step'' is compared against the user's real \num{0.261}; \texttt{vibe},
+  genres, \texttt{ground} higher-better; \texttt{drift} nearer zero better. The
+  window is median step $\in[\num{0.20},\num{0.38}]$ \emph{and} \texttt{vibe}
+  $\ge\num{0.50}$, pre-registered before the sweep; the two rows that satisfy it
+  are bolded. The shipped GRU configuration is $a=\num{0.4}$, $s=\num{0}$; the
+  champion as deployed is $a=\num{0}$, $s=\num{0}$.
+  \emph{Source: \texttt{tools/walk\_frontier.py}.}}
+  \label{tab:walk-frontier}
+  {\footnotesize\setlength{\tabcolsep}{5pt}\begin{tabular}{llcccccc}
+    \toprule
+    Engine & $a$ / $s$ & $W_1$ & med.\ step & vibe & drift & genres & ground \\
+    \midrule
+    GRU & 0.0 / 0.0 & 0.287 & 0.607 & 0.286 & $-$0.328 & 9.70 & 0.270 \\
+    GRU & 0.0 / 0.3 & 0.273 & $-$0.018 & 0.200 & $-$0.157 & 8.95 & 0.291 \\
+    GRU & 0.0 / 0.6 & 0.564 & $-$0.374 & 0.123 & $-$0.102 & 12.00 & 0.244 \\
+    GRU & 0.0 / 1.0 & 0.702 & $-$0.557 & 0.084 & $-$0.036 & 15.80 & 0.224 \\
+    GRU & 0.2 / 0.0 & 0.323 & 0.663 & 0.563 & $-$0.124 & 9.40 & 0.345 \\
+    GRU & 0.2 / 0.3 & 0.186 & 0.094 & 0.426 & $-$0.098 & 11.05 & 0.335 \\
+    GRU & 0.2 / 0.6 & 0.473 & $-$0.251 & 0.330 & $-$0.067 & 13.25 & 0.303 \\
+    GRU & 0.2 / 1.0 & 0.675 & $-$0.522 & 0.185 & $-$0.077 & 15.05 & 0.253 \\
+    GRU & 0.4 / 0.0 \emph{(shipped)} & 0.361 & 0.709 & 0.639 & $-$0.090 & 9.95 & 0.349 \\
+    \best{GRU} & \best{0.4 / 0.3} & \best{0.104} & \best{0.297} & \best{0.588} & \best{$-$0.076} & \best{11.05} & \best{0.358} \\
+    GRU & 0.4 / 0.6 & 0.356 & $-$0.127 & 0.437 & $-$0.044 & 12.55 & 0.303 \\
+    GRU & 0.4 / 1.0 & 0.588 & $-$0.405 & 0.302 & $-$0.027 & 15.20 & 0.287 \\
+    GRU & 0.8 / 0.0 & 0.364 & 0.713 & 0.678 & $-$0.067 & 11.00 & 0.352 \\
+    GRU & 0.8 / 0.3 & 0.190 & 0.506 & 0.672 & $-$0.070 & 12.15 & 0.351 \\
+    GRU & 0.8 / 0.6 & 0.122 & 0.176 & 0.605 & $-$0.038 & 12.60 & 0.358 \\
+    GRU & 0.8 / 1.0 & 0.420 & $-$0.188 & 0.460 & $-$0.016 & 14.65 & 0.335 \\
+    \midrule
+    Champion & 0.0 / 0.0 \emph{(deployed)} & 0.062 & 0.318 & 0.185 & $-$0.203 & 11.00 & 0.275 \\
+    Champion & 0.0 / 0.5 & 0.240 & $-$0.032 & 0.104 & $+$0.002 & 12.15 & 0.266 \\
+    Champion & 1.0 / 0.0 & 0.239 & 0.577 & 0.551 & $-$0.138 & 8.95 & 0.327 \\
+    \best{Champion} & \best{1.0 / 0.5} & \best{0.072} & \best{0.282} & \best{0.503} & \best{$-$0.130} & \best{9.55} & \best{0.324} \\
+    Champion & 2.0 / 0.0 & 0.276 & 0.596 & 0.625 & $-$0.060 & 8.90 & 0.359 \\
+    Champion & 2.0 / 0.5 & 0.170 & 0.472 & 0.615 & $-$0.105 & 9.45 & 0.338 \\
+    Champion & 4.0 / 0.0 & 0.300 & 0.645 & 0.669 & $-$0.051 & 9.85 & 0.338 \\
+    Champion & 4.0 / 0.5 & 0.236 & 0.544 & 0.664 & $-$0.085 & 9.70 & 0.340 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_walk_frontier}
+  \caption{The two retrieval-time controls are orthogonal, and only their
+  \emph{conjunction} reaches the target window (shaded: median step
+  $\in[\num{0.20},\num{0.38}]$ and \texttt{vibe} $\ge\num{0.50}$). Each line
+  joins a fixed anchor as the stride grows, which moves the journey leftward
+  (larger steps) while the vibe decays slowly --- so the trade-off is real but
+  gentle. Neither shipped configuration is inside the window: the GRU at
+  $a=\num{0.4}$, $s=\num{0}$ holds a vibe of \num{0.639} but strides
+  \num{0.709}, and the champion as deployed strides \num{0.318} at a vibe of
+  \num{0.185}. \num{20} held-out sessions $\times$ \num{20} steps, cap 1
+  (\texttt{tools/walk\_frontier.py}).}
+  \label{fig:nexttrack-walk-frontier}
+\end{figure}
+
+\subsection{The matched-sample head-to-head}
+\label{sec:walk-h2h}
+\emph{Rationale.} The two sweeps above each found a cell inside the window, but
+on different samples, and $W_1$ cannot be paired --- so the finalists had to be
+re-run against one another on \emph{identical} material before anything could be
+claimed. \texttt{tools/walk\_headtohead.py} walks five arms over the same
+\num{40} held-out sessions from the same 5-track seeds, at cap 1, and reports
+paired bootstrap differences (\num{2000} resamples, rng \num{1337}) against the
+\textbf{shipped} configuration --- the single GRU at anchor \num{0.4}, stride
+\num{0} --- on five per-session metrics: \texttt{vibe} (higher better),
+\texttt{stride\_err} (lower better), \texttt{drift} (nearer zero),
+\texttt{genres} (higher) and \texttt{ground} (higher).
+
+\emph{Results.} Table~\ref{tab:walk-means} gives the means and
+Table~\ref{tab:walk-paired} the paired differences;
+Figure~\ref{fig:nexttrack-walk-headtohead} plots the latter one panel per
+metric, each on its own scale.
+
+\begin{table}[ht]
+  \centering
+  \caption{Walk-metric means over the \num{40} identical held-out sessions
+  ($\num{20}$ steps, cap 1). \texttt{stride\_err} $=$
+  $|$median step $-$ \num{0.261}$|$ (lower better); \texttt{vibe},
+  \texttt{genres}, \texttt{ground} higher-better; \texttt{drift} nearer zero
+  better. Best cell per column bolded.
+  \emph{Source: \texttt{tools/walk\_headtohead.py}.}}
+  \label{tab:walk-means}
+  {\footnotesize\setlength{\tabcolsep}{6pt}\begin{tabular}{lccccc}
+    \toprule
+    Arm & vibe & stride\_err & drift & genres & ground \\
+    \midrule
+    GRU shipped, $a$\num{0.4} $s$\num{0.0} & 0.609 & 0.399 & $-$0.089 & 9.925 & 0.345 \\
+    GRU tuned, $a$\num{0.4} $s$\num{0.3} & 0.568 & \best{0.129} & $-$0.080 & 10.450 & \best{0.357} \\
+    dual latent/latent f0, $a$\num{0.8} $s$\num{0.4} & \best{0.638} & 0.157 & $-$0.063 & 10.975 & 0.351 \\
+    \best{dual latent/cummean f0, $a$\num{0.8} $s$\num{0.5}} & 0.610 & 0.144 & \best{$-$0.053} & \best{11.425} & 0.351 \\
+    Champion (\Rp+M+\Cp), $a$\num{1.0} $s$\num{0.5} & 0.476 & 0.135 & $-$0.131 & 9.600 & 0.334 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Paired per-session differences against the \textbf{shipped} GRU
+  ($a$\num{0.4} $s$\num{0.0}) over the same \num{40} sessions, \num{2000}
+  bootstrap resamples, rng \num{1337}. ``Verdict'' reads the CI relative to the
+  metric's better direction: \texttt{stride\_err} is lower-better, so a CI below
+  zero is a \emph{win}; \texttt{drift} starts negative for every arm, so a
+  positive $\Delta$ moves it toward zero. Wins bolded.
+  \emph{Source: \texttt{tools/walk\_headtohead.py}.}}
+  \label{tab:walk-paired}
+  {\footnotesize\setlength{\tabcolsep}{6pt}\begin{tabular}{llcl}
+    \toprule
+    Arm & Metric & $\Delta$ [95\% CI] & Verdict \\
+    \midrule
+    GRU tuned $a$\num{0.4} $s$\num{0.3} & vibe & $-$0.0409 [$-$0.0602, $-$0.0221] & CI$<$0: \emph{costs vibe} \\
+     & stride\_err & \best{$-$0.2695 [$-$0.3058, $-$0.2358]} & \best{CI$<$0: win} \\
+     & drift & $+$0.0089 [$-$0.0255, $+$0.0420] & straddles \\
+     & genres & $+$0.525 [$-$0.475, $+$1.500] & straddles \\
+     & ground & $+$0.0116 [$-$0.0143, $+$0.0408] & straddles \\
+    \midrule
+    dual latent/latent f0 & vibe & \best{$+$0.0297 [$+$0.0146, $+$0.0468]} & \best{CI$>$0: win} \\
+    $a$\num{0.8} $s$\num{0.4} & stride\_err & \best{$-$0.2423 [$-$0.2790, $-$0.2053]} & \best{CI$<$0: win} \\
+     & drift & $+$0.0259 [$-$0.0011, $+$0.0521] & straddles \\
+     & genres & \best{$+$1.050 [$+$0.250, $+$1.876]} & \best{CI$>$0: win} \\
+     & ground & $+$0.0060 [$-$0.0172, $+$0.0314] & straddles \\
+    \midrule
+    \best{dual latent/cummean f0} & vibe & $+$0.0013 [$-$0.0151, $+$0.0180] & straddles: \emph{held} \\
+    \best{$a$\num{0.8} $s$\num{0.5}} & stride\_err & \best{$-$0.2545 [$-$0.2962, $-$0.2127]} & \best{CI$<$0: win} \\
+     & drift & \best{$+$0.0351 [$+$0.0071, $+$0.0627]} & \best{CI$>$0: win} \\
+     & genres & \best{$+$1.500 [$+$0.500, $+$2.500]} & \best{CI$>$0: win} \\
+     & ground & $+$0.0059 [$-$0.0163, $+$0.0285] & straddles \\
+    \midrule
+    Champion (\Rp+M+\Cp) & vibe & $-$0.1327 [$-$0.1629, $-$0.1041] & CI$<$0: \emph{costs vibe} \\
+    $a$\num{1.0} $s$\num{0.5} & stride\_err & \best{$-$0.2638 [$-$0.3120, $-$0.2155]} & \best{CI$<$0: win} \\
+     & drift & $-$0.0422 [$-$0.0983, $+$0.0093] & straddles \\
+     & genres & $-$0.325 [$-$1.500, $+$0.876] & straddles \\
+     & ground & $-$0.0115 [$-$0.0467, $+$0.0236] & straddles \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_walk_headtohead}
+  \caption{The matched-sample head-to-head, one panel per metric on its own
+  scale --- deliberately not a dual axis, which would imply a comparability
+  these five quantities do not have. Green is a CI entirely on the metric's
+  better side, red entirely on the worse side, grey straddles zero. Every arm
+  buys the real stride; only the dual-tower arms buy it without paying vibe, and
+  \texttt{ground} straddles for \emph{every} arm.}
+  \label{fig:nexttrack-walk-headtohead}
+\end{figure}
+
+\emph{Interpretation.} Read down the \texttt{stride\_err} column first: all four
+tuned arms cut it by ${\sim}\num{0.25}$ with the CI below zero, which is simply
+the stride control working --- the shipped engine's \num{0.399} error was
+${\sim}\num{2.6}\times$ the next worst arm's. The interesting variation is what
+each arm \emph{pays} for it. Pushing the single GRU to a real stride
+\textbf{costs vibe} ($-\num{0.0409}$, CI below zero) and the champion pays far
+more ($-\num{0.1327}$, CI below zero): for these two engines stride and vibe are
+in tension, exactly as the frontier's gentle-but-real slope predicted. Both
+dual-tower arms escape the trade-off. \texttt{latent/latent} at $a\num{0.8}$
+$s\num{0.4}$ \emph{gains} vibe ($+\num{0.0297}$, CI above zero) and genres
+($+\num{1.05}$, CI above zero) while matching the stride;
+\texttt{latent/cummean} at $a\num{0.8}$ $s\num{0.5}$ holds vibe
+($+\num{0.0013}$, straddling --- held, not traded) and is the only arm with
+\emph{three} wins, adding \num{1.5} genres (CI above zero) and the only
+significant drift improvement ($+\num{0.0351}$, CI above zero, i.e.\ the journey
+ends closer to where it started). On the objective as stated ---
+mood-holding, genre-exploring sequences --- \texttt{latent/cummean} is the
+winner, and the single GRU that was actually shipped is not on the frontier at
+all.
+
+\subsection{The dual-tower reversal, and what the record already knew}
+\label{sec:walk-reversal}
+This is worth stating plainly, because it is the most consequential
+methodological result in this document: \textbf{the dual-tower family was closed
+by three campaigns on recall grounds and is the winner on the stated
+objective.} Section~\ref{sec:dualtower} refuted it across the complete
+$\{$\texttt{latent},\texttt{delta},\texttt{cummean}$\}^2$ view matrix; the
+\texttt{cummean/cummean} arm was even flagged \emph{degenerate} for topping the
+generation-1 holisticness at Recall@10 \num{0.066}. Every one of those judgements
+was made on one-shot next-track accuracy, and none of them is wrong on that
+surface --- the reversal is not a correction of the recall verdicts but a
+demonstration that they answered a different question. Section~\ref{sec:power-stats}'s
+power analysis makes the two readings compatible rather than contradictory: what
+the dual-tower campaign established was the absence of a \emph{large} recall
+gain, which is fully consistent with the family being better at something the
+recall metric does not measure.
+
+\textbf{The corroboration was already in the record, filed as a negative.} The
+interpretability note at \texttt{predictors/seq\_dualgru.py:113} records that the
+\texttt{cummean} tower ``added real linear directions (CKA \num{0.458}) but
+\textbf{zero} next-item concepts tower A lacked.'' Read as a next-track result
+that is dead weight, and it was written down as such. Read on the walk surface it
+is the useful part: a tower whose content is orthogonal to next-item prediction
+is exactly a tower carrying \emph{session state} rather than adjacency. Two
+structural facts complete the explanation. The family retrieves in the
+\emph{raw} item-latent space with no learned projection, so a raw-space mood
+anchor is native to its geometry --- unlike the champion, whose InfoNCE
+projection strips precisely the sound-similarity structure an anchor needs. And
+one promoted arm reads the \emph{causal mean} of the prefix, which is
+structurally a running-average signal.
+
+\textbf{One sub-hypothesis is refuted.} The natural prediction from the above ---
+that the \texttt{cummean} tower holds a vibe \emph{natively} --- is false: with
+both controls off its vibe is \num{0.236}, statistically indistinguishable from
+\texttt{latent/latent}'s \num{0.234}. The architecture does not supply the mood
+hold on its own; it only becomes the best host for one once the anchor and stride
+are applied. That is a weaker and more interesting claim than the one the
+structural argument suggested, and it is the one the measurement supports.
+
+\subsection{Deployment, and what is not established}
+\label{sec:walk-limits}
+The tuned dual-tower arm is now the \textbf{default engine} in the showcase,
+exported as \texttt{dualgru.onnx} (\num{3.16}\,MB) with ONNX-versus-torch
+parity of \num{1e-7} across every prefix length $T = 1\ldots40$ --- the
+\texttt{cummean} cumulative sum was the trace risk, and it is the reason the
+parity check swept $T$ rather than spot-checking it. The single GRU is kept
+alongside for comparison, and the tuned anchor/stride live in the deployment
+manifest rather than in code, so re-tuning is a re-bake and not a code edit. The
+blend champion was removed from the showcase end-to-end: served from a Worker
+its walk cost ${\sim}\SI{0.94}{\second}$ of CPU per batch of 8, roughly
+$100\times$ the \SI{10}{\milli\second} CPU cap of the free plan the showcase is
+deployed on, and batching cannot rescue a single step that already costs
+${\sim}\SI{117}{\milli\second}$.
+
+\paragraph{What this section does \emph{not} establish.} Four limits, stated
+plainly. \textbf{(1)} \texttt{ground} straddles zero for \emph{every} arm
+(Table~\ref{tab:walk-paired}), so no arm is established as better at predicting
+the real continuation --- the wins are about journey \emph{shape} only, and the
+grounding guard-rail confirms only that no arm degraded into pleasant
+irrelevance. \textbf{(2)} One split, one seed, \num{40} sessions of \num{20}
+steps; the walk metrics have had no second-split hardening of the kind
+Section~\ref{sec:projection-hardening} applies to the recall crown, and the
+target window itself was chosen from the first sweep's spread. \textbf{(3)}
+Nothing here has been \emph{listened} to. Every claim is a geometric claim about
+cosines in a PCA-192 space, and ``holds a mood'' is operationalized as
+``stays near a seed centroid,'' which is a hypothesis about perception, not a
+measurement of it. \textbf{(4)} The project's primary metric is
+\textbf{unchanged}: holisticness@10 remains \texttt{[metrics].primary} and this
+document's board remains denominated in Recall@10
+(Section~\ref{sec:power-generations}). Whether the walk metrics should become
+primary is an open decision, not a settled one --- and until it is settled, the
+honest summary is that the walk surface is now \emph{measurable}, and on it one
+refuted family wins.
+\emph{Sources: \texttt{2026-07-30c-artist-cap-measurement.md},
+\texttt{PROJECT-FACTS.md} (roll-up 2026-07-31b),
+\texttt{tools/walk\_eval.py}, \texttt{tools/walk\_frontier.py},
+\texttt{tools/walk\_dualgru.py}, \texttt{tools/walk\_headtohead.py}.}
+
 \section{Conclusions}
 \label{sec:conclusions}
-Fourteen campaigns (Jul 2026) on the next-track retrieval task converge on a clear
+Fifteen campaigns (Jul 2026) on the next-track retrieval task converge on a clear
 story. (1) A session sequence model, even at its best (GRU-infonce), only
 \emph{ties} the first-order Markov co-listening bar on Recall@10 and loses on
 MRR: predicting a next-item latent and retrieving by one cosine hop is a harder
@@ -2067,9 +2624,50 @@ grounded plus artist-concentration), whose differences dwarf every model
 difference and under all of which the servable champion ranks \emph{last} ---
 so this synthesis keeps its board denominated in Recall@10 and tags every
 holisticness column with its generation (Table~\ref{tab:hgen}).
+(14) Finally, a campaign about the \emph{surface} rather than the model finds
+that the board above had been scoring the wrong one
+(Section~\ref{sec:walk}). Everything else in this document is a one-shot top-10,
+while the shipped product serves an autoregressive \emph{walk} --- and
+\texttt{holisticness@10}'s \texttt{mood\_coh} anchors to the \emph{prefix}
+centroid, which on a walk grows with the journey, so a run of individually legal
+steps that ends in the opposite region of the space scores well at every step:
+drift was invisible by construction, and the composite is $\num{5.5}\times$ more
+sensitive to relevance than to eagerness besides. Calibrated against the user's
+own \num{73632} consecutive transitions (median step cosine \num{0.261},
+\SI{27.0}{\percent} negative), the engine the showcase shipped walks
+$\num{2.5}\times$ too tight (median step \num{0.661}) --- ``flat despite lots of
+artists'' was many small safe moves --- while the blend champion matches the real
+stride but cannot hold a mood, because its InfoNCE projection encodes what
+\emph{follows} rather than what \emph{sounds alike}. Three deterministic
+retrieval-time controls fix the reachability: a seed anchor, a stride term
+(deterministic on purpose --- sampling would break the permalink guarantee), and
+a \emph{hard} per-artist cap, which succeeds exactly where the two soft
+anti-eager levers failed because it cannot be outscored (on the pathological
+playlist \num{59} of the top \num{60} candidates are one artist and the next
+artist sits at rank \num{75}, against an MMR diversity budget worth
+${\approx}\num{0.078}$ of normalized score; \texttt{eager\_beta} is mis-specified
+on an absolute cosine when eagerness is a \emph{ranking} property). The cap
+hardens on two disjoint splits and, unexpectedly, \emph{raises} \texttt{music@10}
+at every setting: it trades literal for graded relevance. And on \num{40}
+identical held-out sessions under paired bootstrap the \textbf{dual-tower family,
+closed by three campaigns on recall grounds, is the winner on the stated
+objective} --- \texttt{latent/cummean} at anchor \num{0.8} stride \num{0.5} takes
+stride error $-\num{0.2545}$, genres $+\num{1.50}$ and drift $+\num{0.0351}$
+with every CI clear of zero while \emph{holding} vibe, where the single GRU
+($-\num{0.0409}$) and the champion ($-\num{0.1327}$) both pay vibe for the same
+stride. The corroboration was already in the record as a \emph{negative}
+(\texttt{seq\_dualgru.py:113}: the \texttt{cummean} tower ``added real linear
+directions (CKA \num{0.458}) but zero next-item concepts tower A lacked'') ---
+dead weight for next-track prediction is exactly session state for mood-holding,
+though the stronger reading is refuted: \texttt{cummean} does \emph{not} hold a
+vibe natively (\num{0.236} against \num{0.234}), it only hosts one once the
+controls are applied. It is deployed as the showcase's default engine; and
+\texttt{ground} straddles zero for every arm, so what is established is journey
+\emph{shape}, not next-track truth, on one split, one seed and \num{40}
+sessions, with nothing yet listened to and the primary metric unchanged.
 
 \section{Source reports}
-This synthesis consolidates fourteen next-track campaign reports from
+This synthesis consolidates fifteen next-track campaign reports from
 \texttt{experiments/}:
 \begin{itemize}
   \item \texttt{2026-07-13-nexttrack-sequence-sweep.md} --- the founding
@@ -2143,6 +2741,21 @@ This synthesis consolidates fourteen next-track campaign reports from
     \texttt{frac\_negative\_coords} $=$ \num{0.5327}), plus the measured power
     analysis and the three holisticness generations
     (Sections~\ref{sec:preencoder} and~\ref{sec:power}).
+  \item \texttt{2026-07-30c-artist-cap-measurement.md} --- the \emph{hard
+    per-artist cap}, the first de-eagering lever that works, and it works because
+    it cannot be outscored: \texttt{artist\_conc@10}
+    \num{0.692}$\to$\num{0.123} with \texttt{music@10} \emph{rising} (CI above
+    zero) at every setting, hardened on a second disjoint 0.64-cold split,
+    together with the refutations of the two soft levers it replaces
+    (Section~\ref{sec:walk-controls}). The walk-level material of
+    Section~\ref{sec:walk} --- the surface mismatch, the four walk metrics, the
+    anchor $\times$ stride frontier, the matched-sample head-to-head and the
+    dual-tower reversal --- is transcribed from the \texttt{PROJECT-FACTS.md}
+    roll-up of 2026-07-31b and from the four measurement tools it cites
+    (\texttt{tools/walk\_eval.py}, \texttt{walk\_frontier.py},
+    \texttt{walk\_dualgru.py}, \texttt{walk\_headtohead.py}), whose module
+    docstrings are the authority for how each metric is computed; that material
+    has no campaign report of its own yet.
 \end{itemize}
 
 \end{document}
