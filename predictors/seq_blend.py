@@ -61,7 +61,7 @@ from seq_common import (
     predict_ranking,
     write_outputs,
 )
-from seq_baselines import markov_scorer
+from seq_baselines import build_train_transitions, markov_scorer
 from seq_models import content_knn_scorer
 from seq_nexttrack import SEED, SeqNextLatent, fit
 
@@ -86,6 +86,12 @@ DEFAULTS = {
                             # z(gru)+z(markov)+z(content) over the candidates
                             # (alpha is ignored) — the best-on-record recipe.
     "content_agg": "max",   # content-kNN prefix aggregation: "max" | "mean"
+    # EVIDENCE GATE on the Markov leg (2026-07-27). `_zcand` is scale-invariant,
+    # so it rescales a pure artist/genre back-off (n_u=0, 55.6% of canonical test
+    # queries) back to a full one-third weight. When True the leg ABSTAINS there
+    # and the divisor renormalizes. Default OFF => existing definitions are
+    # bit-identical. Offline screen on the champion: 0.21174 -> 0.23201.
+    "markov_gate": False,
     # LEARNED CONTENT PROJECTION (the R'+M+C' best-on-record recipe, 2026-07-18).
     # When True, a linear metric map of the item-latent space is fit from TRAIN
     # consecutive pairs (leak-free) toward next-track adjacency; the GRU and the
@@ -101,6 +107,10 @@ DEFAULTS = {
     "projection_lr": 1e-3,
     "batch_size": 128,
     "k": 10,                # Recall@k reported in metrics.recall_at_k
+    # HARD per-artist cap on the top-k (2026-07-30). None/0 = off (bit-identical).
+    # Unlike MMR (soft, score-space, needs sonic vectors) a cap cannot be
+    # outscored, which is what a steep same-artist relevance gradient requires.
+    "artist_cap": None,
     # GRU knobs kept fixed at the winning config (not exposed in the registry,
     # but overridable via inline hyperparams for experiments).
     "tau": 0.07,            # InfoNCE temperature
@@ -130,6 +140,7 @@ def load_hp(spec: str) -> dict:
     hp["seed"] = int(hp["seed"])
     hp["alpha"] = float(hp["alpha"])
     hp["content"] = bool(hp["content"])
+    hp["markov_gate"] = bool(hp.get("markov_gate", False))
     hp["projection"] = bool(hp["projection"])
     hp["projection_rank"] = int(hp["projection_rank"])
     hp["projection_epochs"] = int(hp["projection_epochs"])
@@ -180,13 +191,31 @@ def build_blend_score_fn(art, model: SeqNextLatent, hp: dict):
     how it was evaluated:
       2-leg: alpha*z(gru)+(1-alpha)*z(markov)  (byte-identical to seq_blend_eval)
       3-leg (content=true): the EQUAL-THIRDS z-average of the three legs — the
-      best-on-record R+M+C recipe; alpha is ignored."""
+      best-on-record R+M+C recipe; alpha is ignored.
+
+    `markov_gate=true` ABSTAINS the Markov leg on queries where it has no
+    track-level evidence. `markov_scorer` mixes its bigram row with an
+    artist/genre back-off by `trust = n_u/(n_u+8)` (`seq_baselines.py:198`), so
+    at n_u=0 the leg is PURE back-off — but `_zcand` is scale-invariant and
+    rescales that evidence-free vector back to unit variance, letting it speak
+    at a full one-third weight. On the canonical split that is 795/1431 (55.6%)
+    of queries. Gating drops M there and renormalizes the divisor; queries with
+    n_u>0 are bit-identical to the ungated blend. Default OFF, so every existing
+    model definition reproduces exactly."""
     n_items = art.n_items
     alpha = hp["alpha"]
     content = hp["content"]
+    gate = hp.get("markov_gate", False)
     gru_fn = gru_score_fn(model, art.item_latents)
     markov_fn = markov_scorer(art)                       # train-only (THE bar)
     emit({"kind": "log", "msg": "built train-only Markov scorer"})
+    # Track-level bigram support n_u, for the evidence gate only. Same train-only
+    # transitions markov_scorer builds internally — leak-free by construction.
+    track_bigram = build_train_transitions(art)["track_bigram"] if gate else None
+    if gate:
+        emit({"kind": "log", "msg":
+              "markov_gate ON — Markov leg abstains where the last prefix item "
+              "has zero train bigram support"})
     content_fn = content_knn_scorer(art, agg=hp["content_agg"]) if content else None
     if content:
         emit({"kind": "log", "msg":
@@ -196,11 +225,19 @@ def build_blend_score_fn(art, model: SeqNextLatent, hp: dict):
         cand = np.ones(n_items, dtype=bool)
         cand[prefix] = False
         zg = _zcand(gru_fn(prefix).astype(np.float64), cand)
-        zm = _zcand(markov_fn(prefix).astype(np.float64), cand)
+        # w_m = 0 abstains the Markov leg; the divisor renormalizes so the
+        # surviving legs keep unit total weight.
+        w_m = 1.0
+        if gate and sum(track_bigram.get(int(prefix[-1]), {}).values()) == 0:
+            w_m = 0.0
         if content_fn is None:
-            return alpha * zg + (1.0 - alpha) * zm
+            if w_m == 0.0:
+                return zg
+            return alpha * zg + (1.0 - alpha) * _zcand(
+                markov_fn(prefix).astype(np.float64), cand)
+        zm = _zcand(markov_fn(prefix).astype(np.float64), cand)
         zc = _zcand(content_fn(prefix).astype(np.float64), cand)
-        return (zg + zm + zc) / 3.0
+        return (zg + w_m * zm + zc) / (2.0 + w_m)
 
     return blend_score_fn
 
@@ -323,7 +360,8 @@ def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
           f"{int(art.test_sessions.size)} test sessions"})
     metrics, predictions = eval_from_scores(
         art, blend_score_fn, k=hp["k"],
-        mmr_lambda=hp.get("mmr_lambda"), mmr_pool=int(hp.get("mmr_pool", 200)))
+        mmr_lambda=hp.get("mmr_lambda"), mmr_pool=int(hp.get("mmr_pool", 200)),
+        artist_cap=hp.get("artist_cap"))
     metrics["alpha"] = alpha  # record the blend weight (extra key, like baselines)
     metrics["legs"] = "R'+M+C'" if proj else ("R+M+C" if content else "R+M")
 
@@ -360,7 +398,10 @@ def predict(model_dir: Path, input_dir: Path, output: Path) -> None:
         art = _projected_artifact(art, W)
     model = load_model(model_dir, art, hp)
     blend_score_fn = build_blend_score_fn(art, model, hp)
-    predict_ranking(art, blend_score_fn, input_dir, output, k=hp["k"])
+    predict_ranking(art, blend_score_fn, input_dir, output, k=hp["k"],
+                    mmr_lambda=hp.get("mmr_lambda"),
+                    mmr_pool=int(hp.get("mmr_pool", 200)),
+                    artist_cap=hp.get("artist_cap"))
     emit({"kind": "done"})
 
 

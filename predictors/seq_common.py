@@ -22,6 +22,7 @@ Run under the shared predictor venv (torch 2.12.0+cpu / numpy / sklearn)."""
 from __future__ import annotations
 
 import json
+import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -334,12 +335,62 @@ def mmr_rerank_order(order: np.ndarray, scores: np.ndarray,
     return np.array(selected + rest + tail, dtype=order.dtype)
 
 
+def artist_cap_order(order: np.ndarray, artist_ids: np.ndarray, k: int,
+                     cap: int | None) -> np.ndarray:
+    """Per-artist cap on the top-`k`: an artist is skipped once it already holds
+    `cap` of the selected slots. Returns a FULL permutation (capped head + the
+    displaced items in score order) so truth-rank lookup still works.
+
+    BEST-EFFORT, not absolute: the scan walks the WHOLE order looking for
+    admissible artists, but if it runs out (a prefix whose entire candidate space
+    is one artist) the remaining slots are BACKFILLED with the deferred items in
+    score order rather than returning fewer than `k`. So the cap binds exactly as
+    hard as the candidate pool allows — measure `artist_conc`, don't assume it.
+    Because it scans the full order rather than a fixed pool, it can promote items
+    from far down the ranking; that relevance cost is the thing to measure.
+
+    Motivation (2026-07-30): MMR and the `eager_beta` train penalty are both SOFT
+    levers in score space, and both lose to a steep relevance gradient — on an
+    artist-heavy prefix the next different artist can sit ~70 ranks down, far
+    beyond what a (1-lambda) diversity bonus can pay for. A cap cannot be
+    outscored, which is the property `seq_extend`'s `artist_cooldown` already
+    relies on. Unlike MMR this needs NO sonic vectors, so it ports to a
+    thin client unchanged.
+
+    `cap=None` (or cap<=0, or cap>=k) is the identity — existing runs and models
+    stay byte-identical. Items with an unknown artist (id < 0) are never capped.
+    Greedy and prefix-stable: the capped top-10 of a k=200 call equals that of a
+    k=10 call."""
+    if cap is None or cap <= 0 or cap >= k:
+        return order
+    selected: list[int] = []
+    deferred: list[int] = []
+    used: dict[int, int] = {}
+    budget = min(k, order.size)
+    for idx in order:
+        i = int(idx)
+        if len(selected) >= budget:
+            break
+        a = int(artist_ids[i])
+        if a >= 0 and used.get(a, 0) >= cap:
+            deferred.append(i)
+            continue
+        selected.append(i)
+        if a >= 0:
+            used[a] = used.get(a, 0) + 1
+    # Everything not promoted keeps its original relative (score) order.
+    taken = set(selected)
+    rest = [int(i) for i in order if int(i) not in taken]
+    return np.array(selected + rest, dtype=order.dtype)
+
+
 def eval_from_scores(
     art: SeqArtifact,
     score_fn,
     k: int = 10,
     mmr_lambda: float | None = None,
     mmr_pool: int = 200,
+    artist_cap: int | None = None,
 ) -> tuple[dict, list[dict]]:
     """Run the leave-last-out retrieval eval over TEST sessions.
 
@@ -409,6 +460,10 @@ def eval_from_scores(
         if mmr_lambda is not None and mmr_lambda < 1.0:
             order = mmr_rerank_order(order, scores, music_vecs, music_mask,
                                      k, mmr_lambda, mmr_pool)
+        # HARD per-artist cap, applied AFTER MMR so it is the last word (a cap
+        # that can be outscored is not a cap). Identity when off.
+        if artist_cap:
+            order = artist_cap_order(order, artist_ids, k, artist_cap)
         top_k = order[:10].tolist()
 
         # 1-based rank of the truth (None if it was excluded / -inf).
@@ -674,15 +729,43 @@ def resolve_prefix(art: SeqArtifact, tokens: list) -> tuple[np.ndarray, list]:
 
 
 def rank_topk(art: SeqArtifact, score_fn, prefix_idx: np.ndarray,
-              k: int = 10) -> list[int]:
+              k: int = 10, mmr_lambda: float | None = None,
+              mmr_pool: int = 200, artist_cap: int | None = None) -> list[int]:
     """Score the full vocab for one prefix, exclude the prefix items
     (next-distinct rule, identical to eval_from_scores), return the top-k item
-    indices best-first."""
+    indices best-first.
+
+    `mmr_lambda` applies the SAME MMR diversity re-rank as `eval_from_scores`, so
+    a promoted model SERVES the ranking it was EVALUATED as. Before 2026-07-30
+    this path ignored `mmr_lambda` entirely: the hyperparam reached the leaderboard
+    (via eval_from_scores) but never the serving path, so two promoted models
+    differing only by `mmr_lambda` returned byte-identical top-10s and the
+    best-models group ranked by holisticness gains production could not reproduce.
+
+    Identity when `mmr_lambda` is None or >= 1.0, and the Qdrant-backed music
+    vectors are fetched ONLY when the re-rank is active — models with MMR off pay
+    no extra cost and keep byte-identical output. Greedy MMR is prefix-stable, so
+    the top-10 of a k=200 request equals that of a k=10 request."""
     scores = np.asarray(score_fn(prefix_idx), dtype=np.float64).copy()
     assert scores.shape[0] == art.n_items, "score_fn must cover the full vocab"
     if prefix_idx.size:
         scores[prefix_idx] = -np.inf
     order = np.argsort(-scores, kind="stable")
+    if mmr_lambda is not None and mmr_lambda < 1.0:
+        music_vecs, music_mask = _load_music_vectors(art)
+        if music_vecs is None:
+            emit({"event": "log",
+                  "msg": f"predict: mmr_lambda={mmr_lambda} requested but the "
+                         "musical-distance index is unavailable — serving the "
+                         "PURE-SCORE ranking (this does NOT match how the model "
+                         "was evaluated)"})
+        order = mmr_rerank_order(order, scores, music_vecs, music_mask,
+                                 k, mmr_lambda, mmr_pool)
+    # HARD per-artist cap, applied AFTER MMR so it is the last word — matching
+    # eval_from_scores' order of operations exactly. Needs no sonic vectors.
+    if artist_cap:
+        order = artist_cap_order(order, _relevance_ids(art, "artist"),
+                                 k, artist_cap)
     return [int(i) for i in order[:k]]
 
 
@@ -698,12 +781,18 @@ def load_prefix_request(input_dir: Path) -> tuple[list, int | None]:
 
 
 def predict_ranking(art: SeqArtifact, score_fn, input_dir: Path,
-                    output: Path, k: int | None = None) -> None:
+                    output: Path, k: int | None = None,
+                    mmr_lambda: float | None = None,
+                    mmr_pool: int = 200,
+                    artist_cap: int | None = None) -> None:
     """Full serving-time predict: read the prefix request, rank the vocab, and
     write the lensing predictions.json shape ([{row_id, predicted, top_k_ids}]).
     One query (prefix) per call → a single-element list. Precedence for the
     result size: caller-requested k (prefix.json) > the model's trained k
-    (passed as `k`) > 10."""
+    (passed as `k`) > 10.
+
+    Callers should pass the model's stored `mmr_lambda` / `mmr_pool` so serving
+    reproduces eval; see `rank_topk` for why this used to be silently dropped."""
     tokens, req_k = load_prefix_request(input_dir)
     kk = int(req_k if req_k is not None else (k if k is not None else 10))
     prefix_idx, unknown = resolve_prefix(art, tokens)
@@ -714,16 +803,36 @@ def predict_ranking(art: SeqArtifact, score_fn, input_dir: Path,
     if prefix_idx.size == 0:
         raise SystemExit("predict: no prefix token resolved to a known vocab "
                          "item — cannot rank a next track")
-    top = rank_topk(art, score_fn, prefix_idx, k=kk)
+    # The stored `artist_cap` is calibrated at the model's TRAINED k (it is what
+    # eval_from_scores measured). When a caller requests a different k, scale it so
+    # the SHARE of the list one artist may hold is preserved — measured 2026-07-31:
+    # a fixed cap 3 holds artist_conc 0.110 at k=10 but drifts to 0.021 at k=50
+    # (5x more diverse than the operating point that was actually hardened) and
+    # reaches base rank p95 278 vs 156 to do it. Scaling is BOTH more faithful and
+    # shallower. Identical at k == trained_k, so the hardened config is untouched.
+    cap_eff = artist_cap
+    trained_k = int(k) if k else 0
+    if artist_cap and trained_k > 0 and kk != trained_k:
+        share = artist_cap / trained_k
+        cap_eff = max(int(artist_cap), math.ceil(share * kk))
+    top = rank_topk(art, score_fn, prefix_idx, k=kk,
+                    mmr_lambda=mmr_lambda, mmr_pool=mmr_pool,
+                    artist_cap=cap_eff)
     preds = [{
         "row_id": 0,                              # single query
         "predicted": float(top[0]) if top else -1.0,
         "top_k_ids": [int(i) for i in top],
     }]
     output.write_text(json.dumps(preds))
+    rerank = (f", MMR lambda={mmr_lambda} pool={mmr_pool}"
+              if mmr_lambda is not None and mmr_lambda < 1.0 else "")
+    if artist_cap:
+        rerank += (f", artist_cap={cap_eff}"
+                   + (f" (scaled from {artist_cap} at trained k={trained_k})"
+                      if cap_eff != artist_cap else ""))
     emit({"event": "log",
           "msg": f"ranked top-{kk} over {art.n_items} items from a "
-                 f"{prefix_idx.size}-item prefix"})
+                 f"{prefix_idx.size}-item prefix{rerank}"})
 
 
 # --------------------------------------------------------------------------- #

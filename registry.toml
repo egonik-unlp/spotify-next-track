@@ -1852,6 +1852,14 @@ default = 200
 min = 1
 max = 5000
 
+[[predictors.params]]
+name = "artist_cap"
+label = "max top-k slots one artist may hold (0 = off; a HARD cap, applied after MMR)"
+type = "int"
+default = 0
+min = 0
+max = 50
+
 [[predictors]]
 name = "seq-blend"
 display_name = "Next-track GRU x Markov blend (sequence)"
@@ -1937,6 +1945,20 @@ default = "max"
 options = ["max", "mean"]
 
 [[predictors.params]]
+name = "markov_gate"
+label = "abstain the Markov leg where the last prefix item has no train bigram support"
+type = "bool"
+default = false
+
+[[predictors.params]]
+name = "artist_cap"
+label = "max top-k slots one artist may hold (0 = off; a HARD cap, applied after MMR)"
+type = "int"
+default = 0
+min = 0
+max = 50
+
+[[predictors.params]]
 name = "k"
 label = "Recall@k reported in metrics.recall_at_k"
 type = "int"
@@ -2012,6 +2034,14 @@ type = "int"
 default = 200
 min = 1
 max = 5000
+
+[[predictors.params]]
+name = "artist_cap"
+label = "max top-k slots one artist may hold (0 = off; a HARD cap, applied after MMR)"
+type = "int"
+default = 0
+min = 0
+max = 50
 
 [[predictors]]
 name = "seq-ann"
@@ -2307,6 +2337,14 @@ default = 200
 min = 1
 max = 5000
 
+[[predictors.params]]
+name = "artist_cap"
+label = "max top-k slots one artist may hold (0 = off; a HARD cap, applied after MMR)"
+type = "int"
+default = 0
+min = 0
+max = 50
+
 # --------------------------------------------------------------------------- #
 # LEARNED item representation. Every other sequence predictor retrieves in a    #
 # FROZEN space (offline PCA/AE latents); this one can train the item embedding  #
@@ -2488,6 +2526,14 @@ default = 200
 min = 1
 max = 5000
 
+[[predictors.params]]
+name = "artist_cap"
+label = "max top-k slots one artist may hold (0 = off; a HARD cap, applied after MMR)"
+type = "int"
+default = 0
+min = 0
+max = 50
+
 [[predictors]]
 name = "seq-stacker"
 display_name = "Next-track XGBoost stacker (meta-learner, sequence)"
@@ -2636,3 +2682,11 @@ type = "int"
 default = 100
 min = 1
 max = 5000
+
+[[predictors.params]]
+name = "artist_cap"
+label = "max top-k slots one artist may hold (0 = off; a HARD cap, applied after MMR)"
+type = "int"
+default = 0
+min = 0
+max = 50

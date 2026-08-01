@@ -113,6 +113,7 @@ DEFAULTS = {
     "eager_margin": 0.0,
     "mmr_lambda": None,
     "mmr_pool": 200,
+    "artist_cap": None,   # HARD cap on top-k slots per artist (None/0 = off)
 }
 
 
@@ -378,7 +379,10 @@ def predict(model_dir: Path, input_dir: Path, output: Path) -> None:
     hp = load_hp(str(model_dir / "hyperparams.json"))
     art = load_artifact(model_dir)
     model = load_model(model_dir, art, hp)
-    predict_ranking(art, build_score_fn(model), input_dir, output, k=hp["k"])
+    predict_ranking(art, build_score_fn(model), input_dir, output, k=hp["k"],
+                    mmr_lambda=hp.get("mmr_lambda"),
+                    mmr_pool=int(hp.get("mmr_pool", 200)),
+                    artist_cap=hp.get("artist_cap"))
     emit({"kind": "done"})
 
 
@@ -406,7 +410,8 @@ def train(dataset: Path, run_dir: Path, hp_spec: str) -> None:
 
     metrics, predictions = eval_from_scores(
         art, build_score_fn(model), k=hp["k"],
-        mmr_lambda=hp.get("mmr_lambda"), mmr_pool=int(hp.get("mmr_pool", 200)))
+        mmr_lambda=hp.get("mmr_lambda"), mmr_pool=int(hp.get("mmr_pool", 200)),
+        artist_cap=hp.get("artist_cap"))
     write_outputs(run_dir, metrics, predictions)
     torch.save(model.state_dict(), run_dir / "model.pt")
     (run_dir / "hyperparams.json").write_text(json.dumps(hp))

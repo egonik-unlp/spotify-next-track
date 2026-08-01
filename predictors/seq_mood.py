@@ -34,6 +34,7 @@ DEFAULTS = {
     "k": 10,                 # top-k reported / served
     "mmr_lambda": None,      # optional light spread (1.0/None = off); mood ranking rarely needs it
     "mmr_pool": 100,
+    "artist_cap": None,   # HARD cap on top-k slots per artist (None/0 = off)
 }
 NEG = -1e18
 
@@ -86,7 +87,8 @@ def train(dataset: Path, output: Path, hp: dict) -> None:
     score_fn = mood_scorer(art, hp["artist_penalty"])
     metrics, predictions = eval_from_scores(
         art, score_fn, k=hp["k"],
-        mmr_lambda=hp.get("mmr_lambda"), mmr_pool=int(hp.get("mmr_pool", 100)))
+        mmr_lambda=hp.get("mmr_lambda"), mmr_pool=int(hp.get("mmr_pool", 100)),
+        artist_cap=hp.get("artist_cap"))
     metrics["artist_penalty"] = hp["artist_penalty"]
     output.mkdir(parents=True, exist_ok=True)
     write_outputs(output, metrics, predictions)
@@ -104,7 +106,10 @@ def predict(model_dir: Path, input_dir: Path, output: Path) -> None:
     hp = load_hp(str(model_dir / "hyperparams.json"))
     art = load_artifact(model_dir)
     score_fn = mood_scorer(art, hp["artist_penalty"])
-    predict_ranking(art, score_fn, input_dir, output, k=hp["k"])
+    predict_ranking(art, score_fn, input_dir, output, k=hp["k"],
+                    mmr_lambda=hp.get("mmr_lambda"),
+                    mmr_pool=int(hp.get("mmr_pool", 200)),
+                    artist_cap=hp.get("artist_cap"))
     emit({"kind": "done"})
 
 
