@@ -32,9 +32,62 @@ sys.path.insert(0, str(ROOT / "tools"))
 import walk_eval as WE                                          # noqa: E402
 sys.path.insert(0, str(ROOT / "predictors"))
 import seq_common, seq_blend, seq_dualgru                       # noqa: E402
+import seq_nexttrack, seq_stack                                 # noqa: E402
 
 DUAL_LL = "best-seq-dualgru-20260725-143502-18b4a"     # latent/latent, fusion_layers=0
 DUAL_CM = "best-seq-dualgru-20260725-143502-3e5d4"     # latent/cummean, fusion_layers=0
+
+
+# --------------------------------------------------------------------------- #
+# ADDITIVE (2026-08-01): score functions for arbitrary PROMOTED models.        #
+#                                                                             #
+# Two traps this avoids, both measured:                                       #
+#   * `seq_common.load_artifact()` reads `train_sessions.u32` UNCONDITIONALLY, #
+#     and a model dir materialized from DB artifacts need not carry it. So the #
+#     ARTIFACT comes from the dataset (`WE.DS`) and only the WEIGHTS from the  #
+#     model dir.                                                              #
+#   * That substitution is only legitimate if the two item spaces are the      #
+#     same, so `item_latents.f32` is asserted BYTE-IDENTICAL before use. A     #
+#     silent mismatch would score the walk in the wrong vocabulary and return  #
+#     a wrong number rather than an error.                                     #
+# Reached only via --include-stack; the default 5-arm invocation is untouched. #
+# --------------------------------------------------------------------------- #
+FAMILIES = {"stack": seq_stack, "dual": seq_dualgru, "gru": seq_nexttrack}
+_SCORE_CACHE: dict = {}
+
+
+def promoted_score(family: str, name: str, art):
+    key = (family, name)
+    if key in _SCORE_CACHE:
+        return _SCORE_CACHE[key]
+    if family not in FAMILIES:
+        raise SystemExit(f"unknown family {family!r}; allowed: {sorted(FAMILIES)}")
+    mod = FAMILIES[family]
+    d = ROOT / "data/models" / name
+    if not d.is_dir():
+        raise SystemExit(f"no promoted model dir {d}")
+    mine = (d / "item_latents.f32").read_bytes()
+    theirs = (WE.DS / "item_latents.f32").read_bytes()
+    if mine != theirs:
+        raise SystemExit(f"{name}: item_latents.f32 is NOT byte-identical to {WE.DS.name} "
+                         "— the model was trained in a different item space, refusing to "
+                         "score its walk against these sessions")
+    hp = mod.load_hp(str(d / "hyperparams.json"))
+    m = mod.load_model(d, art, hp)
+    fn = mod.build_score_fn(m, art.item_latents)
+    out = lambda seq: np.asarray(fn(np.asarray(seq, dtype=np.int64)), dtype=np.float64)
+    _SCORE_CACHE[key] = out
+    return out
+
+
+def parse_arm(spec: str):
+    """`family:model_name:anchor:stride[:label]` -> (label, family, name, a, s)."""
+    bits = spec.split(":")
+    if len(bits) < 4:
+        raise SystemExit(f"--arm needs family:model:anchor:stride[:label], got {spec!r}")
+    family, name, a, s = bits[0], bits[1], float(bits[2]), float(bits[3])
+    label = ":".join(bits[4:]) if len(bits) > 4 else f"{name} a{a} s{s}"
+    return label, family, name, a, s
 
 
 def paired(base, arm, n=2000, seed=1337):
@@ -54,7 +107,19 @@ def main() -> None:
     ap.add_argument("--sessions", type=int, default=40)
     ap.add_argument("--steps", type=int, default=20)
     ap.add_argument("--out", default="/tmp/walk_headtohead.json")
+    # ADDITIVE, all defaulting to the historical behaviour.
+    ap.add_argument("--include-stack", action="store_true",
+                    help="honour --arm specs for promoted models (default OFF)")
+    ap.add_argument("--arm", action="append", default=[],
+                    help="family:model:anchor:stride[:label]; needs --include-stack")
+    ap.add_argument("--defaults", choices=("all", "gru", "none"), default="all",
+                    help="which of the 5 historical arms to keep (default all)")
+    ap.add_argument("--base-label", default=None,
+                    help="substring of the arm to pair against (default: the first arm)")
     args = ap.parse_args()
+    if args.arm and not args.include_stack:
+        raise SystemExit("--arm given without --include-stack; refusing to change the "
+                         "default arm set implicitly")
 
     art = seq_common.load_artifact(WE.DS)
     n = art.n_items
@@ -88,23 +153,34 @@ def main() -> None:
         fn = seq_dualgru.build_score_fn(m, a.item_latents)
         return lambda seq: np.asarray(fn(np.asarray(seq, dtype=np.int64)), dtype=np.float64)
 
-    hp = seq_blend.load_hp(str(WE.CHAMP_DIR / "hyperparams.json"))
-    cart = seq_blend.load_artifact(WE.CHAMP_DIR)
-    cart = seq_blend._projected_artifact(cart, np.load(WE.CHAMP_DIR / "projection.npz")["W"])
-    cmodel = seq_blend.load_model(WE.CHAMP_DIR, cart, hp)
-    cfn = seq_blend.build_blend_score_fn(cart, cmodel, hp)
-
-    def champ_score(seq):
-        return np.asarray(cfn(np.asarray(seq, dtype=np.int64)), dtype=np.float64)
-
     # (label, score_fn, anchor, stride, z_terms)
-    ARMS = [
-        ("GRU shipped      a0.4 s0.0", gru_score, 0.4, 0.0, False),
-        ("GRU tuned        a0.4 s0.3", gru_score, 0.4, 0.3, False),
-        ("dual l/l    f0   a0.8 s0.4", dual_score(DUAL_LL), 0.8, 0.4, False),
-        ("dual l/cummean f0 a0.8 s0.5", dual_score(DUAL_CM), 0.8, 0.5, False),
-        ("champion         a1.0 s0.5", champ_score, 1.0, 0.5, True),
-    ]
+    ARMS = []
+    if args.defaults in ("all", "gru"):
+        ARMS += [
+            ("GRU shipped      a0.4 s0.0", gru_score, 0.4, 0.0, False),
+            ("GRU tuned        a0.4 s0.3", gru_score, 0.4, 0.3, False),
+        ]
+    if args.defaults == "all":
+        hp = seq_blend.load_hp(str(WE.CHAMP_DIR / "hyperparams.json"))
+        cart = seq_blend.load_artifact(WE.CHAMP_DIR)
+        cart = seq_blend._projected_artifact(cart, np.load(WE.CHAMP_DIR / "projection.npz")["W"])
+        cmodel = seq_blend.load_model(WE.CHAMP_DIR, cart, hp)
+        cfn = seq_blend.build_blend_score_fn(cart, cmodel, hp)
+
+        def champ_score(seq):
+            return np.asarray(cfn(np.asarray(seq, dtype=np.int64)), dtype=np.float64)
+
+        ARMS += [
+            ("dual l/l    f0   a0.8 s0.4", dual_score(DUAL_LL), 0.8, 0.4, False),
+            ("dual l/cummean f0 a0.8 s0.5", dual_score(DUAL_CM), 0.8, 0.5, False),
+            ("champion         a1.0 s0.5", champ_score, 1.0, 0.5, True),
+        ]
+    if args.include_stack:
+        for spec in args.arm:
+            lbl, fam, nm, a, s_ = parse_arm(spec)
+            ARMS.append((lbl, promoted_score(fam, nm, art), a, s_, False))
+    if not ARMS:
+        raise SystemExit("no arms selected")
     print(f"{len(ARMS)} arms, identical sessions\n")
 
     rng = np.random.default_rng(1337)
@@ -170,10 +246,15 @@ def main() -> None:
         print(f"{lbl:29s}" + "".join(f"{means[lbl][f]:13.3f}" for f, _ in FIELDS))
 
     base_lbl = ARMS[0][0]
+    if args.base_label:
+        hits = [l for l, *_ in ARMS if args.base_label in l]
+        if len(hits) != 1:
+            raise SystemExit(f"--base-label {args.base_label!r} matched {len(hits)} arms: {hits}")
+        base_lbl = hits[0]
     print(f"\nPAIRED Δ vs '{base_lbl.strip()}' (2000 resamples, rng 1337) — CI excluding 0 = real")
     out = {"real_median": real_med, "sessions": len(sessions), "steps": args.steps,
            "means": means, "paired": {}}
-    for lbl, *_ in ARMS[1:]:
+    for lbl, *_ in [x for x in ARMS if x[0] != base_lbl]:
         print(f"  {lbl.strip()}")
         out["paired"][lbl] = {}
         for f, _ in FIELDS:

@@ -2690,3 +2690,132 @@ type = "int"
 default = 0
 min = 0
 max = 50
+
+# --------------------------------------------------------------------------- #
+# Stage-stack sequence next-track predictor: ONE SEQUENTIAL stack whose        #
+# composition is a hyperparameter — `stages` names per-step MLP (`ann`) and    #
+# recurrent (`gru`/`lstm`) stages in order, e.g. ann+gru+gru+ann. `ann` stages #
+# are STRICTLY per-timestep (length preserved, no cross-timestep mixing — a    #
+# mixing MLP would leak the teacher-forcing target), so the next recurrence    #
+# still has a sequence to walk. Training reuses seq_nexttrack.fit verbatim.    #
+# predictors/seq_stack.py.                                                     #
+# --------------------------------------------------------------------------- #
+[[predictors]]
+name = "seq-stack"
+display_name = "Next-track stage stack (per-step MLP / recurrence, sequence)"
+language = "Python"
+framework = "PyTorch"
+description = "One SEQUENTIAL stack whose composition is spelled out as a hyperparameter: `stages` names per-step MLP (`ann`) and recurrent (`gru`/`lstm`) stages in order, e.g. ann+gru+gru+ann. `ann` stages are strictly per-timestep (sequence length preserved, no cross-timestep mixing — a mixing MLP would leak the teacher-forcing target), so the next recurrence still has a sequence to walk. Training reuses seq_nexttrack.fit verbatim. Reads a SEQUENCE artifact. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/seq_stack.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/seq_stack.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+
+[[predictors.params]]
+name = "stages"
+label = "the stack, in order ('+'-joined; ann = per-step MLP, gru = one recurrent layer)"
+type = "enum"
+default = "ann+gru+gru+ann"
+options = ["gru", "ann+gru+ann+gru", "ann+gru+gru+ann", "ann+gru+gru+gru", "gru+gru+gru+gru", "gru+ann+gru+gru"]
+
+[[predictors.params]]
+name = "hidden"
+label = "width of every recurrent stage"
+type = "int"
+default = 256
+min = 8
+max = 1024
+
+[[predictors.params]]
+name = "ann_hidden"
+label = "width of every per-step MLP stage"
+type = "int"
+default = 256
+min = 8
+max = 1024
+
+[[predictors.params]]
+name = "dropout"
+label = "dropout applied after every recurrent stage and inside every MLP stage"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors.params]]
+name = "loss"
+label = "training objective"
+type = "enum"
+default = "infonce"
+options = ["cosine", "infonce"]
+
+[[predictors.params]]
+name = "tau"
+label = "InfoNCE temperature"
+type = "float"
+default = 0.07
+
+[[predictors.params]]
+name = "epochs"
+label = "max training epochs"
+type = "int"
+default = 40
+
+[[predictors.params]]
+name = "patience"
+label = "early-stopping patience (epochs without val improvement)"
+type = "int"
+default = 6
+
+[[predictors.params]]
+name = "lr"
+label = "Adam learning rate"
+type = "float"
+default = 0.001
+
+[[predictors.params]]
+name = "batch_size"
+label = "minibatch size (sessions)"
+type = "int"
+default = 128
+
+[[predictors.params]]
+name = "val_fraction"
+label = "fraction of train sessions held out for early stopping"
+type = "float"
+default = 0.15
+
+[[predictors.params]]
+name = "seed"
+label = "random seed"
+type = "int"
+default = 1337
+
+[[predictors.params]]
+name = "k"
+label = "top-k reported / served"
+type = "int"
+default = 10
+
+[[predictors.params]]
+name = "mmr_lambda"
+label = "optional light spread at rank time (1.0 = off; <1 diversifies)"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1.0
+
+[[predictors.params]]
+name = "mmr_pool"
+label = "candidate pool size the optional spread operates over"
+type = "int"
+default = 200
+min = 1
+max = 5000
+
+[[predictors.params]]
+name = "artist_cap"
+label = "max top-k slots one artist may hold (0 = off; a HARD cap, applied after MMR)"
+type = "int"
+default = 0
+min = 0
+max = 50
