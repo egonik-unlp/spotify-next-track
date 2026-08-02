@@ -87,6 +87,8 @@ async function loadCatalog() {
 function policyFromUI() {
   const p = {};
   for (const k of KNOBS) p[k] = Number($(k).value);
+  // A boolean, not a knob: it changes what the SEED is, not how candidates score.
+  p.cold_start = $('cold_start').checked;
   return p;
 }
 const seedTokens = () =>
@@ -344,8 +346,17 @@ function renderPanel(slot, model, j) {
   if (s.expanded?.length) {
     bits.push(...s.expanded.map((e) => `${e.name || e.kind} (${e.tracks})`));
   }
-  bits.push(`seed ${s.resolved}/${s.submitted ?? s.resolved} in vocab`);
+  // Distinguish the three ways a seed track can end up (or not end up) in the
+  // prefix: found in the vocab, cold-started into it, or dropped. Reporting them
+  // as one "resolved" number would hide which question the journey answered.
+  const cold = s.cold_started || 0;
+  bits.push(`seed ${s.resolved - cold}/${s.submitted ?? s.resolved} in vocab`);
+  if (cold) {
+    bits.push(`${cold} cold-started`
+      + (s.cold_mood_space === cold ? '' : ` (${s.cold_mood_space ?? 0} in mood space)`));
+  }
   if (s.unknown_count) bits.push(`${s.unknown_count} unknown`);
+  if (s.cold_note) bits.push(s.cold_note);
   if (s.anchored) bits.push(`anchored on core ${s.core}`);
   panel.querySelector('.ppred').textContent = bits.join(' · ');
 

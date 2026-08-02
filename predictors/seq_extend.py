@@ -112,6 +112,11 @@ DEFAULTS = {
                             # ("Del Oro" twice in 8 stops)
     "anchor_lambda": 1.0,   # weight on z(cos(cand, seed-core centroid))
     "anchor_min_core": 5,   # anchor only when the seed core has >= this many rows
+    # COLD START (opt-in). Off by default so every model sees the identical
+    # in-vocab seed and a comparison isolates the algorithm — flip it on to ask
+    # "where does THIS playlist go", the question the product answers, where most
+    # of a pasted playlist is usually outside the library. See seq_coldstart.
+    "cold_start": False,
     "temperature": 0.0,     # 0 = greedy argmax; >0 = sample (z units)
     "sample_top_k": 20,     # candidate pool sampled from when temperature > 0
     "seed_rng": 1337,       # sampling RNG seed (reproducible journeys)
@@ -152,6 +157,15 @@ def local_z(v: np.ndarray, allowed: np.ndarray, pool_n: int = 200) -> np.ndarray
 # dispatch below adapts rather than forcing a false uniformity.
 DISPATCH = ("seq-nexttrack", "seq-dualgru", "seq-ann", "seq-blend", "seq-embed",
             "seq-markov", "seq-popularity", "seq-recency")
+
+# Which families can take a COLD-STARTED seed. The requirement is that the model
+# reads its prefix as LATENTS (`latents[prefix_idx]`), so a virtual row appended to
+# the latent matrix is indistinguishable from a vocab row. The rest read the prefix
+# as vocab IDENTITIES — seq-embed retrieves in its own learned per-item table,
+# seq-blend and the count baselines index transition/count tables keyed by item
+# index — and a virtual index has no entry in any of them. Those keep dropping
+# unknown seeds, and the payload says so rather than silently ignoring the flag.
+COLD_START_FAMILIES = ("seq-nexttrack", "seq-dualgru", "seq-ann")
 
 
 # --------------------------------------------------------------------------- #
@@ -321,7 +335,7 @@ def load_params(spec: str | None) -> dict:
 # --------------------------------------------------------------------------- #
 # Model dispatch — reuse each predictor's OWN scorer, never reimplement one    #
 # --------------------------------------------------------------------------- #
-def build_scorer(predictor: str, model_dir: Path, art):
+def build_scorer(predictor: str, model_dir: Path, art, latents=None):
     """Return (score_fn, predict_latent_fn|None, info dict) for a promoted model.
 
     `score_fn(prefix_idx) -> full-vocab float score vector` is the universal
@@ -333,7 +347,11 @@ def build_scorer(predictor: str, model_dir: Path, art):
         raise SystemExit(f"extend: unsupported predictor {predictor!r} "
                          f"(supported: {', '.join(DISPATCH)})")
 
-    latents = art.item_latents
+    # `latents` may be LONGER than the vocab: cold-started seeds are appended as
+    # virtual rows so `latents[prefix_idx]` resolves for them too. The scorer then
+    # returns scores for those rows as well, which the rollout truncates away — they
+    # are prefix context, never candidates.
+    latents = art.item_latents if latents is None else latents
     info: dict = {"predictor": predictor}
 
     if predictor in ("seq-markov", "seq-popularity", "seq-recency"):
@@ -1104,6 +1122,61 @@ def extend(model_dir: Path, predictor: str, prm: dict) -> dict:
     tokens, seed_info = expand_seed(list(prm["seed"]))
     phase("seed", "resolving the seed against the model's vocabulary")
     seed_idx, unknown = resolve_prefix(art, tokens)
+
+    # ---- cold start (opt-in) --------------------------------------------------
+    # Everything above resolved the seed against the vocab and DROPPED the rest,
+    # which for a pasted playlist is usually most of it. Place those in the model's
+    # own latent space instead, and splice them back into the prefix IN ORDER — a
+    # session is a sequence, so a seed reordered is a different seed.
+    n_vocab = int(art.n_items)
+    latents_ext = None
+    cold_info: dict = {}
+    if prm.get("cold_start") and unknown:
+        if predictor not in COLD_START_FAMILIES:
+            cold_info = {"cold_started": 0, "cold_skipped": len(unknown),
+                         "cold_note": f"{predictor} reads its prefix as vocab ids, "
+                                      f"not latents — cold seeds cannot be fed to it"}
+        else:
+            phase("coldstart", f"placing {len(unknown)} unknown seed track(s) in "
+                               f"the model's latent space")
+            try:
+                import seq_coldstart
+                cold = seq_coldstart.cold_start(
+                    unknown, emit=lambda m: emit({"kind": "log", "msg": m}))
+            except Exception as exc:                          # noqa: BLE001
+                cold = {}
+                cold_info = {"cold_started": 0, "cold_skipped": len(unknown),
+                             "cold_note": f"cold start unavailable: {exc}"}
+            if cold:
+                (latents_ext, artist_ids, genre_ids, mood, music_vecs, music_mask,
+                 uri_to_virtual) = attach_cold_seeds(
+                    art, cold, artist_ids, genre_ids, mood, music_vecs, music_mask)
+                # Re-walk the tokens so the prefix keeps the playlist's order.
+                unknown_set = {str(u) for u in unknown}
+                known_iter = iter(seed_idx.tolist())
+                merged, still_unknown = [], []
+                for tok in tokens:
+                    if str(tok) not in unknown_set:
+                        merged.append(next(known_iter))
+                        continue
+                    sid = seq_coldstart.bare_id(tok)
+                    hit = next((v for u, v in uri_to_virtual.items()
+                                if u.endswith(sid or "\0")), None)
+                    if hit is None:
+                        still_unknown.append(tok)
+                    else:
+                        merged.append(hit)
+                seed_idx = np.asarray(merged, dtype=np.int64)
+                unknown = still_unknown
+                cold_info = {"cold_started": len(cold),
+                             "cold_skipped": len(still_unknown)}
+                mood_covered = sum(1 for c in cold.values() if c.music is not None)
+                cold_info["cold_mood_space"] = mood_covered
+                emit({"kind": "log", "msg":
+                      f"cold start: {len(cold)} seed(s) placed "
+                      f"({mood_covered} with mood-space vectors), "
+                      f"{len(still_unknown)} still unresolved"})
+
     if seed_idx.size == 0:
         raise SystemExit(
             f"extend: none of the {len(tokens)} seed track(s) are in this "
@@ -1112,7 +1185,10 @@ def extend(model_dir: Path, predictor: str, prm: dict) -> dict:
             f"with a playlist that overlaps it.")
 
     phase("scorer", f"loading the {predictor} weights")
-    score_fn, predict_latent_fn, info = build_scorer(predictor, model_dir, art)
+    score_fn, predict_latent_fn, info = build_scorer(predictor, model_dir, art,
+                                                     latents=latents_ext)
+    if latents_ext is not None:
+        latents = latents_ext
     core_idx, anchor = dominant_core(seed_idx, music_vecs)
     use_anchor = (anchor is not None
                   and float(prm["anchor_lambda"]) > 0
@@ -1140,7 +1216,7 @@ def extend(model_dir: Path, predictor: str, prm: dict) -> dict:
 
     stops = rollout(art, score_fn, predict_latent_fn, seed_idx, core_idx, use_anchor,
                     anchor, prm, artist_ids, genre_ids, genre_names, latents,
-                    music_vecs, music_mask, mood, mood_ref)
+                    music_vecs, music_mask, mood, mood_ref, n_vocab=n_vocab)
 
     phase("scoring", "scoring the journey against your bands")
     return {
@@ -1154,6 +1230,7 @@ def extend(model_dir: Path, predictor: str, prm: dict) -> dict:
             "unknown_count": len(unknown),
             "core": int(core_idx.size),
             "anchored": bool(use_anchor),
+            **cold_info,
             **seed_info,
         },
         "params": prm,
@@ -1167,16 +1244,100 @@ def extend(model_dir: Path, predictor: str, prm: dict) -> dict:
     }
 
 
+def _label_ids(art, field: str) -> dict:
+    """The label → class-id map `seq_common._relevance_ids` assigns, rebuilt so a
+    COLD track's artist can be given the SAME id as that artist's library tracks.
+    That is what lets the artist cooldown span the seed: a playlist full of an
+    artist you don't own still suppresses that artist's library tracks."""
+    vocab: dict[str, int] = {}
+    for key, meta in art.items.items():
+        i = int(key)
+        if not (0 <= i < art.n_items):
+            continue
+        val = meta.get(field)
+        if val is not None and val not in vocab:
+            vocab[val] = len(vocab)
+    return vocab
+
+
+def attach_cold_seeds(art, cold: dict, artist_ids, genre_ids, mood,
+                      music_vecs, music_mask):
+    """Append cold-started tracks as VIRTUAL rows after the vocab.
+
+    Returns (latents_ext, artist_ids, genre_ids, mood, music_vecs, music_mask,
+    uri → virtual index). `art` itself keeps its vocab size — `art.n_items` is a
+    property of `item_latents`, so growing that in place would silently redefine the
+    vocabulary for every consumer. Only `art.items` gains entries (name/artist for
+    the title-dedupe key and the readouts), which is keyed by index and harmless.
+    """
+    order = list(cold.values())
+    n_vocab = int(art.n_items)
+    k = len(order)
+    latents_ext = np.vstack([
+        art.item_latents,
+        np.asarray([c.latent for c in order], dtype=art.item_latents.dtype),
+    ])
+
+    artist_vocab, genre_vocab = _label_ids(art, "artist"), _label_ids(art, "genre")
+    a_ext = np.full(k, -1, dtype=np.int64)
+    g_ext = np.full(k, -1, dtype=np.int64)
+    for j, c in enumerate(order):
+        if c.artist in artist_vocab:
+            a_ext[j] = artist_vocab[c.artist]
+        if c.genre in genre_vocab:
+            g_ext[j] = genre_vocab[c.genre]
+    artist_ids = np.concatenate([artist_ids, a_ext])
+    genre_ids = np.concatenate([genre_ids, g_ext])
+
+    # Mood: the acoustics come from the same fetch the latent was built from, so a
+    # cold seed reads on the same axes. The BEHAVIOURAL fields stay NaN by
+    # definition — you have no play history with a track outside your library.
+    mood = {key: np.concatenate([arr, np.full(k, np.nan)]) for key, arr in mood.items()}
+    for j, c in enumerate(order):
+        cm = c.mood
+        for key in ("energy", "valence", "tempo", "acousticness", "danceability",
+                    "instrumentalness", "year"):
+            v = cm.get(key) if key in cm else c.acoustics.get(f"af_{key}")
+            if isinstance(v, (int, float)) and np.isfinite(v):
+                mood[key][n_vocab + j] = float(v)
+        pop = c.meta.get("track_popularity")
+        if isinstance(pop, (int, float)):
+            mood["popularity"][n_vocab + j] = float(pop)
+
+    if music_vecs is not None and music_mask is not None:
+        dim = music_vecs.shape[1]
+        m_ext = np.zeros((k, dim), dtype=music_vecs.dtype)
+        mask_ext = np.zeros(k, dtype=bool)
+        for j, c in enumerate(order):
+            if c.music is not None and len(c.music) == dim:
+                m_ext[j] = c.music
+                mask_ext[j] = True
+        music_vecs = np.vstack([music_vecs, m_ext])
+        music_mask = np.concatenate([music_mask, mask_ext])
+
+    for j, c in enumerate(order):
+        art.items[str(n_vocab + j)] = {
+            "uri": c.uri, "name": c.name, "artist": c.artist, "genre": c.genre,
+            "cold_started": True,
+        }
+    return (latents_ext, artist_ids, genre_ids, mood, music_vecs, music_mask,
+            {c.uri: n_vocab + j for j, c in enumerate(order)})
+
+
 def title_keys(art, artist_ids: np.ndarray) -> np.ndarray:
     """Title identity for the dedupe constraint: the same recording appears in the
     vocab under multiple releases (single + album + edit), each its own item index,
     so index-level next-distinct does not stop a replay. Key on
     (normalized title, artist id)."""
-    keys = np.full(art.n_items, -1, dtype=np.int64)
+    # Sized to `artist_ids`, not to the vocab: with cold-started seeds that array is
+    # longer, and those rows must get title keys too or a cold seed's own recording
+    # could be handed straight back as the first stop.
+    n = int(len(artist_ids))
+    keys = np.full(n, -1, dtype=np.int64)
     vocab: dict[tuple, int] = {}
     for key, meta in art.items.items():
         i = int(key)
-        if not (0 <= i < art.n_items):
+        if not (0 <= i < n):
             continue
         name = (meta.get("name") or "").strip().lower()
         if not name:
@@ -1189,7 +1350,8 @@ def title_keys(art, artist_ids: np.ndarray) -> np.ndarray:
 
 def rollout(art, score_fn, predict_latent_fn, seed_idx, core_idx, use_anchor,
             anchor, prm, artist_ids, genre_ids, genre_names, latents,
-            music_vecs, music_mask, mood, mood_ref, narrate: bool = True) -> list:
+            music_vecs, music_mask, mood, mood_ref, narrate: bool = True,
+            n_vocab: int | None = None) -> list:
     """THE autoregressive generation loop + the shared retrieval policy.
 
     Factored out of `extend` so that the offline rollout EVALUATION
@@ -1202,6 +1364,12 @@ def rollout(art, score_fn, predict_latent_fn, seed_idx, core_idx, use_anchor,
 
     `narrate=False` silences the per-step SSE events for batch evaluation, where
     thousands of steps of progress chatter is noise rather than a readout."""
+    # THE INVARIANT once cold-started seeds exist: the per-item arrays may run
+    # LONGER than the vocab, and every row past `n_vocab` is a virtual seed — legal
+    # to read as prefix context, never legal as a candidate. So anything that scores
+    # or filters CANDIDATES slices to `n_vocab`, and anything that reads the SEED
+    # (artist ids, mood, music vectors, title keys) uses the full array.
+    n_vocab = int(art.n_items if n_vocab is None else n_vocab)
     rng = np.random.default_rng(int(prm["seed_rng"]))
     # Generation runs from the CORE when anchoring (the app's `begin()` rule), but
     # every loaded seed counts as used so nothing is replayed.
@@ -1215,35 +1383,38 @@ def rollout(art, score_fn, predict_latent_fn, seed_idx, core_idx, use_anchor,
 
     anchor_sims = None
     if use_anchor:
-        anchor_sims = np.full(art.n_items, 0.0, dtype=np.float64)
-        mm = music_mask if music_mask is not None else np.ones(art.n_items, bool)
-        anchor_sims[mm] = music_vecs[mm] @ anchor
+        anchor_sims = np.full(n_vocab, 0.0, dtype=np.float64)
+        mm = (music_mask[:n_vocab] if music_mask is not None
+              else np.ones(n_vocab, bool))
+        anchor_sims[mm] = music_vecs[:n_vocab][mm] @ anchor
 
     stops = []
     for step in range(int(prm["steps"])):
         prefix = np.array(seq, dtype=np.int64)
-        raw = np.asarray(score_fn(prefix), dtype=np.float64)
+        # Truncate: with virtual rows the scorer also scores them, and a cold seed
+        # is not a place the journey may travel to (it isn't in the library).
+        raw = np.asarray(score_fn(prefix), dtype=np.float64)[:n_vocab]
 
         # --- shared retrieval policy -----------------------------------------
-        allowed = np.ones(art.n_items, dtype=bool)
-        allowed[list(used)] = False            # next-distinct: never replay
+        allowed = np.ones(n_vocab, dtype=bool)
+        allowed[[i for i in used if i < n_vocab]] = False   # next-distinct: never replay
         # Hard constraints, applied to ELIGIBILITY rather than to the score, so
         # no amount of model confidence or anchor pull can override them.
         cooldown = int(prm["artist_cooldown"])
         if cooldown > 0 and used_artists:
             recent_a = [a for a in used_artists[-cooldown:] if a >= 0]
             if recent_a:
-                allowed &= ~np.isin(artist_ids, recent_a)
+                allowed &= ~np.isin(artist_ids[:n_vocab], recent_a)
         if prm["dedupe_titles"] and played_titles:
-            allowed &= ~np.isin(title_key, list(played_titles))
+            allowed &= ~np.isin(title_key[:n_vocab], list(played_titles))
         if not allowed.any():
             # Constraints exhausted the vocab — relax them for this step rather
             # than truncating the journey, and say so.
             emit({"kind": "log", "msg":
                   f"step {step + 1}: constraints left no candidate; relaxing "
                   f"the artist cooldown for this step"})
-            allowed = np.ones(art.n_items, dtype=bool)
-            allowed[list(used)] = False
+            allowed = np.ones(n_vocab, dtype=bool)
+            allowed[[i for i in used if i < n_vocab]] = False
             if not allowed.any():
                 break
 
@@ -1261,7 +1432,7 @@ def rollout(art, score_fn, predict_latent_fn, seed_idx, core_idx, use_anchor,
             recent = used_artists[-win:] if win > 0 else used_artists
             bad = set(a for a in recent if a >= 0)
             if bad:
-                pen = np.isin(artist_ids, list(bad))
+                pen = np.isin(artist_ids[:n_vocab], list(bad))
                 scores = scores - ap * pen
 
         pool_idx = np.nonzero(allowed)[0]

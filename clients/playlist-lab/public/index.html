@@ -62,6 +62,17 @@
         <button id="rand" class="btn-quiet" type="button">Random library track</button>
         <span id="seedinfo" class="meta" role="status"></span>
       </div>
+      <!-- Off by default ON PURPOSE: with it off every model sees the identical
+           in-vocab seed, so a comparison isolates the algorithm. On, the lab asks
+           the product's question instead — where does THIS playlist go. -->
+      <label class="blindtoggle" for="cold_start">
+        <input type="checkbox" id="cold_start">
+        <span>Cold-start unknown seeds — place tracks outside your library in the
+          model's own latent space instead of dropping them
+          (<span class="mono">seq-nexttrack</span> /
+          <span class="mono">seq-dualgru</span> /
+          <span class="mono">seq-ann</span> only; adds a Spotify + embedding pass)</span>
+      </label>
     </fieldset>
 
     <fieldset class="ctl ctl-models">
