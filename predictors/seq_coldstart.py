@@ -74,6 +74,9 @@ class ColdTrack:
     meta: dict = field(default_factory=dict)     # the raw assembled metadata
     acoustics: dict = field(default_factory=dict)
     doc: str = ""
+    music: np.ndarray | None = None     # (517,) the fused musical-distance vector,
+                                        # i.e. the mood/anchor space — None when the
+                                        # stats for it aren't derived yet
 
     @property
     def mood(self) -> dict:
@@ -129,7 +132,168 @@ class Basis:
         return np.asarray(z / np.where(n > 0, n, 1.0), dtype=np.float32)
 
 
+class MusicSpace:
+    """The fused MUSICAL-DISTANCE vector for a cold track — the space the anchor,
+    the mood reference and `mood_coh` live in (`spotify_tracks_content_metric`).
+
+    Same recipe as `build_content_metric.assemble`, one row at a time: per block
+    center by the stored mean, apply W(alpha), divide by the stored median, scale by
+    sqrt(weight); concatenate; L2-normalize. Three of those centers and the meta ZCA
+    are not in the shipped artifact (see pipeline/coldstart_metric_stats.py), so this
+    is unavailable until that one-time read-only derivation has been run.
+
+    The AE block needs the Song-AE encoder, which reads the SAME 539-d row the PCA
+    basis does — one feature assembly, two frozen projections."""
+
+    def __init__(self, artifacts: Path = ARTIFACTS, profile: str | None = None):
+        cm_path = artifacts / "content_metric.json"
+        npz_path = artifacts / "content_metric.npz"
+        cold_path = artifacts / "content_metric_coldstart.npz"
+        ae_path = artifacts / "song_ae.pt"
+        ae_pre_path = artifacts / "song_ae_preprocess.json"
+        for p in (cm_path, npz_path, ae_path, ae_pre_path):
+            if not p.exists():
+                raise ColdStartUnavailable(f"missing {p}")
+        if not cold_path.exists():
+            raise ColdStartUnavailable(
+                f"{cold_path.name} not derived — run "
+                f"`predictors/.venv/bin/python pipeline/coldstart_metric_stats.py` "
+                f"(read-only; recovers the block centers the shipped artifact omits)")
+        cm = json.loads(cm_path.read_text())
+        self.profile = profile or cm["default_profile"]
+        self.spec = cm["specs"][self.profile]
+        z = np.load(npz_path, allow_pickle=True)
+        c = np.load(cold_path, allow_pickle=True)
+        self.ae_mean = np.asarray(z["ae_mean"], dtype=np.float64)
+        self.ae_whiten = np.asarray(z["ae_whiten"], dtype=np.float64)
+        self.meta_mean = np.asarray(z["meta_mean"], dtype=np.float64)
+        self.meta_std = np.asarray(z["meta_std"], dtype=np.float64)
+        self.meta_fields = cm["meta_fields"]
+        self.protos = {str(g): v for g, v in zip(z["genre_vocab"],
+                                                 np.asarray(z["genre_protos"], np.float64))}
+        self.txt_mean = np.asarray(c["txt_mean"], dtype=np.float64)
+        self.meta_zmean = np.asarray(c["meta_zmean"], dtype=np.float64)
+        self.meta_whiten = np.asarray(c["meta_whiten"], dtype=np.float64)
+        self.genre_mean = np.asarray(c["genre_mean"], dtype=np.float64)
+        self.genre_fallback = np.asarray(c["genre_fallback"], dtype=np.float64)
+        self.ae_pre = json.loads(ae_pre_path.read_text())
+        self._encoder = None
+        self._ae_path = ae_path
+
+    def encoder(self):
+        if self._encoder is not None:
+            return self._encoder
+        try:
+            import torch
+            from torch import nn
+        except ImportError as exc:                                # pragma: no cover
+            raise ColdStartUnavailable(f"torch not installed: {exc}") from exc
+        pre = self.ae_pre
+        enc = nn.Sequential(nn.Linear(pre["din"], pre["hidden"]), nn.ReLU(),
+                            nn.Linear(pre["hidden"], pre["latent"]))
+        state = torch.load(self._ae_path, map_location="cpu")
+        # The checkpoint holds the whole autoencoder; the encoder half is `enc.*`.
+        enc.load_state_dict({k[len("enc."):]: v for k, v in state.items()
+                             if k.startswith("enc.")})
+        enc.eval()
+        self._encoder = enc
+        return enc
+
+    def ae_latent(self, row539: np.ndarray) -> np.ndarray:
+        """L2-NORMALIZED, because build_content_metric reads its `ae` block straight
+        out of the spotify_tracks_song_ae collection, whose stored vectors are
+        normalized. The raw encoder output has norm 4–7 and points the same way
+        (verified: cosine 1.0000 against the stored latents) — feeding it unnormalized
+        put the block on the wrong scale before whitening and wrecked the fusion."""
+        import torch
+        with torch.no_grad():
+            x = torch.from_numpy(np.asarray(row539, dtype=np.float32)[None, :])
+            v = self.encoder()(x).numpy()[0].astype(np.float64)
+        return v / (float(np.linalg.norm(v)) or 1.0)
+
+    def vector(self, row539: np.ndarray, meta: dict, text_vec: np.ndarray) -> np.ndarray:
+        parts = []
+        for name in self.spec:                       # ae, txt, meta, genre — spec order
+            s = self.spec[name]
+            w, med = float(s["weight"]), float(s["median"])
+            if name == "ae":
+                b = (self.ae_latent(row539) - self.ae_mean) @ self.ae_whiten
+            elif name == "txt":
+                b = np.asarray(text_vec, dtype=np.float64) - self.txt_mean
+            elif name == "meta":
+                raw = []
+                for k in self.meta_fields:
+                    v = meta.get(k)
+                    v = float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else np.nan
+                    if k == "artist_followers":
+                        v = math.log1p(max(v, 0.0)) if math.isfinite(v) else np.nan
+                    raw.append(v)
+                zrow = (np.asarray(raw) - self.meta_mean) / np.where(self.meta_std == 0, 1.0, self.meta_std)
+                zrow[~np.isfinite(zrow)] = 0.0
+                b = (zrow - self.meta_zmean) @ self.meta_whiten
+            else:                                    # genre prototype
+                b = self.protos.get(str(meta.get("genre_primary")), self.genre_fallback) - self.genre_mean
+            parts.append(math.sqrt(w) * (b / (med or 1.0)))
+        v = np.concatenate(parts)
+        n = float(np.linalg.norm(v))
+        return (v / (n or 1.0)).astype(np.float32)
+
+
 _TEXT_MODEL_CACHE: dict = {}
+
+
+def remote_spec(explicit: str | None = None) -> str | None:
+    """`COLDSTART_REMOTE=<ssh-host>:<instance-path>` — e.g. `homeserver:~/lensing-worker`.
+    Explicit argument wins, then the environment, then .env."""
+    return explicit or os.environ.get("COLDSTART_REMOTE") or _env().get("COLDSTART_REMOTE")
+
+
+def remote_encoder(spec: str | None, model_name: str, say):
+    """Ship the TEXT ENCODE to another machine over ssh and get the vectors back.
+
+    Only the documents travel — the Spotify/ReccoBeats calls, the feature assembly
+    and both projections stay local, so no credential and no artifact leaves this
+    host. The remote runs THIS module's `encode` subcommand against the same model
+    name, so the vectors are the same function of the same text; the daily rsync
+    (scripts/sync_remote.sh) is what keeps the file over there current.
+
+    Returns None when no remote is configured or it doesn't answer — the caller then
+    encodes locally. A remote that is down must never cost you a journey."""
+    spec = remote_spec(spec)
+    if not spec:
+        return None
+    host, _, path = spec.partition(":")
+    path = path or "~/lensing-worker"
+    py = f"{path}/predictors/.venv/bin/python"
+    script = f"{path}/predictors/seq_coldstart.py"
+
+    def encode(docs: list[str]) -> np.ndarray:
+        import subprocess
+        payload = json.dumps({"model": model_name, "docs": docs})
+        say(f"cold start: encoding {len(docs)} document(s) on {host}")
+        proc = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host,
+             f"{py} {script} encode"],
+            input=payload, capture_output=True, text=True, timeout=300, check=False)
+        if proc.returncode != 0:
+            raise ColdStartUnavailable(
+                f"remote encode on {host} failed ({proc.returncode}): "
+                f"{proc.stderr.strip()[:200]}")
+        vecs = np.asarray(json.loads(proc.stdout)["vectors"], dtype=np.float32)
+        if vecs.shape[0] != len(docs):
+            raise ColdStartUnavailable(
+                f"remote returned {vecs.shape[0]} vectors for {len(docs)} documents")
+        return vecs
+
+    def guarded(docs: list[str]) -> np.ndarray:
+        try:
+            return encode(docs)
+        except Exception as exc:                                  # noqa: BLE001
+            say(f"cold start: remote encode unavailable ({exc}) — falling back to local")
+            local = text_encoder(model_name)
+            return local.encode(docs, normalize_embeddings=False, show_progress_bar=False)
+
+    return guarded
 
 
 def text_encoder(model_name: str):
@@ -357,7 +521,8 @@ def feature_row(meta: dict, text_vec: np.ndarray, acoustics: dict, basis: Basis)
 # The entry point the lab calls                                                #
 # --------------------------------------------------------------------------- #
 def cold_start(tokens: list, *, basis_name: str = DEFAULT_BASIS,
-               artifacts: Path = ARTIFACTS, emit=None) -> dict[str, ColdTrack]:
+               artifacts: Path = ARTIFACTS, emit=None,
+               with_music: bool = True, remote: str | None = None) -> dict[str, ColdTrack]:
     """Cold-start every resolvable token. Returns {track_uri: ColdTrack}.
 
     Tokens that Spotify does not know, or that are not track references at all, are
@@ -379,8 +544,28 @@ def cold_start(tokens: list, *, basis_name: str = DEFAULT_BASIS,
         return {}
 
     b = Basis(basis_name, artifacts)
-    encoder = text_encoder(b.text_model)          # raises if unavailable, before any I/O
+    # The text encode is the only heavy step; everything else is numpy. When a remote
+    # is configured it runs there and only documents/vectors cross the wire — the
+    # Spotify credentials never leave this machine.
+    # Resolve BEFORE the gate: the spec may come from the environment or .env, not
+    # just the argument, and gating on the raw argument silently ignored those.
+    spec = remote_spec(remote)
+    encode = remote_encoder(spec, b.text_model, say) if spec else None
+    if encode is None:
+        encoder = text_encoder(b.text_model)      # raises if unavailable, before any I/O
+        def encode(docs):                         # noqa: E306
+            return encoder.encode(docs, normalize_embeddings=False,
+                                  show_progress_bar=False)
     say(f"cold start: {len(ids)} unknown track(s) → {b.name} ({b.latent_dim}-d)")
+
+    music: MusicSpace | None = None
+    if with_music:
+        try:
+            music = MusicSpace(artifacts)
+        except ColdStartUnavailable as exc:
+            # The mood space is an upgrade, not a requirement: without it the cold
+            # rows still drive the model, they just sit outside the anchor.
+            say(f"cold start: no mood-space vectors ({exc})")
 
     token = spotify_token()
     tracks, artists = fetch_metadata(ids, token)
@@ -392,18 +577,24 @@ def cold_start(tokens: list, *, basis_name: str = DEFAULT_BASIS,
     order = [sid for sid in ids if sid in metas]
     if not order:
         return {}
-    vecs = encoder.encode([content_doc(metas[sid]) for sid in order],
-                          normalize_embeddings=False, show_progress_bar=False)
+    vecs = encode([content_doc(metas[sid]) for sid in order])
 
     out: dict[str, ColdTrack] = {}
     for sid, tvec in zip(order, vecs):
         m = metas[sid]
         af = acoustics.get(sid, {})
-        latent = b.project(feature_row(m, tvec, af, b))
+        row = feature_row(m, tvec, af, b)
+        latent = b.project(row)
+        mv = None
+        if music is not None:
+            try:
+                mv = music.vector(row, m, tvec)
+            except Exception as exc:                              # noqa: BLE001
+                say(f"cold start: mood-space vector failed for {sid} ({exc})")
         out[m["track_uri"]] = ColdTrack(
             uri=m["track_uri"], latent=latent, name=m.get("track_name"),
             artist=m.get("artist"), genre=m.get("genre_primary"),
-            meta=m, acoustics=af, doc=content_doc(m))
+            meta=m, acoustics=af, doc=content_doc(m), music=mv)
     say(f"cold start: placed {len(out)} track(s) in the model's latent space")
     return out
 
@@ -411,7 +602,28 @@ def cold_start(tokens: list, *, basis_name: str = DEFAULT_BASIS,
 # --------------------------------------------------------------------------- #
 # verify — the fidelity gate                                                   #
 # --------------------------------------------------------------------------- #
-def verify(dataset: Path, n: int, basis_name: str = DEFAULT_BASIS) -> int:
+def _stored_music_vectors(uris: list[str], url: str | None = None) -> dict:
+    """The corpus's own fused vectors for these uris, for the mood-space gate."""
+    import hashlib
+    from qdrant_client import QdrantClient
+    url = url or os.environ.get("QDRANT_URL", "http://localhost:6337")
+    collection = os.environ.get("LENSING_MUSIC_METRIC_COLLECTION",
+                                "spotify_tracks_content_metric")
+    ids = {int.from_bytes(hashlib.sha256(u.encode()).digest()[:8], "little"): u
+           for u in uris}                                    # pipeline/corpus/ids.py
+    client = QdrantClient(url=url, timeout=60)
+    got = client.retrieve(collection, ids=list(ids), with_vectors=True)
+    out = {}
+    for p in got:
+        vec = p.vector
+        if isinstance(vec, dict):                            # named vectors
+            vec = vec.get("balanced") or next(iter(vec.values()))
+        out[ids[p.id]] = np.asarray(vec, dtype=np.float64)
+    return out
+
+
+def verify(dataset: Path, n: int, basis_name: str = DEFAULT_BASIS,
+           remote: str | None = None, check_music: bool = False) -> int:
     """Round-trip tracks that ARE in the dataset: discard what the corpus knows,
     rebuild from the live APIs, project, and compare with the trained latent.
 
@@ -428,6 +640,7 @@ def verify(dataset: Path, n: int, basis_name: str = DEFAULT_BASIS) -> int:
     pick = [int(i) for i in rng.choice(n_items, size=n * 3, replace=False)
             if str(rows[i].get("uri") or "").startswith("spotify:track:")][:n]
     cold = cold_start([rows[i]["uri"] for i in pick], basis_name=basis_name,
+                      remote=remote, with_music=check_music,
                       emit=lambda m: print(f"  {m}"))
     if not cold:
         print("verify: nothing cold-started (no creds / no network?)", file=sys.stderr)
@@ -449,6 +662,28 @@ def verify(dataset: Path, n: int, basis_name: str = DEFAULT_BASIS) -> int:
     if not cosines:
         print("verify: no overlap between the picks and the cold-start result", file=sys.stderr)
         return 1
+
+    # The mood space is a SECOND projection of the same feature row, reassembled from
+    # recovered block stats — so it gets its own round-trip against the corpus's own
+    # fused vectors rather than riding on the latent's result.
+    if check_music:
+        stored = {}
+        try:
+            stored = _stored_music_vectors([rows[i]["uri"] for i in pick])
+        except Exception as exc:                                  # noqa: BLE001
+            print(f"\nmood space: corpus vectors unreachable ({exc})")
+        mcos = []
+        for i in pick:
+            ct, tgt = cold.get(rows[i]["uri"]), stored.get(rows[i]["uri"])
+            if ct is None or ct.music is None or tgt is None:
+                continue
+            a = ct.music / (np.linalg.norm(ct.music) or 1.0)
+            b2 = tgt / (np.linalg.norm(tgt) or 1.0)
+            mcos.append(float(a @ b2))
+        if mcos:
+            m = np.asarray(mcos)
+            print(f"\nmood space (fused musical-distance vector), n={m.size}: "
+                  f"mean {m.mean():.4f}  min {m.min():.4f}  max {m.max():.4f}")
 
     cos = np.asarray(cosines)
     pairs = rng.choice(n_items, size=(400, 2))
@@ -476,14 +711,31 @@ def main() -> int:
                    default=ROOT / "data/datasets/seq-20260715-131139")
     v.add_argument("--n", type=int, default=8)
     v.add_argument("--basis", default=DEFAULT_BASIS)
+    v.add_argument("--remote", default=None, help="ssh-host:instance-path (or COLDSTART_REMOTE)")
+    v.add_argument("--music", action="store_true",
+                   help="also check the fused mood-space vector against the corpus")
     s = sub.add_parser("show", help="cold-start tracks and print where they land")
     s.add_argument("tokens", nargs="+")
     s.add_argument("--basis", default=DEFAULT_BASIS)
+    s.add_argument("--remote", default=None, help="ssh-host:instance-path (or COLDSTART_REMOTE)")
+    # The remote half: stdin {"model","docs"} → stdout {"vectors"}. Deliberately the
+    # SAME file, so there is one definition of "encode these documents" and the rsync
+    # cannot leave the two halves on different versions of it.
+    sub.add_parser("encode", help="stdin/stdout text-encode worker (run on the remote)")
     args = ap.parse_args()
 
+    if args.cmd == "encode":
+        req = json.load(sys.stdin)
+        model = text_encoder(req["model"])
+        vecs = model.encode(list(req["docs"]), normalize_embeddings=False,
+                            show_progress_bar=False)
+        json.dump({"vectors": np.asarray(vecs, dtype=np.float32).tolist()}, sys.stdout)
+        return 0
     if args.cmd == "verify":
-        return verify(args.dataset, args.n, args.basis)
-    cold = cold_start(args.tokens, basis_name=args.basis, emit=lambda m: print(f"  {m}"))
+        return verify(args.dataset, args.n, args.basis, remote=args.remote,
+                      check_music=args.music)
+    cold = cold_start(args.tokens, basis_name=args.basis, remote=args.remote,
+                      emit=lambda m: print(f"  {m}"))
     for uri, ct in cold.items():
         print(f"\n{uri}\n  {ct.name} — {ct.artist} · {ct.genre}")
         print(f"  doc: {ct.doc}")
