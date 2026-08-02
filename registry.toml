@@ -2819,3 +2819,132 @@ type = "int"
 default = 0
 min = 0
 max = 50
+
+# --------------------------------------------------------------------------- #
+# seq-bank — N PARALLEL bare GRU towers -> concat -> ONE LINEAR head.          #
+# The parallel analogue of seq-stack's generalization: tower COUNT and the     #
+# view MULTISET are ONE hyperparameter (`views`) on ONE module, so N=2 and     #
+# N>=3 cannot be confounded with implementation. Anchored to two              #
+# independently-established points by BIT-IDENTITY gates (`verify`): N=1 IS    #
+# seq_nexttrack's single GRU, N=2 at dropout 0 IS seq_dualgru at              #
+# fusion_layers=0 — both verified at max|Δ| exactly 0.                         #
+#                                                                             #
+# EVERY REFUTED KNOB IS ABSENT BY DESIGN, not defaulted-off: no fusion MLP     #
+# (`fusion_layers=1` is a 3x-confirmed regression), no per-step pre-MLP        #
+# (refuted at N=1, on the N=2 walk, and at depth 4), no `layers`>1 (the depth  #
+# cliff), no `arch`/LSTM, no `bidirectional` (leaks), no `eager_*`. They are   #
+# unexpressible, so no run can reach them. `views` also REJECTS a bank with no #
+# `latent` tower — those arms measured 0.058-0.087 recall, below every floor.  #
+# predictors/seq_bank.py.                                                     #
+# --------------------------------------------------------------------------- #
+[[predictors]]
+name = "seq-bank"
+display_name = "Next-track parallel tower bank (N GRUs, linear head, sequence)"
+language = "Python"
+framework = "PyTorch"
+description = "A BANK of N independent single-layer GRU towers reading the session prefix in PARALLEL over their own causal views ('+'-joined `views`, e.g. latent+latent+cummean), their per-step hidden states concatenated and mapped to the next-track latent by ONE LINEAR head. Generalizes seq_dualgru's hard-wired two towers so tower count and view multiset are one hyperparameter on one module. No fusion MLP, no pre-encoder, no stacked layers, no LSTM, no bidirectional mode — every one of those is a measured regression on this corpus and is deliberately unexpressible here. At least one `latent` tower is required. Training copies seq_dualgru.fit (NOT delegated, so the bit-identity gates hold). Reads a SEQUENCE artifact. Python, CPU."
+command = "predictors/.venv/bin/python"
+args = ["predictors/seq_bank.py", "train", "--dataset", "{dataset}", "--output", "{run_dir}", "--hyperparams", "{hyperparams}"]
+predict_args = ["predictors/seq_bank.py", "predict", "--model", "{model}", "--input", "{input}", "--output", "{output}"]
+
+[[predictors.params]]
+name = "views"
+label = "the tower bank ('+'-joined causal views; one GRU tower per entry, >=1 must be `latent`)"
+type = "enum"
+default = "latent+latent"
+options = ["latent", "latent+latent", "latent+latent+latent", "latent+latent+latent+latent", "latent+latent+cummean", "latent+cummean+delta", "latent+cummean+cummean"]
+
+[[predictors.params]]
+name = "hidden"
+label = "recurrent width of EVERY tower (uniform by design)"
+type = "int"
+default = 256
+min = 8
+max = 1024
+
+[[predictors.params]]
+name = "dropout"
+label = "dropout on the concatenated hidden state before the head (0.0 = the historical seq-dualgru f0 path, which has NO active dropout)"
+type = "float"
+default = 0.1
+min = 0.0
+max = 0.9
+
+[[predictors.params]]
+name = "loss"
+label = "training objective"
+type = "enum"
+default = "infonce"
+options = ["cosine", "infonce"]
+
+[[predictors.params]]
+name = "tau"
+label = "InfoNCE temperature"
+type = "float"
+default = 0.07
+
+[[predictors.params]]
+name = "epochs"
+label = "max training epochs"
+type = "int"
+default = 40
+
+[[predictors.params]]
+name = "patience"
+label = "early-stopping patience (epochs without val improvement)"
+type = "int"
+default = 6
+
+[[predictors.params]]
+name = "lr"
+label = "Adam learning rate"
+type = "float"
+default = 0.001
+
+[[predictors.params]]
+name = "batch_size"
+label = "minibatch size (sessions)"
+type = "int"
+default = 128
+
+[[predictors.params]]
+name = "val_fraction"
+label = "fraction of train sessions held out for early stopping"
+type = "float"
+default = 0.15
+
+[[predictors.params]]
+name = "seed"
+label = "random seed"
+type = "int"
+default = 1337
+
+[[predictors.params]]
+name = "k"
+label = "top-k reported / served"
+type = "int"
+default = 10
+
+[[predictors.params]]
+name = "mmr_lambda"
+label = "optional light spread at rank time (1.0 = off; <1 diversifies)"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1.0
+
+[[predictors.params]]
+name = "mmr_pool"
+label = "candidate pool size the optional spread operates over"
+type = "int"
+default = 200
+min = 1
+max = 5000
+
+[[predictors.params]]
+name = "artist_cap"
+label = "max top-k slots one artist may hold (0 = off; a HARD cap, applied after MMR)"
+type = "int"
+default = 0
+min = 0
+max = 50

@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import walk_eval as WE                                          # noqa: E402
 sys.path.insert(0, str(ROOT / "predictors"))
 import seq_common, seq_blend, seq_dualgru                       # noqa: E402
-import seq_nexttrack, seq_stack                                 # noqa: E402
+import seq_nexttrack, seq_stack, seq_bank                       # noqa: E402
 
 DUAL_LL = "best-seq-dualgru-20260725-143502-18b4a"     # latent/latent, fusion_layers=0
 DUAL_CM = "best-seq-dualgru-20260725-143502-3e5d4"     # latent/cummean, fusion_layers=0
@@ -52,7 +52,8 @@ DUAL_CM = "best-seq-dualgru-20260725-143502-3e5d4"     # latent/cummean, fusion_
 #     a wrong number rather than an error.                                     #
 # Reached only via --include-stack; the default 5-arm invocation is untouched. #
 # --------------------------------------------------------------------------- #
-FAMILIES = {"stack": seq_stack, "dual": seq_dualgru, "gru": seq_nexttrack}
+FAMILIES = {"stack": seq_stack, "dual": seq_dualgru, "gru": seq_nexttrack,
+            "bank": seq_bank}
 _SCORE_CACHE: dict = {}
 
 
