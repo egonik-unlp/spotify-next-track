@@ -367,6 +367,16 @@ function renderPanel(slot, model, j) {
   const ol = panel.querySelector('.stops');
   for (const st of j.stops || []) ol.append(renderStop(st, slot));
 
+  const sb = panel.querySelector('.save');
+  const smsg = panel.querySelector('.savemsg');
+  // Blind mode: the playlist is named after the model, so saving before the vote
+  // would reveal it. Re-enabled by reveal().
+  sb.disabled = BLIND && !REVEALED;
+  sb.title = sb.disabled
+    ? 'Vote or reveal first — the playlist is named after the model'
+    : 'Create a private Spotify playlist from this journey';
+  sb.addEventListener('click', () => savePanel(slot, sb, smsg));
+
   const hb = panel.querySelector('.handoff');
   hb.disabled = !($('modelA').value && $('modelB').value);
   hb.title = hb.disabled
@@ -788,6 +798,11 @@ function reveal() {
   document.querySelectorAll('#compare .cname').forEach((n, i) => {
     if (SLOTS[i]) n.textContent = SLOTS[i];
   });
+  // Saving was held back only to protect the blinding — the names are out now.
+  for (const b of document.querySelectorAll('.panel .save')) {
+    b.disabled = false;
+    b.title = 'Create a private Spotify playlist from this journey';
+  }
   $('ballot').hidden = true;
 }
 
@@ -946,9 +961,256 @@ function markPlaying(uri) {
   }
 }
 
+/* ------------------------------------------------------- save to Spotify */
+/* The same browser PKCE flow the infinite-playlist product uses (no secret in the
+ * page, no server round-trip): consent → authorization code → token, then create a
+ * private playlist and add the journey's uris. Ported here because a journey you
+ * liked is worthless if you can only hear it in this tab.
+ *
+ * Per PANEL, not per page: in a comparison bench the two journeys are different
+ * playlists, and "the one on the right" is exactly what you want to keep.
+ *
+ * The client id is PUBLIC (the deployed Worker hands out the same value at
+ * /api/config) and is published to /lab/spotify.json by
+ * scripts/lab_spotify_config.py. No id → the Save button asks for one and keeps it
+ * in localStorage, so a fresh checkout still works without the script.
+ */
+const SP_SCOPE_SAVE = 'playlist-modify-public playlist-modify-private';
+const SP_K = {
+  token: 'lab.sp.token.v1',
+  refresh: 'lab.sp.refresh.v1',
+  verifier: 'lab.sp.pkce.v1',
+  pending: 'lab.sp.pending.v1',
+  client: 'lab.sp.client_id.v1',
+};
+/* Spotify accepts a loopback redirect only on an explicit IP literal, so the lab
+ * must be opened on 127.0.0.1 for the round-trip to be authorizable at all —
+ * `localhost:8096/lab/` cannot be registered in the dashboard. Detected rather
+ * than assumed, and reported with the URL that does work. */
+const SP_REDIRECT = `${location.origin}${location.pathname}`;
+const SP_LOOPBACK_OK = location.hostname !== 'localhost';
+const spAltUrl = () => `${location.protocol}//127.0.0.1${location.port ? `:${location.port}` : ''}${location.pathname}`;
+let CLIENT_ID = null;
+
+const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const rnd = (n) => {
+  const a = new Uint8Array(n);
+  crypto.getRandomValues(a);
+  return Array.from(a, (x) => `0${(x & 0xff).toString(16)}`.slice(-2)).join('');
+};
+
+async function loadSpotifyConfig() {
+  try {
+    const r = await fetch('/lab/spotify.json');
+    if (r.ok) CLIENT_ID = (await r.json()).client_id || null;
+  } catch { /* the localStorage fallback below covers it */ }
+  if (!CLIENT_ID) CLIENT_ID = localStorage.getItem(SP_K.client) || null;
+}
+
+function tokenRec() {
+  try { return JSON.parse(localStorage.getItem(SP_K.token) || 'null'); } catch { return null; }
+}
+function storeToken(access, expiresIn, scope, refresh) {
+  const cur = tokenRec() || {};
+  localStorage.setItem(SP_K.token, JSON.stringify({
+    access_token: access,
+    exp: Date.now() + (expiresIn || 3600) * 1000,
+    scope: scope ?? cur.scope,
+  }));
+  if (refresh) localStorage.setItem(SP_K.refresh, refresh);
+}
+function scopeCovers(granted, required) {
+  if (!granted) return false;
+  const g = new Set(granted.split(/\s+/).filter(Boolean));
+  return required.split(/\s+/).filter(Boolean).every((s) => g.has(s));
+}
+async function spTokenPost(body) {
+  const r = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  if (!r.ok) throw new Error(`token ${r.status}`);
+  return r.json();
+}
+async function refreshAccess() {
+  const rt = localStorage.getItem(SP_K.refresh);
+  if (!rt || !CLIENT_ID) return null;
+  try {
+    const d = await spTokenPost(new URLSearchParams({
+      grant_type: 'refresh_token', refresh_token: rt, client_id: CLIENT_ID,
+    }));
+    storeToken(d.access_token, d.expires_in, d.scope, d.refresh_token);
+    return tokenRec();
+  } catch { return null; }
+}
+/* A token covering `required`, refreshed silently if merely expired. null means
+ * consent is needed — the caller stashes the work and redirects. */
+async function getFreshToken(required) {
+  let t = tokenRec();
+  const good = (x) => x && x.exp > Date.now() + 30000 && scopeCovers(x.scope, required);
+  if (good(t)) return t.access_token;
+  t = await refreshAccess();
+  return good(t) ? t.access_token : null;
+}
+async function connectSpotify() {
+  const verifier = rnd(48);
+  localStorage.setItem(SP_K.verifier, verifier);
+  const challenge = b64url(await crypto.subtle.digest(
+    'SHA-256', new TextEncoder().encode(verifier)));
+  const p = new URLSearchParams({
+    response_type: 'code', client_id: CLIENT_ID, scope: SP_SCOPE_SAVE,
+    redirect_uri: SP_REDIRECT, code_challenge_method: 'S256', code_challenge: challenge,
+  });
+  location.href = `https://accounts.spotify.com/authorize?${p}`;
+}
+async function spApi(token, path, method = 'GET', body) {
+  const r = await fetch(`https://api.spotify.com/v1/${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (r.status === 401) { localStorage.removeItem(SP_K.token); throw new Error('expired'); }
+  if (!r.ok) throw new Error(`spotify ${path} ${r.status}`);
+  return r.status === 204 ? null : r.json();
+}
+async function createPlaylist(token, uris, name, description) {
+  const me = await spApi(token, 'me');
+  const pl = await spApi(token, `users/${encodeURIComponent(me.id)}/playlists`, 'POST',
+    { name, public: false, description });
+  for (let i = 0; i < uris.length; i += 100) {
+    await spApi(token, `playlists/${pl.id}/tracks`, 'POST', { uris: uris.slice(i, i + 100) });
+  }
+  return { url: pl.external_urls?.spotify, n: uris.length };
+}
+
+/* Name and description come from the journey itself: which seed, which model,
+ * which policy. A playlist you find again in six months should still say what
+ * generated it — that is the whole reason to save from a bench. */
+function journeyNaming(model, j) {
+  const src = (j.seed?.expanded || []).map((e) => e.name).filter(Boolean)[0];
+  const short = model.replace(/^best-/, '').replace(/^seq-/, '');
+  const name = `${src || 'Playlist lab'} → ${short}`;
+  const prm = j.params || {};
+  const bits = [
+    `${(j.stops || []).length} stops`,
+    `${j.predictor || 'model'} ${model}`,
+    `anchor λ ${prm.anchor_lambda ?? '—'}${j.seed?.anchored ? '' : ' (off — seed core too small)'}`,
+    `artist penalty ${prm.artist_penalty ?? '—'}`,
+    `temperature ${prm.temperature ?? '—'}`,
+  ];
+  return { name: name.slice(0, 100), description: `lensing playlist lab · ${bits.join(' · ')}`.slice(0, 300) };
+}
+
+function setSaveMsg(el, text, state) {
+  if (!el) return;
+  el.hidden = false;
+  el.textContent = text;
+  if (state) el.dataset.state = state; else delete el.dataset.state;
+}
+function setSaveMsgHtml(el, html) {
+  if (!el) return;
+  el.hidden = false;
+  el.innerHTML = html;
+  delete el.dataset.state;
+}
+
+async function savePanel(slot, btn, msg) {
+  const j = LAST[slot];
+  const model = SLOTS[slot];
+  if (!j || !model) return;
+  // Saving under blind mode would print the model's name into the playlist and
+  // undo the blinding before the vote.
+  if (BLIND && !REVEALED) {
+    setSaveMsg(msg, 'vote (or reveal) first — the playlist is named after the model.', 'error');
+    return;
+  }
+  if (!CLIENT_ID) {
+    const typed = prompt('Spotify client id (public — run scripts/lab_spotify_config.py '
+      + 'to publish it from .env and skip this):');
+    if (!typed) { setSaveMsg(msg, 'needs a Spotify client id to save.', 'error'); return; }
+    CLIENT_ID = typed.trim();
+    localStorage.setItem(SP_K.client, CLIENT_ID);
+  }
+  // Same recording under several releases is a real vocab case (see dedupe_titles
+  // in seq_extend); a duplicate uri would also be rejected silently by Spotify.
+  const uris = [...new Set((j.stops || []).map((s) => s.uri).filter(Boolean))];
+  if (!uris.length) { setSaveMsg(msg, 'this journey has no playable uris.', 'error'); return; }
+  const { name, description } = journeyNaming(model, j);
+
+  btn.disabled = true;
+  setSaveMsg(msg, `saving ${uris.length} tracks…`);
+  try {
+    const token = await getFreshToken(SP_SCOPE_SAVE);
+    if (!token) {
+      if (!SP_LOOPBACK_OK) {
+        setSaveMsgHtml(msg, 'Spotify only allows a loopback redirect on an IP literal, '
+          + `so open the lab at <a href="${spAltUrl()}">${spAltUrl()}</a> to connect.`);
+        msg.dataset.state = 'error';
+        return;
+      }
+      localStorage.setItem(SP_K.pending, JSON.stringify({ uris, name, description }));
+      setSaveMsg(msg, 'connecting to Spotify…');
+      await connectSpotify();
+      return;
+    }
+    const res = await createPlaylist(token, uris, name, description);
+    setSaveMsgHtml(msg, `saved ${res.n} tracks as “${name}” — `
+      + `<a href="${res.url}" target="_blank" rel="noopener">open in Spotify ↗</a>`);
+  } catch (e) {
+    if (String(e.message) === 'expired' && SP_LOOPBACK_OK) {
+      localStorage.setItem(SP_K.pending, JSON.stringify({ uris, name, description }));
+      await connectSpotify();
+      return;
+    }
+    setSaveMsg(msg, `couldn't save: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* Finish an OAuth round-trip. The panel that started the save is gone (consent is
+ * a full page load), so the banner reports, and the stashed uris — not the panel —
+ * are the source of truth for what gets saved. */
+async function handleRedirect() {
+  const url = new URL(location.href);
+  const code = url.searchParams.get('code');
+  const err = url.searchParams.get('error');
+  const banner = $('savebanner');
+  if (err) {
+    history.replaceState({}, '', SP_REDIRECT);
+    localStorage.removeItem(SP_K.pending);
+    setSaveMsg(banner, `Spotify connect was declined (${err}).`, 'error');
+    return;
+  }
+  if (!code) return;
+  history.replaceState({}, '', SP_REDIRECT);
+  let pend = null;
+  try { pend = JSON.parse(localStorage.getItem(SP_K.pending) || 'null'); } catch { /* none */ }
+  localStorage.removeItem(SP_K.pending);
+  if (!CLIENT_ID) { setSaveMsg(banner, 'connected, but no client id is configured.', 'error'); return; }
+  try {
+    const d = await spTokenPost(new URLSearchParams({
+      grant_type: 'authorization_code', code, redirect_uri: SP_REDIRECT,
+      client_id: CLIENT_ID, code_verifier: localStorage.getItem(SP_K.verifier) || '',
+    }));
+    storeToken(d.access_token, d.expires_in, d.scope, d.refresh_token);
+    localStorage.removeItem(SP_K.verifier);
+    if (!pend?.uris?.length) { setSaveMsg(banner, 'Spotify connected.'); return; }
+    setSaveMsg(banner, `connected — saving ${pend.uris.length} tracks…`);
+    const res = await createPlaylist(d.access_token, pend.uris, pend.name, pend.description);
+    setSaveMsgHtml(banner, `saved ${res.n} tracks as “${pend.name}” — `
+      + `<a href="${res.url}" target="_blank" rel="noopener">open in Spotify ↗</a>`);
+  } catch (e) {
+    setSaveMsg(banner, `Spotify connect failed: ${e.message}`, 'error');
+  }
+}
+
 /* ----------------------------------------------------------------- wiring */
+/* Submit only: #run is the form's submit button, so a click already raises this
+ * event — a click handler too would generate every journey twice. */
 $('controls').addEventListener('submit', (e) => { e.preventDefault(); run(); });
-$('run').addEventListener('click', () => run());
 $('dockclose').addEventListener('click', () => {
   $('dock').hidden = true;
   if (controller) controller.pause();
@@ -998,3 +1260,5 @@ $('voteSkip').addEventListener('click', () => reveal());
 
 loadModels().catch((e) => setStatus(`model load failed: ${e.message}`, 'error'));
 loadCatalog();
+// Config BEFORE the redirect handler: the code exchange needs the client id.
+loadSpotifyConfig().then(handleRedirect);

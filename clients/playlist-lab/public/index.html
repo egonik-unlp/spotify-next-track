@@ -34,10 +34,19 @@
       Autoregressive journeys from one seed, under one shared retrieval policy.
     </p>
   </div>
-  <button id="run" class="btn-primary" type="button">Generate</button>
 </div>
 
+<!-- The primary action lives at the END of the form it submits (see .form-actions),
+     not up here: you read the band, fill seed → models → policy downwards, and the
+     button is where that pass finishes. In the band it was also unreachable by
+     keyboard until after every field, since it preceded the form in the DOM. -->
+
 <main class="view-body">
+
+  <!-- Where a save that survived the OAuth redirect reports. A consent round-trip
+       is a full page load, so the panel that started the save no longer exists by
+       the time the playlist is created — the page, not the panel, has to say so. -->
+  <p id="savebanner" class="savebanner" role="status" hidden></p>
 
   <form class="controls" id="controls" autocomplete="off">
     <fieldset class="ctl ctl-seed">
@@ -98,6 +107,13 @@
       <p class="help">Units are pool-local score <em>z</em>, so one value means
         the same displacement for every model. Temperature 0 is greedy.</p>
     </fieldset>
+
+    <div class="form-actions">
+      <button id="run" class="btn-primary" type="submit">Generate</button>
+      <p class="help" id="runhint">One journey costs about one artifact load
+        (~8&nbsp;s including the calibration pass over your own sessions),
+        whatever its length.</p>
+    </div>
   </form>
 
   <section id="ballot" class="ballot" hidden>
@@ -163,9 +179,9 @@
           they are no longer the headline.</dd>
       </div>
     </dl>
-    <p class="meta">Pick a seed and press Generate. One journey costs about one
-      artifact load (~8&nbsp;s, including the calibration pass over your own
-      sessions) regardless of length.</p>
+    <p class="meta">Pick a seed and press Generate. Any journey you want to keep
+      saves to a private Spotify playlist from its own panel, named after the seed
+      and the model that wrote it.</p>
   </section>
 
   <section id="compare" class="compare" hidden></section>
@@ -195,8 +211,10 @@
         <span class="ppred meta"></span>
       </div>
       <span class="spacer"></span>
+      <button class="save btn-quiet" type="button">Save to Spotify</button>
       <button class="handoff btn-quiet" type="button">Hand off →</button>
     </header>
+    <p class="savemsg meta" role="status" hidden></p>
     <div class="moodcard"></div>
     <details class="facets">
       <summary>Leaderboard facets</summary>

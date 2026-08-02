@@ -142,7 +142,8 @@ h1, h2 { margin: 0; font-weight: 600; }
 .live[data-state='error'] { color: oklch(0.8 0.12 27); }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
-/* The band: title + meta + at most ONE primary action. */
+/* The band: title + meta. The primary action sits at the foot of the form it
+   submits (.form-actions), which is where the reading order actually ends. */
 .band {
   display: flex; align-items: center; gap: var(--sp-4);
   padding: var(--sp-3) var(--sp-4);
@@ -217,6 +218,31 @@ input:hover, select:hover, textarea:hover { border-color: var(--ink-faint); }
 input[type='number'] { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
 
 .seed-actions { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-2); }
+
+/* The submit row: spans the whole control grid so the button reads as belonging
+   to the form as a whole rather than to the last fieldset above it. */
+.form-actions {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding-top: var(--sp-1);
+  border-top: 1px solid var(--hairline);
+}
+.form-actions .help { margin: 0; max-width: 52ch; }
+
+/* A save reported by the page (post-redirect), not by a panel. */
+.savebanner {
+  margin: 0 0 var(--sp-4); padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-raised); border: 1px solid var(--hairline-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  font-size: var(--text-dense); color: var(--ink-secondary);
+}
+.savemsg {
+  margin: calc(-1 * var(--sp-2)) 0 var(--sp-3);
+  font-size: var(--text-label); color: var(--ink-secondary);
+}
+.savebanner a, .savemsg a { color: var(--accent-text); }
+.savemsg[data-state='error'], .savebanner[data-state='error'] { color: oklch(0.5 0.14 27); }
 .ctl-models .field { display: grid; gap: var(--sp-1); margin-bottom: var(--sp-3); }
 .ctl-models label {
   display: inline-flex; align-items: center; gap: var(--sp-2);
