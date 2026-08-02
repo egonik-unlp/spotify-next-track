@@ -43,6 +43,19 @@ const SESS_PENDING = {};      // engine key -> in-flight load promise
 const URI2ROW = new Map();  // spotify uri → catalog row (for loading playlists)
 const EXTRA = new Map();    // virtual-row index → its own latent (seeds embedded on the fly, never in output)
 const latOf = (r) => EXTRA.get(r) || RAW.subarray(r*DIM, r*DIM + DIM);
+// …and its L2 norm. NORM is baked for the N library rows ONLY, so a virtual row has to
+// compute (and cache) its own — see the stride term in nearest(), which reads the norm
+// of the previously played track, and that track CAN be a cold-started seed.
+const EXTRA_NORM = new Map();
+function normOf(r) {
+  if (r < N) return NORM[r];
+  let n = EXTRA_NORM.get(r);
+  if (n === undefined) {
+    const v = latOf(r); let a = 0; for (let j = 0; j < DIM; j++) a += v[j]*v[j];
+    n = Math.sqrt(a) || 1; EXTRA_NORM.set(r, n);
+  }
+  return n;
+}
 
 // ---------- load catalog + latents + the ONNX GRU ----------
 async function load() {
@@ -68,7 +81,10 @@ async function load() {
   NLIB = man.n_library ?? CAT.filter((c) => c && c.il !== 0).length;
   $("#meta").textContent = `queue up anything from your Spotify · the journey travels your library of ${NLIB.toLocaleString()} · anti-eager GRU`;
   ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
-  modelReady = ort.InferenceSession.create("./model/gru.onnx").then((s) => { sess = s; });
+  // NO eager session here. Graphs are pulled per engine by engineSession()/warmEngine();
+  // the old `modelReady = ...` line assigned to an UNDECLARED binding, which in a module
+  // (strict mode) throws ReferenceError and aborted the rest of load() — the permalink
+  // restore, the seed/cart restore and the OAuth round-trip below never ran.
   await configReady;   // already in flight since page load (see below)
   if (!CLIENT_ID) {   // no creds → full tracks can't work; fall back to previews
     $("#fulltoggle").checked = false; $("#fulltoggle").disabled = true;
@@ -123,7 +139,14 @@ async function predictNext(seqRows) {
 function nearest(pred, used, counts, cap, anchorL, stride, prev) {
   let best = -1, bs = -Infinity;
   const capped = cap > 0 && Number.isFinite(cap);
-  const po = prev >= 0 ? prev * DIM : -1;
+  // Read prev through latOf/normOf, NOT RAW/NORM directly: when a pasted playlist
+  // contains tracks outside the baked catalog they become VIRTUAL rows (index >= N,
+  // latent in EXTRA), and the first step's `prev` is the last seed — so it can be one.
+  // Indexing RAW past its end gave undefined -> every candidate scored NaN -> no
+  // comparison ever won -> nearest returned -1 and the journey came back empty. Only
+  // bit the dual tower, because it is the engine that ships stride > 0.
+  const pv = prev >= 0 ? latOf(prev) : null;
+  const pvN = prev >= 0 ? normOf(prev) : 1;
   for (let r = 0; r < N; r++) {
     if (used.has(r)) continue;
     if (!CAT[r].il) continue;                                   // the journey travels YOUR library
@@ -131,7 +154,7 @@ function nearest(pred, used, counts, cap, anchorL, stride, prev) {
     const o = r*DIM; let dot = 0; for (let j=0;j<DIM;j++) dot += RAW[o+j]*pred[j];
     let sc = dot / NORM[r];
     if (ANCHOR && anchorL) { let ad = 0; for (let j=0;j<DIM;j++) ad += RAW[o+j]*ANCHOR[j]; sc += anchorL * ad / NORM[r]; }  // hold the seed mood
-    if (stride && po >= 0) { let pd = 0; for (let j=0;j<DIM;j++) pd += RAW[o+j]*RAW[po+j]; sc -= stride * pd / (NORM[r]*NORM[prev]); }  // and keep moving
+    if (stride && pv) { let pd = 0; for (let j=0;j<DIM;j++) pd += RAW[o+j]*pv[j]; sc -= stride * pd / (NORM[r]*pvN); }  // and keep moving
     if (sc > bs) { bs = sc; best = r; }
   }
   // The cap can genuinely exhaust the library (a small seed genre, a long walk).
@@ -341,13 +364,28 @@ function renderNew(fromOi) {
   more.addEventListener("click", () => extend());
   j.appendChild(more);
 }
+// Failures here used to be invisible AND terminal: an engine that couldn't load (a
+// 404'd graph, a device where the wasm backend won't start) rejected into nothing, and
+// `busy` stayed latched true, so the UI sat on "generating…" forever and a retry was
+// refused. Surface the reason and release the latch instead.
 async function extend() {
   if (busy) return; busy = true;
   const m = $("#more"); if (m) { m.textContent = "generating…"; m.disabled = true; }
   const from = order.length;
-  const picks = await genMore(BATCH);
-  order.push(...picks); renderNew(from); busy = false;
-  return picks.length;
+  try {
+    const picks = await genMore(BATCH);
+    order.push(...picks); renderNew(from);
+    // A no-throw empty batch is its own failure mode: retrieval scored nothing eligible
+    // (the virtual-prev NaN was exactly this, and library exhaustion looks the same).
+    // Silence here left the page on "…charting the journey…" forever.
+    if (!picks.length) setPlayMsg(order.length ? "no further tracks left in your library for this journey"
+                                              : "couldn't chart a journey from these seeds — try another engine or more seeds");
+    return picks.length;
+  } catch (e) {
+    setPlayMsg(`the ${ENGINES[engine()].label} engine couldn't run here: ${(e && e.message) || e}`);
+    if (m) { m.textContent = "Extend the journey"; m.disabled = false; }
+    return 0;
+  } finally { busy = false; }
 }
 
 async function begin() {
@@ -384,8 +422,7 @@ async function begin() {
   const names = core.slice(0, 5).map((r) => `<b>${esc(CAT[r].name)}</b>`).join(", ");
   const focus = core.length < seeds.length ? ` <span class="focus">· focusing on the ${core.length}-track core of ${seeds.length}</span>` : "";
   $("#journey").innerHTML = `<p class="from">From ${names}${core.length > 5 ? ", …" : ""}${focus} — the GRU is charting the journey…</p>`;
-  await extend();
-  playOi(0);
+  if (await extend()) playOi(0);   // nothing generated (engine failed) → don't play a hole
 }
 function revealSave() {
   $("#savebar").hidden = false;
