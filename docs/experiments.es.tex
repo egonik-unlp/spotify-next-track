@@ -97,6 +97,29 @@ particiones --- el primer modelo de ranking de pista siguiente registrado, promo
 y servible (Secciones~\ref{sec:nexttrack-projection}--\ref{sec:nexttrack-music}). Su
 tarea, métricas y campeón no tienen relación con las tablas de rotación y nunca deben
 leerse contra ellas. Se incorporan después dos campañas finales de arquitectura de pista siguiente, ambas nulos: una GRU de \emph{torre doble} entrenada conjuntamente sobre pares de vistas causales del prefijo de sesión no logra superar a una torre única emparejada en parámetros al \SI{0.098}{\percent} (el cuarto nulo independiente de combinador aprendido, y el que responde a la objeción de «entrenad la fusión de extremo a extremo»), y un \emph{pre-codificador} por paso aprendido no solo es inútil sino activamente \emph{perjudicial} en una torre única ($-\num{0.0140}$ de R@10, con el IC por debajo de cero) --- pérdida que una lectura contrafactual de interpretabilidad rastrea hasta la rectificación de media onda de un latente centrado en cero, que borra exactamente su mitad negativa (\texttt{frac\_exact\_zero} \num{0.5327} $=$ \texttt{frac\_negative\_coords} \num{0.5327}). Un análisis de potencia medido reencuadra luego los cinco nulos de arquitectura: con $n=\num{1431}$ el semiancho del IC de bootstrap pareado es \num{0.0124} de R@10 mientras una familia de arquitectura completa abarca solo \num{0.028}, así que los daños grandes se detectaron con fiabilidad mientras las victorias moderadas nunca fueron detectables --- y \emph{holisticness@10} existe en tres generaciones de código mutuamente no comparables, razón por la cual el tablero de pista siguiente sigue denominado en R@10 (Secciones~\ref{sec:nexttrack-dualtower}--\ref{sec:nexttrack-power}).
+Se incorporan seis campañas más de pista siguiente: una frontera nativa de
+\emph{MMR} $\lambda$ que es la primera palanca de holisticness confirmada del
+registro y resuelve unánimemente su pregunta de mecanismo (la diversificación sónica
+des-concentra artistas en 8 de 8 ramas); una métrica de \emph{despliegue}
+construida a propósito que devuelve un sexto nulo de arquitectura en el régimen de
+despliegue, donde la varianza por semilla domina la identidad del modelo; un
+memorándum de investigación cuyos supervivientes son todos cambios de
+\emph{condicionamiento por evidencia} y no de capacidad, reportado en un registro
+más bajo porque nada en él se ejecutó; \textbf{\texttt{markov\_gate}}, un cambio de
+nueve líneas en tiempo de puntuación que hace que la rama de Markov se abstenga en
+el \SI{55.6}{\percent} de las consultas sin evidencia de bigramas, con un valor de
+$+\num{0.0203}$ / $+\num{0.0196}$ de recall@10 en dos particiones disjuntas (R@10
+\num{0.2320}, la mejor del registro) y con los buckets cálidos de evidencia
+idénticos byte a byte; la refutación-con-mecanismo del regularizador anti-eager de
+entrenamiento, cuyos márgenes se calibraron desde la distribución equivocada y son
+demostrablemente inertes; la primera palanca de des-eagering que \emph{funciona}, un
+tope duro por artista que no puede ser superado en puntuación y cambia relevancia
+literal por relevancia graduada (\texttt{artist\_conc}
+\num{0.692}$\to$\num{0.113} con \texttt{music@10} \emph{al alza}, endurecido en dos
+particiones); y una campaña de profundidad de pila de etapas que cierra la rama
+serie del eje de arquitectura en \emph{ambas} superficies de evaluación, cuya rama
+de mejor ajuste tiene la pérdida de validación más baja de su lote y recupera
+\num{55} aciertos menos.
 \end{abstract}
 
 \section{Introducción}
@@ -1998,6 +2021,14 @@ pre-codificador en torre única
 (Secciones~\ref{sec:nexttrack-dualtower}--\ref{sec:nexttrack-preencoder}). Se
 listan porque \emph{acotan} sus ejes, no porque sean candidatos: ninguno supera
 la línea base de GRU única según el estadístico pareado y ninguno se registró.
+Desde 2026-07-27c la fila superior del tablero es el campeón \emph{con compuerta de
+evidencia} (Sección~\ref{sec:nexttrack-markovgate}): hacer que la rama de Markov se
+abstenga en el \SI{55.6}{\percent} de las consultas donde no tiene evidencia de
+bigramas eleva el recall@10 a \num{0.2320} (\num{332} de \num{1431}), con IC
+pareado sobre cero en dos particiones disjuntas y con MRR y ambas métricas graduadas
+al alza. Es la mejor cifra de recall de esta línea de trabajo, y es \emph{solo} una
+recomendación de promoción --- nada se registró ni se promovió --- así que el campeón
+servible que va debajo queda sin cambios.
 Sobre la métrica principal efectiva en el servidor, y sobre por qué este tablero
 sigue denominado en Recall@10 a lo largo de tres generaciones de holisticidad,
 véase la Sección~\ref{sec:nexttrack-power-generations}.
@@ -2015,6 +2046,11 @@ véase la Sección~\ref{sec:nexttrack-power-generations}.
   quedan excluidas del resaltado de mejor celda; no llevan IC marginal, solo un
   $\Delta$ pareado contra la línea base de GRU única
   (Tablas~\ref{tab:nexttrack-dualtower} y~\ref{tab:nexttrack-preencoder}).
+  La fila superior, añadida el 2026-07-27c, es el campeón con compuerta de evidencia
+  de la Sección~\ref{sec:nexttrack-markovgate}: una \emph{recomendación} de promoción
+  y no un modelo registrado, así que su R@10 va en negrita como la mejor registrada
+  pero por lo demás queda excluida del resaltado de mejor celda, y lleva un $\Delta$
+  pareado (Tabla~\ref{tab:nexttrack-markovgate-paired}) en lugar de un IC marginal.
   \textbf{No comparable con ninguna tabla de rotación de arriba.} Espacios de
   ítems: AE-64 (\dsid{spotify\_tracks\_song\_ae}); PCA-$k$
   (\dsid{spotify\_tracks\_song\_pca$k$}), todos ajustados desde la fuente leak-safe
@@ -2024,6 +2060,7 @@ véase la Sección~\ref{sec:nexttrack-power-generations}.
     \toprule
     Modelo & R@10 [IC 95\%] & MRR & art@10 & gen@10 & mus@10 & Nota \\
     \midrule
+    \best{\Rp+M+\Cp\ $+$ comp.} & \best{0.2320} & 0.1335 & 0.367 & 0.463 & 0.493 & mejor R@10 \\
     \best{\Rp+M+\Cp, PCA-192} (campeón, servible) & \best{0.2117 [0.191, 0.233]} & \best{0.1220} & 0.333 & 0.401 & 0.454 & nuevo campeón \\
     R+M+C, PCA-192 (campeón de fusión previo) & 0.1859 [0.166, 0.207] & 0.1025 & 0.331 & 0.394 & 0.449 & contenido aditivo \\
     R+M+C, PCA-128                        & 0.1824 [0.162, 0.203] & 0.0993 & 0.332 & 0.396 & --- & contenido aditivo \\
@@ -2032,6 +2069,8 @@ véase la Sección~\ref{sec:nexttrack-power-generations}.
     R+M, PCA-192                          & 0.1712 [0.151, 0.192] & 0.0952 & 0.329 & 0.398 & 0.443 & $\approx$ campeón previo \\
     R+M, PCA-128                          & 0.1670 [0.148, 0.187] & 0.0920 & 0.329 & 0.398 & 0.444 & ganancia GRU no traslada \\
     R+A+M, AE-64                          & 0.1684 & 0.0943 & --- & --- & --- & rama ANN redundante \\
+    GRU single h512, PCA-192          & 0.1300 & --- & --- & --- & 0.458 & empate anchura \#7; no sig.\ \\
+    banco torres lat$\times$4, PCA-192 & 0.1300 & --- & --- & --- & 0.459 & banco $=$ anchura; cerrado \\
     LSTM single, PCA-128                  & 0.1272 [0.110, 0.145] & 0.0495 & 0.335 & \best{0.458} & 0.451 & mejor único; $\ll$ blend \\
     GRU única h454, PCA-192           & 0.1251 & 0.0539 & 0.338 & 0.454 & 0.457 & anchura cerrada \\
     GRU single, PCA-192                   & 0.1230 [0.106, 0.140] & 0.0534 & \best{0.338} & 0.450 & 0.456 & óptimo puntual de dim \\
@@ -3763,6 +3802,1943 @@ generación.
 \emph{Fuentes: \texttt{2026-07-25-nexttrack-dual-tower-fusion-scan.md},
 \texttt{2026-07-26-nexttrack-pre-encoder-scan.md}.}
 
+\section{Pista siguiente: la frontera de MMR $\lambda$: la primera palanca de corona confirmada}
+\label{sec:nexttrack-mmr}
+\emph{Motivación.} La Sección~\ref{sec:nexttrack-holisticness} dejó una bandera pendiente:
+un re-ordenamiento MMR en tiempo de evaluación con $\lambda\approx\num{0.9}$ era
+«la única palanca de holisticness casi gratuita del registro», medida en un barrido
+\emph{offline} sobre un checkpoint almacenado y diferida explícitamente a una
+decisión del usuario. Esta campaña es la confirmación nativa, y se diseñó para
+resolver además una segunda pregunta \emph{de mecanismo} pre-registrada, no
+simplemente para volver a medir el mando: ¿la diversificación sónica
+des-concentra \textbf{artistas} (H1, «responsiva») o las pistas del mismo artista
+están lo bastante separadas en el espacio de la métrica de contenido como para que
+la penalización de diversidad deje intacta la eagerness (H2, «pegajosa»)? La
+respuesta decide si una penalización explícita de diversidad de artista es la
+secuela indicada o una redundante.
+
+\paragraph{Qué se está maximizando.} Las diez ramas se puntúan bajo la corona
+\emph{viva} de cuatro factores, tomada literalmente de
+\texttt{predictors/seq\_common.py}:
+\[
+  \begin{aligned}
+    H = {}& \max(\texttt{mood\_coh},0)\;\times\;\texttt{ild}\\
+          &\times\;\bigl(1-\mathrm{clamp}(\max(\texttt{artist\_adj},
+             \texttt{artist\_conc}),0,1)\bigr)\\
+          &\times\;\mathrm{clamp}\bigl((\texttt{music@10}-\num{0.34})/\num{0.66},
+             \,0,\,1\bigr),
+  \end{aligned}
+\]
+con cada faceta como la \emph{media sobre filas} y el producto tomado \emph{de los
+agregados} --- la generación 3 de la Sección~\ref{sec:nexttrack-power-generations}. Dos
+anclas enmarcan el lote: \textbf{A}, el campeón de recall \Rp+M+\Cp\ (H
+\num{0.008603}, con su factor de eagerness ligado por \texttt{artist\_conc}
+\num{0.691653}), y \textbf{B}, el mejor modelo \emph{único} en la corona viva,
+\texttt{gru-infonce-h256} (H \num{0.024538}). La barra a superar es el máximo
+histórico de corona entre ramas sanas, $H_{\mathrm{bar}} = \num{0.024872}$, en
+manos de un control de capacidad h425
+(\runid{run-20260725-143502-be11b-seq-nexttrack}). Todas las ramas usan la
+partición canónica \dsid{seq-20260715-131139}; no hizo falta trabajo de dataset.
+
+\paragraph{Por qué este lote es inusualmente afilado.} $\lambda$ es un parámetro
+\emph{solo de evaluación}: los pesos entrenados son idénticos bit a bit entre las
+ramas de un mismo modelo, así que $\lambda=\num{1.0}$ es una compuerta de
+identidad bit a bit y cada $\Delta$ es una comparación pareada al máximo. Ambos
+controles reprodujeron sus anclas exactamente (\num{303} y \num{176} aciertos de
+\num{1431}, con MRR coincidiendo a \num{3.1e-11}), y el $H$ de cada rama fue
+\emph{recalculado} desde el \texttt{predictions.json} almacenado por una única ruta
+de código, de modo que el sesgo de redondeo por fila se cancela en cada $\Delta$
+(recalculado contra almacenado coincidió a \num{7.4e-8} y \num{2.1e-7}). Una
+tercera compuerta --- MMR activo --- exigía que el \texttt{ild} de cada rama con
+$\lambda<1$ difiriera del de su propio control por mucho más de \num{1e-6}, que es
+el detector registrado de que MMR se vuelva silenciosamente inocuo cuando el
+índice de la métrica de contenido es inalcanzable. Ninguna rama fue inocua.
+
+\emph{Resultados.} La Tabla~\ref{tab:nexttrack-mmr-arms} es la frontera, y la
+Figura~\ref{fig:nexttrack-mmr-frontier} la dibuja. Las ramas se clasifican por una
+regla pre-registrada: \textbf{NIVEL-1 GRATIS} significa $\Delta H$ sobre cero con
+el $\Delta$ de recall abarcando cero y $|\Delta\text{recall}| \ll \num{0.015}$;
+\textbf{NIVEL-2 CON PRECIO} significa una ganancia real de $H$ a un costo de recall
+que el IC ve; \textbf{NIVEL-3 RECHAZADA} significa $\Delta$recall por debajo de
+$-\num{0.03}$.
+
+\begin{table}[ht]
+  \centering
+  \caption{La frontera de MMR $\lambda$ sobre ambas anclas, partición canónica
+  \dsid{seq-20260715-131139} ($n=\num{1431}$), ordenada por holisticness@10. Todo
+  run id es \protect\runid{run-20260726-} más una hora de lanzamiento y un sufijo
+  hexadecimal, en orden de rama: \texttt{184115-bf395} (B3),
+  \texttt{184115-1dc77} (A4), \texttt{184116-20d9b} (B4),
+  \texttt{184115-147a6} (B2), \texttt{184115-e1539} (B1),
+  \texttt{183333-9a0b2} (B0), \texttt{184115-7a2f7} (A3),
+  \texttt{184115-36edb} (A2), \texttt{184115-6cb38} (A1),
+  \texttt{183333-1c361} (A0); las ramas A son \texttt{seq-blend} y las B
+  \texttt{seq-nexttrack}. Cada $\Delta$ es un bootstrap pareado (\num{2000}
+  remuestreos, rng \num{1337}) contra el control $\lambda=\num{1.0}$ de la
+  \emph{propia} rama, con las cinco facetas re-agregadas sobre el mismo conjunto
+  de índices remuestreado antes del producto; los límites del IC se dan a tres
+  decimales por ancho. Códigos de nivel: \emph{t1} NIVEL-1 GRATIS, \emph{t2}
+  NIVEL-2 CON PRECIO, \emph{t3} NIVEL-3 RECHAZADA, \emph{ctrl} el control
+  $\lambda=\num{1.0}$ de la propia rama. La faceta que liga --- la que entra en el
+  factor de eagerness por el \texttt{max()} --- es \texttt{conc} en A0/A1/A2 y B0, y
+  \texttt{adj} en todas las demás. H@10, R@10, \texttt{mus} ($=$ music@10) e
+  \texttt{ild} mejor cuanto más alto; \texttt{adj}, \texttt{conc} mejor cuanto más
+  bajo. Mejor celda por métrica en negrita; la rama promocionable B4 en negrita
+  completa. \texttt{mood\_coh} se omite por ancho y se lee en la interpretación:
+  B0$\to$B3 \num{0.4788}$\to$\num{0.4585} ($-\SI{4}{\percent}$) frente a
+  A0$\to$A4 \num{0.3982}$\to$\num{0.2378} ($-\SI{40}{\percent}$), el colapso del
+  campeón bajo diversificación.
+  \emph{Fuente: \texttt{2026-07-26-nexttrack-mmr-lambda-frontier.md}.}}
+  \label{tab:nexttrack-mmr-arms}
+  {\scriptsize\setlength{\tabcolsep}{1.9pt}\begin{tabular}{lllllllll}
+    \toprule
+    Rama & $\lambda$/pool & H@10 & $\Delta H$ [IC 95\%] & R@10 (aciertos) & $\Delta$R@10 [IC 95\%] & mus & ild & adj / conc \\
+    \midrule
+    B3 \emph{t2} & 0.7 / 200 & \best{0.034171} & $+.0096$ [$+.008$, $+.011$] & 0.11461 (164) & $-.0085$ [$-.016$, $-.001$] & 0.4747 & 0.5314 & 0.313 / 0.271 \\
+    A4 \emph{t3} & 0.3 / 200 & 0.031626 & $+.0230$ [$+.021$, $+.026$] & 0.10971 (157) & $-.1019$ [$-.120$, $-.084$] & \best{0.4925} & \best{0.8146} & 0.293 / \best{0.190} \\
+    \best{B4} \emph{t1} & \best{0.7 / 50} & \best{0.030355} & \best{$+.0058$ [$+.005$, $+.007$]} & \best{0.12020 (172)} & \best{$-.0029$ [$-.008$, $+.003$]} & 0.4670 & 0.5017 & 0.327 / 0.302 \\
+    B2 \emph{t1} & 0.8 / 200 & 0.029458 & $+.0049$ [$+.004$, $+.006$] & 0.11950 (171) & $-.0036$ [$-.009$, $+.001$] & 0.4648 & 0.4961 & 0.330 / 0.307 \\
+    B1 \emph{t1} & 0.9 / 200 & 0.026761 & $+.0022$ [$+.002$, $+.003$] & 0.12089 (173) & $-.0021$ [$-.006$, $+.002$] & 0.4597 & 0.4716 & 0.341 / 0.337 \\
+    B0 \emph{ctrl} & 1.0 / 200 & 0.024539 & --- & 0.12299 (176) & --- & 0.4558 & 0.4536 & 0.347 / 0.356 \\
+    A3 \emph{t3} & 0.5 / 200 & 0.023576 & $+.0150$ [$+.013$, $+.017$] & 0.16422 (235) & $-.0473$ [$-.061$, $-.033$] & 0.4871 & 0.6527 & 0.486 / 0.461 \\
+    A2 \emph{t2} & 0.7 / 200 & 0.015289 & $+.0067$ [$+.006$, $+.008$] & 0.19357 (277) & $-.0181$ [$-.029$, $-.008$] & 0.4759 & 0.5201 & 0.571 / 0.608 \\
+    A1 \emph{t1} & 0.9 / 200 & 0.010435 & $+.0018$ [$+.001$, $+.002$] & 0.21034 (301) & $-.0013$ [$-.008$, $+.005$] & 0.4625 & 0.4362 & 0.603 / 0.671 \\
+    A0 \emph{ctrl} & 1.0 / 200 & 0.008603 & --- & \best{0.21174 (303)} & --- & 0.4538 & 0.4064 & 0.610 / 0.692 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_mmr_frontier}
+  \caption{\textbf{Izquierda:} la frontera de $\lambda$ en el plano recall
+  $\times$ corona. Cada motor traza un camino a medida que $\lambda$ baja desde
+  \num{1.0}; el color es el nivel pre-registrado (verde NIVEL-1 GRATIS, azul
+  NIVEL-2 CON PRECIO, rojo NIVEL-3 RECHAZADA, gris control). Tres ramas de la GRU
+  única superan la barra histórica de corona \num{0.024872} con un recall cuyo IC
+  pareado abarca cero --- el primer movimiento de corona genuinamente gratuito del
+  registro. El camino del campeón alcanza un $H$ comparable solo tras pagar recall
+  que el IC ve, y sus dos mejores puntos de $H$ quedan rechazados como
+  degenerados. \textbf{Derecha:} la pregunta de mecanismo. H1 exigía
+  $|\Delta\texttt{artist\_conc}|\ge|\Delta\texttt{artist\_adj}|$; H2 exigía la
+  razón por debajo de \num{0.5} (zona sombreada). Medida en
+  \numrange{1.59}{3.06} en \emph{8 de 8} ramas, así que H2 queda refutada por un
+  factor de \numrange{3}{6} en la dirección contraria --- y la razón se encoge
+  monótonamente al bajar $\lambda$, es decir, la des-concentración fácil se compra
+  primero y el mecanismo se satura.}
+  \label{fig:nexttrack-mmr-frontier}
+\end{figure}
+
+\emph{Interpretación.} \textbf{MMR es una palanca de corona real, y la primera del
+registro.} Cada una de las ocho ramas con $\lambda<1$ eleva $H$ con el IC
+enteramente sobre cero. Lo que hace legítima la ganancia, en lugar de un artefacto
+del compuesto, es que \emph{tres} de los cuatro factores mejoran a la vez:
+\texttt{ild} sube (\num{0.4536}$\to$\num{0.5314} en la GRU,
+\num{0.4064}$\to$\num{0.8146} en el campeón), la eagerness baja y --- la parte
+portante --- \texttt{music@10} \emph{también} sube
+(\num{0.4558}$\to$\num{0.4747}). Una palanca que elevara $H$ degradando la
+relevancia quedaría cancelada por el factor de anclaje; esta no, y esa es
+exactamente la distinción que el umbral se escribió para imponer tras las
+patologías de \texttt{cummean/cummean} y \texttt{seq-mood}.
+
+\textbf{H1 se confirma unánimemente y H2 queda refutada, lo que \emph{cancela} la
+secuela que la campaña previa había pre-registrado.} En 8 de 8 ramas
+$\Delta\texttt{artist\_conc} \le \Delta\texttt{artist\_adj}$ (ambas negativas) con
+una razón de \numrange{1.59}{3.06}. Las pistas del mismo artista \emph{sí} son
+vecinas cercanas en el espacio de la métrica de contenido, así que una penalización
+de similitud máxima des-concentra artistas como efecto colateral, sin ninguna
+noción explícita de artista en ninguna parte. Por tanto el MMR sónico \emph{es} una
+palanca de des-eagering, y portar la \texttt{artist\_penalty} explícita de
+\texttt{seq-mood} al blend --- la secuela H2 pre-registrada --- ya no es el
+siguiente paso indicado. Queda archivada como \emph{complemento}, porque
+\texttt{artist\_adj} cae ${\sim}\num{2.5}\times$ más despacio que
+\texttt{artist\_conc} y se convierte en la faceta que liga a $\lambda$ bajo.
+
+\textbf{La faceta que liga cambia, y eso localiza el final de la palanca.} En el
+campeón el cambio de \texttt{artist\_conc} a \texttt{artist\_adj} ocurre entre
+$\lambda\num{0.7}$ y $\lambda\num{0.5}$; en la GRU ya ha ocurrido a
+$\lambda\num{0.9}$. Una vez que liga \texttt{artist\_adj}, el factor
+$(1-\text{eager})$ es el rígido y cada punto adicional de recall compra
+progresivamente menos corona --- la razón estructural de que la frontera de la GRU
+se aplane donde lo hace, y una predicción de que empujar por debajo de
+${\sim}\lambda\num{0.7}$ en la GRU es mal negocio. B3 es la confirmación: el $H$
+más alto medido en cualquier parte (\num{0.034171}) al costo de perder el empate
+de recall.
+
+\textbf{El punto de operación promocionable es la sonda de pool.} \textbf{B4}
+($\lambda\num{0.7}$, \texttt{mmr\_pool}~\num{50}) es la mejor rama NIVEL-1 con
+$H$~\num{0.030355} --- $+\SI{22.1}{\percent}$ sobre $H_{\mathrm{bar}}$ y
+\num{5.4} semianchos medidos por encima --- y supera a B2 en $H$ por
+$+\num{0.000889}$ con el IC sobre cero a un recall que abarca, de modo que su
+puesto está \emph{resuelto}, no es nominal. B2 ($\lambda\num{0.8}$) era la
+hipótesis de promoción pre-registrada del diseño y se cumplió casi exactamente
+como se proyectó (\num{0.0321} previsto frente a \num{0.029458} medido, con un
+costo de recall \emph{menor} que el proyectado). Nada se promocionó: se
+registraron seis definiciones, cada una con la nota «NO PROMOCIONADA ---
+confirmación de robustez $+$ aprobación del usuario pendientes». La tabla de
+recall queda intacta: \textbf{ninguna rama mejora el recall}; MMR solo lo cuesta.
+
+\textbf{El segundo eje, \texttt{mmr\_pool}, cierra como mando de ajuste fino y no
+como eje.} Limitar el conjunto de candidatos a \num{50} recupera recall
+($\Delta$ frente a pool~\num{200} $+\num{0.005584}$, IC sobre cero, como se
+hipotetizó --- un tope acota cuán lejos puede llegar MMR buscando diversidad) pero
+devuelve $H$ ($-\num{0.003838}$, IC bajo cero). No gana a $\lambda$ fijo; se mueve
+por la \emph{misma} frontera. Lo que le gana una línea en el registro es la
+comparación cruzada anterior: el tope alcanza un punto ligeramente \emph{mejor}
+que el ajuste puro de $\lambda$ más cercano. Prefiérase $\lambda$ para movimiento
+grueso y el pool para ajuste fino en un $\lambda$ elegido.
+
+\textbf{El contraste campeón/GRU se resuelve a favor de la salud de los factores,
+no del margen para des-eagerizar.} El diseño planteó esto como la pregunta
+portante: el campeón es $\num{1.9}\times$ más eager, así que un des-eagering
+absoluto dado vale allí ${\sim}\num{2.1}\times$ más $H$ relativo --- y sin embargo
+arranca $\num{2.85}\times$ por detrás, y la brecha se \emph{ensancha} bajo
+diversificación ($H$~\num{0.015289} frente a \num{0.034171} a
+$\lambda\num{0.7}$). Las facetas dicen por qué: el \texttt{mood\_coh} del campeón
+\textbf{se derrumba} al diversificar (\num{0.3982}$\to$\num{0.2378} a
+$\lambda\num{0.3}$, $-\SI{40}{\percent}$) mientras el de la GRU apenas se mueve
+($-\SI{4}{\percent}$). El recall del campeón proviene de la adyacencia de artista
+--- la rama de bigramas de Markov, según la
+Sección~\ref{sec:nexttrack-holisticness} --- así que diversificar alejándose del artista
+semilla también lo saca del vecindario de ánimo del prefijo. Paga dos veces.
+\textbf{El valor de MMR escala con la salud de los otros tres factores, no con el
+margen para des-eagerizar}, y ningún $\lambda$ cierra la brecha de corona del
+campeón.
+
+\paragraph{Dos hallazgos de instrumento, uno de ellos una advertencia sobre el
+registro mismo.} Primero, \textbf{el instrumento de pesos compartidos es
+$\numrange{3}{33}\times$ más afilado que el suelo de ruido de la familia de
+arquitecturas}: los semianchos medidos van de \numrange{0.000382}{0.002476} en
+$\Delta H$ frente al \num{0.0018} conservador de la familia, con el número de
+sesiones cuyo hit@10 cambió siquiera tan bajo como \textbf{\num{9}}. La rama A1
+estaba pre-registrada como «probablemente IRRESOLUBLE» y se resolvió a \num{4.8}
+semianchos medidos. Las palancas en tiempo de evaluación deben por tanto
+presupuestar su efecto mínimo detectable a partir del \emph{emparejamiento}, no de
+la cifra de arquitectura de la Sección~\ref{sec:nexttrack-power-stats} --- los dos
+regímenes difieren en más de un orden de magnitud, y confundirlos deja sin
+potencia a toda una clase de experimentos baratos. El corolario tranquiliza en la
+otra dirección: el barrido \emph{offline} de $\lambda$ del 2026-07-22 proyectó
+recall \num{0.2103} / \num{0.1936} / \num{0.1642} / \num{0.1097} y los runs
+nativos devolvieron \num{0.21034} / \num{0.19357} / \num{0.16422} / \num{0.10971}
+--- cuatro de cuatro a cuatro decimales, lo que valida el driver offline como
+instrumento de \emph{cribado}.
+
+Segundo, se encontró a la fuerza una nueva trampa de infraestructura que califica
+retroactivamente parte del registro: \textbf{un worker remoto ejecutando una
+imagen binaria \texttt{(deleted)} descarta silenciosamente claves de métrica que
+su estructura no conoce}. La compuerta de completitud de métricas falló en el
+primer intento con \texttt{artist\_conc\_at\_k} ausente, aunque los predictores
+eran idénticos en md5 al hub y el propio \texttt{metrics.json} del worker llevaba
+el campo: el \emph{demonio} del worker se había iniciado un día antes de que el
+campo existiera, \texttt{rsync} había reemplazado el archivo en disco pero no la
+imagen en ejecución, y la imagen antigua deserializó las métricas del predictor en
+una estructura sin el campo, lo descartó y publicó el conjunto filtrado
+\textbf{sin error}. \texttt{holisticness@10} fue correcto en todo momento porque
+el predictor calcula $H$ él mismo antes de que el servidor lo vea --- que es
+exactamente lo que hizo invisible el defecto. Todos los runs remotos de una
+ventana de cuatro horas del 2026-07-26 perdieron \texttt{artist\_conc\_at\_k}, y
+por eso la concentración citada para el ancla B era una \emph{reconstrucción} a
+partir de \texttt{top\_k\_ids} y el mapa de artistas del dataset. Esa
+reconstrucción queda ahora validada de forma independiente: los valores emitidos
+nativamente (\num{0.6916530786551751} y \num{0.35591272614333413}) coinciden con
+las reconstrucciones de la herramienta de re-puntuación hasta el último dígito.
+Remedio: ciclar el demonio siempre que se añada un campo de métrica; el
+\texttt{rsync} del binario no basta.
+\emph{Fuente: \texttt{2026-07-26-nexttrack-mmr-lambda-frontier.md}.}
+
+\section{Pista siguiente: despliegues autorregresivos: una métrica de generación y cinco barridos que dicen no}
+\label{sec:nexttrack-rollout}
+\emph{Motivación.} Esta campaña la provocó una \emph{preferencia del usuario}, no
+una métrica. Sobre una playlist real de 135 pistas el usuario prefirió con
+claridad el recorrido de 20 pasos de un motor sobre el de otro, mientras
+\texttt{holisticness@10} puntuaba esos dos recorridos con \num{0.003} de
+diferencia. Esa brecha es el punto: toda métrica del registro --- recall@10,
+holisticness@10 y sus cuatro facetas, \texttt{music@10}, incluso el evaluador
+multi-paso de continuación --- puntúa \emph{una} lista ordenada producida a partir
+de un prefijo \emph{real}. Ninguna alimenta al modelo con su propia salida. Un
+recorrido de 20 pasos hace exactamente eso, así que un fallo de trayectoria --- un
+despliegue cuya energía decae hasta que una semilla de fiesta se ha convertido en
+un bajón --- es estructuralmente invisible para todas ellas. Es la primera campaña
+de este documento que construye un instrumento para el régimen de
+\emph{despliegue}, y es el ancestro directo de la superficie de caminata de la
+Sección~\ref{sec:nexttrack-artistcap}.
+
+\paragraph{Qué se construyó.} Cuatro cosas, todas fuera de la ruta de
+entrenamiento.
+\begin{description}
+  \item[\texttt{hold@N}, una métrica de generación.] Por eje legible $a$ en
+  \{energía, valencia, acousticness, tempo\},
+  \[
+    \texttt{fade}_a = \frac{|\mathrm{mean}(\text{2.\textsuperscript{a} mitad}) -
+      \mathrm{mean}(\text{1.\textsuperscript{a} mitad})|}{\texttt{band}_a},
+  \]
+  y entonces
+  \[
+    \texttt{hold@}N = 1 - \mathrm{clamp}\bigl(\mathrm{mean}_a(\texttt{fade}_a)
+      + \texttt{stasis},\,0,\,1\bigr).
+  \]
+  Las bandas por eje se calibran sobre \num{2135} sesiones \emph{reales} de
+  entrenamiento (desvanecimiento de energía p10 \num{0.0141}, p50 \num{0.0769},
+  p90 \num{0.1963}; tempo \num{1.28}, \num{8.05}, \num{22.43}), de modo que ejes
+  con unidades incompatibles se combinan y «un desvanecimiento grande» significa
+  grande \emph{en relación con cómo escucha realmente este oyente}. Las sesiones
+  reales no son planas --- el desvanecimiento mediano de energía es \num{0.077} ---
+  así que una métrica que premiara el desvanecimiento nulo pondría a un generador
+  antinaturalmente rígido por encima del oyente al que imita.
+  \item[\texttt{stasis}, el término anti-gaming.] Una métrica de puro
+  desvanecimiento es degenerada: veinte pistas casi idénticas se desvanecen en
+  \num{0} y puntúan \num{1.0}, que es la misma patología que obliga a
+  \texttt{holisticness@10} a llevar un umbral de recall \emph{externo}.
+  \texttt{stasis} pone el umbral \emph{dentro} de la métrica penalizando pasos más
+  pequeños que el salto p10 del propio oyente, y se verificó sobre un aplanamiento
+  sintético (se-mueve-con-naturalidad \num{1.000}, en-tu-umbral \num{1.000},
+  medio-umbral \num{0.500}, apenas-se-mueve \num{0.048}).
+  \item[Un evaluador offline de despliegue.] \texttt{seq\_continuation\_eval.py
+  --rollout} puntúa sesiones de \emph{prueba} muestreadas \textbf{importando} el
+  bucle de generación de la ruta de servicio en lugar de reimplementarlo, de modo
+  que una puntuación offline describe los recorridos que el laboratorio sirve de
+  verdad; la refactorización se verificó idéntica byte a byte. Es a demanda y
+  muestreada porque un despliegue cuesta \texttt{steps} pasadas de vocabulario
+  completo por sesión frente a la única de la ruta principal
+  (${\sim}20\times$).
+  \item[Una lectura para el laboratorio de playlists.] Una tarjeta de informe de
+  ánimo, un gráfico comparativo de forma del recorrido y diagnósticos
+  \texttt{passed\_over} por paso, con las facetas de holisticness relegadas a un
+  bloque de detalle plegado.
+\end{description}
+
+\emph{Resultados.} La Tabla~\ref{tab:nexttrack-rollout} recoge cinco barridos, \num{120}
+despliegues pareados y \num{240} recorridos, bajo un bootstrap pareado sobre
+\emph{semillas} más un jackknife de dejar-una-semilla-fuera. La política de
+despliegue se congeló todo el tiempo en los valores por defecto del laboratorio
+(\num{20} pasos, penalización de artista \num{2}, ancla \num{1}, temperatura
+\num{0} --- determinista, así que una semilla es una muestra y no hay varianza de
+despliegue).
+
+\begin{table}[ht]
+  \centering
+  \caption{Cinco barridos de \texttt{hold@20}, bootstrap pareado sobre semillas
+  (\num{2000} remuestreos, rng \num{1337}) con un jackknife de
+  dejar-una-semilla-fuera (``LOO'' es el número de reajustes que preservan el
+  veredicto). Un $\Delta$ positivo favorece a la rama de torre doble. La regla
+  pre-registrada era CONFIRMADO si y solo si el IC queda enteramente sobre cero
+  \emph{y} el veredicto sobrevive $\ge\SI{90}{\percent}$ de los reajustes LOO;
+  EMPATE si el IC abarca. S2 y S3 cumplieron esa regla y aun así fueron
+  \emph{retirados} --- véase la interpretación.
+  \emph{Fuente: \texttt{2026-07-27-rollout-hold-metric.md}.}}
+  \label{tab:nexttrack-rollout}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{llrlll}
+    \toprule
+    \# & Barrido & $n$ & $\Delta$\,\texttt{hold@20} [IC 95\%] & LOO & Veredicto \\
+    \midrule
+    S1 & piloto, semillas de ánimo extremo, prefijo de 10 & 8 & $-0.034$ [$-0.138$, $+0.079$] & 0/8 & EMPATE \\
+    S2 & piloto, semillas de ánimo extremo, prefijo de 30 & 8 & $+0.314$ [$+0.107$, $+0.529$] & 8/8 & \emph{retirado} \\
+    S3 & réplica, semillas \textbf{aleatorias} & 39 & $+0.122$ [$+0.044$, $+0.201$] & 39/39 & \emph{confundido} \\
+    S4 & \textbf{control de misma partición} & 39 & $+0.033$ [$-0.030$, $+0.093$] & 0/39 & \best{EMPATE} \\
+    S4b & misma partición, otro checkpoint doble & 39 & $+0.051$ [$-0.012$, $+0.118$] & 0/39 & \best{EMPATE} \\
+    S4c & \textbf{intra-arquitectura} & 39 & $-0.072$ [$-0.141$, $-0.002$] & --- & significativo \\
+    S5 & \textbf{las \num{11} playlists del propio usuario} & 11 & $+0.004$ [$-0.088$, $+0.104$] & 0/11 & \best{EMPATE} \\
+    --- & la única playlist juzgada & 1 & $+0.379$ (\num{0.623} / \num{0.245}) & --- & atípico \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{Interpretación.} \textbf{El desvanecimiento en despliegue no separa a esta
+familia.} A partición de entrenamiento igualada las dos arquitecturas empatan
+\emph{dos veces}; sobre las propias playlists del usuario el par que prefirió
+empata; y el único efecto que sobrevive es de \textbf{nivel de checkpoint} dentro
+de una arquitectura (S4c), y no se traslada al régimen de playlists. La media de
+\texttt{hold@20} sobre las mismas \num{39} semillas aleatorias es \num{0.6488} /
+\num{0.6309} para los dos checkpoints de torre doble frente a \num{0.5983} /
+\num{0.5266} para los dos de GRU única --- así que la aparente victoria de
+arquitectura de S3 se descompone en una componente de arquitectura no
+significativa ($+\num{0.05}$) y una componente de \emph{checkpoint} significativa
+($+\num{0.072}$). Dos modelos \texttt{seq-nexttrack} difieren entre sí más de lo
+que la torre doble difiere de la GRU única a partición igualada, y el checkpoint
+que el laboratorio de playlists preselecciona por defecto resulta ser el peor
+sostenedor de los cuatro. La comparación original del usuario era el mejor
+sostenedor contra el peor.
+
+Combinado con los cinco nulos de arquitectura previos, este es un sexto, y es la
+forma más fuerte disponible, porque la réplica de siempre a esos nulos era que
+«recall@10 no puede ver la calidad de la sesión». No puede; y cuando mira un
+instrumento construido para el régimen de despliegue, tampoco hay nada allí.
+
+\textbf{La varianza por semilla domina la identidad del modelo, y ese es el
+hallazgo operativo.} Las brechas individuales sobre \emph{un} par de modelos van de
+$+\num{0.39}$ a $-\num{0.27}$, mientras la diferencia media a nivel de modelo sobre
+las playlists del usuario es $+\num{0.004}$. Qué semilla se le dé al generador
+importa mucho más que cuál de estos modelos genere. Dos consecuencias: preferir
+servir un \emph{conjunto} y dejar que el oyente elija antes que cazar un generador
+mejor, y presupuestar $\ge\num{40}$ semillas para cualquier comparación futura de
+despliegue --- entre \num{8} y \num{12} no resuelven nada con esta varianza.
+
+\textbf{\texttt{hold@N} es un instrumento que funciona, pero no un ordenador de
+modelos.} Se disparó sobre una diferencia real de checkpoint, se disparó sobre la
+playlist juzgada (\num{0.62} frente a \num{0.25}) donde
+\texttt{holisticness@10} veía una brecha de \num{0.003}, y devolvió EMPATE
+correctamente tres veces. La recomendación es por tanto conservarla como
+\emph{lectura de laboratorio} por recorrido y \textbf{no} cablearla como columna de
+tabla: su verdad de referencia es la preferencia del oyente, que está en $n=1$
+voto ciego. Promover un compuesto no validado a métrica principal es cómo la corona
+acabó necesitando un umbral de recall externo, y sustituir un compuesto no validado
+por otro repite el error.
+
+\paragraph{Cuatro trampas metodológicas, cada una al precio de un positivo
+retirado.} Valen más que el nulo. \textbf{(1) Una comparación entre particiones
+disfrazada de resultado de arquitectura.} Las dos preselecciones por defecto del
+laboratorio se entrenan sobre particiones \emph{distintas} con vocabulario e
+ítems-latentes idénticos, así que compararlas atribuye a la arquitectura
+diferencias de checkpoint y de partición; empareje del mismo lote cuando la
+afirmación sea arquitectónica. \textbf{(2) La selección de semillas de ánimo
+extremo infla los efectos ${\sim}\num{2.5}\times$} (el $+\num{0.314}$ de S2 se
+volvió $+\num{0.122}$ de S3 sobre una muestra aleatoria). \textbf{(3) Un término
+anti-gaming puede ser demasiado débil para su trabajo:} \texttt{stasis} normalizaba
+al principio el déficit por el \emph{ancho} de la banda y, como la banda de saltos
+de este oyente es amplia, un despliegue aplanado puntuó \num{0.740} ---
+\emph{por encima} del \num{0.477} de un generador real. Normalice por el
+\emph{umbral}; un guardián al que puede vencer la degeneración que persigue blanquea
+esa degeneración como buena puntuación. \textbf{(4) Una métrica que no devuelve
+nada debe descartar el \emph{par}} y reportar el $n$ menor, o el emparejamiento se
+rompe en silencio. El jackknife se ganó el sueldo con $n<40$ en todo momento: mató
+dos de tres positivos por eje con $n=8$ y marcó S4 y S5 como no respaldados con
+0/39 y 0/11.
+
+\paragraph{Qué añade la lectura por eje, incluido un control negativo fallido.} Con
+$n=\num{39}$ solo el desvanecimiento de \emph{energía} separa las ramas
+($-\num{0.039}$ [$-\num{0.069}$, $-\num{0.009}$], a favor de la torre doble);
+valencia, acousticness y tempo abarcan cero. Pero un control \emph{negativo}
+pre-registrado se movió: la desviación de \emph{nivel} de energía respecto de la
+semilla favorece a la GRU única ($+\num{0.018}$ [$+\num{0.005}$,
+$+\num{0.032}$]). Son propiedades distintas, así que la afirmación tuvo que
+re-alcanzarse de «sostiene mejor la semilla» a «es más estacionaria» --- y muestra
+que la exclusión deliberada de un término de nivel en \texttt{hold@N} es una
+decisión que \emph{cambia el orden}, no una simplificación neutra. Dos límites más
+viajan con el lote: el \SI{74}{\percent} del corpus lleva los campos acústicos que
+la métrica necesita, así que las semillas se pre-filtraron por cobertura de prefijo
+$\ge\SI{60}{\percent}$ (un leve efecto de selección), y nada de esto se ha
+escuchado.
+
+Nada se promocionó, registró ni cableó; el campeón, la tabla de corona y los
+anclajes del grupo de mejores modelos quedan sin cambios. Para el registro, la
+posición en la corona viva relevante para la cuestión de la torre doble es un
+\emph{empate} más que una derrota --- la mejor rama doble legítima \num{0.02378}
+frente al \num{0.02454} de la GRU única, una brecha de \num{0.0008} contra un
+semiancho de ${\sim}\num{0.0018}$. La familia fue refutada en recall@10, empata en
+la métrica principal viva y no muestra nada en el eje de despliegue. El siguiente
+eje indicado no es por tanto la topología sino el \emph{régimen de entrenamiento}:
+los cinco nulos de arquitectura mantuvieron el teacher forcing de un paso idéntico
+byte a byte mientras el producto rueda veinte pasos sobre su propia salida, y ese
+desajuste de exposición es lo único que esos nulos no podían haber detectado.
+\emph{Fuente: \texttt{2026-07-27-rollout-hold-metric.md}.}
+
+\section{Pista siguiente: un memorándum de investigación, y qué permite su procedencia}
+\label{sec:nexttrack-memo}
+\emph{Estatus, primero.} Esta sección consolida un documento que \textbf{no es un
+informe de campaña}. Nada se ejecutó en el servidor, nada se promocionó, nada se
+registró; el campeón, la tabla de mejores, la tabla de corona y los anclajes del
+grupo de mejores modelos quedan todos sin cambios por él. Lo produjo un flujo de
+investigación (cuatro exploradores, cinco lentes de propuesta, cinco cribadores
+adversariales y luego síntesis) más puntuación \emph{offline} contra checkpoints
+congelados. Donde reporta un número, ese número vino de un cribado offline sobre
+artefactos almacenados, no de un run nativo. Se incluye aquí porque es el padre
+directo de la campaña de la Sección~\ref{sec:nexttrack-markovgate} y porque sus resultados
+negativos --- el cementerio de más abajo --- son más baratos de reutilizar que de
+redescubrir. Se reporta en un registro más bajo que las campañas medidas, y sus
+cifras se mantienen deliberadamente fuera de toda tabla de este documento.
+
+\paragraph{La partición de procedencia, mantenida visible.} El propio memorándum
+distingue dos clases de número, y esa distinción sobrevive a esta síntesis.
+\begin{description}
+  \item[Re-derivado de forma independiente por el orquestador.] La proporción de
+  consultas de prueba cuyo último ítem de prefijo tiene \emph{cero} soporte de
+  bigramas de entrenamiento: \textbf{\num{795} de \num{1431} $=$ \num{0.5556}},
+  reproducida por un script independiente. El control sin compuerta, que es
+  auto-validante porque debe igualar al campeón: \textbf{\num{0.21174}}, exacto. La
+  rama con compuerta: \textbf{\num{0.23201}}, un $\Delta$ pareado de
+  $+\num{0.02027}$ $[+\num{0.01048}, +\num{0.03075}]$ con el IC sobre cero. Y su
+  descomposición por bucket: el bucket de soporte cero se mueve
+  \num{0.1660}$\to$\num{0.2025} sobre \num{795} consultas mientras los dos buckets
+  cálidos quedan \textbf{idénticos bit a bit} (\num{0.3116} y \num{0.2326}, sin
+  cambio).
+  \item[\textbf{No} verificado por el orquestador.] Solo reportado por agentes y
+  tratado como provisional: la cifra $+\num{0.01957}$ de la segunda partición, el
+  $+\num{0.02865}$ del canal de repetición, los números de
+  \texttt{latent\_gamma} y la discordancia recalculada de \num{0.0706} con su suelo
+  de ruido de ${\sim}\num{0.0145}$. Ninguno aparece en la Tabla~\ref{tab:nexttrack-lb} ni
+  en ninguna tabla de corona, y el primero de ellos es precisamente lo que se
+  encargó establecer nativamente a la campaña siguiente.
+\end{description}
+
+\paragraph{Una cautela que el memorándum enuncia sobre su propio titular.} Las
+diez variantes de compuerta se cribaron \textbf{sobre el conjunto de prueba}, así
+que citar el IC de la mejor rama es optimista por construcción y el cribado no
+puede ser evidencia por sí mismo. Tres cosas lo mitigan --- cuatro variantes
+mecánicamente relacionadas caen todas en \numrange{0.019}{0.020}, la descomposición
+por bucket es una explicación mecánica y no un ajuste, y los buckets cálidos no se
+mueven ni un acierto --- pero la mitigación es un argumento, no una medición. La
+confirmación nativa en dos particiones es la compuerta real, y es la
+Sección~\ref{sec:nexttrack-markovgate}.
+
+\paragraph{El titular honesto: «una topología mejor» es la pregunta equivocada.} El
+registro ya la había respondido seis veces: celda y función de pérdida en el
+espacio AE-64; profundidad, anchura y dirección; anchura en PCA-192; fusión de
+torre doble (Sección~\ref{sec:nexttrack-dualtower}); la cabeza MLP de fusión, una regresión
+\emph{activa} recuperada al borrarla; el pre-codificador por paso, una pérdida
+medida con el mecanismo identificado hasta \texttt{frac\_exact\_zero} $=$
+\texttt{frac\_negative\_coords} (Sección~\ref{sec:nexttrack-preencoder}); y el
+desvanecimiento en despliegue (Sección~\ref{sec:nexttrack-rollout}). Cinco lentes se
+apuntaron a la cuestión de topología y \emph{toda} propuesta con forma de
+arquitectura volvió debilitada, bajo el ruido o pre-eliminada. Dos volvieron con
+resultados negativos medidos: una rama de Markov dividida perdió en cada punto de
+su propia rejilla pre-registrada, y una cabeza softmax factorizada por artista
+quedó muerta por su propio run de pre-eliminación, que encontró que compuertar por
+los 5 artistas principales sobre el checkpoint real cambia el recall en
+\textbf{exactamente \num{0.0}}, porque el top-10 de la GRU entrenada ya vive dentro
+de sus propios 5 artistas principales.
+
+\textbf{Hacia dónde apunta la evidencia en cambio: el modelo no es la restricción.
+Lo son aquello contra lo que se le pide ordenar y qué ramas tienen permitido hablar
+en una consulta dada.} Toda propuesta que sobrevivió al cribado adversarial es un
+cambio de conjunto de candidatos o de condicionamiento por evidencia --- una rama de
+Markov con compuerta de evidencia, un canal causal de repetición entre sesiones,
+escalares de fiabilidad por rama, una máscara de negativos solo del prefijo, la
+temperatura del softmax nunca barrida. Ninguna es una topología. Es la misma
+conclusión a la que el registro había llegado por el lado de la representación,
+alcanzada desde cinco direcciones independientes, y viene con una justificación de
+medición: las palancas en tiempo de evaluación y de puntuación son
+$\numrange{3}{33}\times$ más baratas de resolver que las de entrenamiento
+(Sección~\ref{sec:nexttrack-mmr}), así que una lista corta de propuestas en tiempo de
+puntuación es la respuesta racional al instrumento que este laboratorio tiene.
+
+\paragraph{Los dos supervivientes que merecen nombre.} \textbf{(1)
+\texttt{markov\_gate}} --- hacer que la rama de Markov se abstenga donde no tiene
+evidencia de bigramas, restaurando el término \texttt{trust} que la normalización
+del blend borra. Doce líneas, cero parámetros aprendidos, y confirmado nativamente
+en la sección siguiente. \textbf{(2) Un canal causal de repetición entre
+sesiones} --- el \SI{76.17}{\percent} de los objetivos retenidos se reprodujo en una
+sesión \emph{estrictamente anterior} y no está en el prefijo actual, y nada en la
+familia puede verlo, porque la rama de Markov es un bigrama congelado en
+entrenamiento y el puntuador de recencia solo puntuaba ítems del prefijo, que el
+evaluador enmascara a $-\infty$ (su \num{0.001} registrado es código muerto, no una
+medición). Su Jaccard de aciertos con la GRU es \num{0.060} frente al \num{0.201}
+del par GRU/Markov que produjo un blend funcional, es decir, es señal
+genuinamente distinta. Su problema es de \emph{gobernanza}, no de código: es una
+enmienda del conjunto de información que mueve el techo ordenable de \num{0.4493}
+a \num{0.7617}, lo que exige su propia columna de tabla y una decisión explícita
+antes de que cualquier número suyo sea comparable con algo de este documento. Una
+tercera propuesta, \texttt{latent\_gamma} (un re-escalado espectral de un escalar
+sobre los ítems-latentes), merece registro por su \emph{reencuadre} más que por su
+delta: en el cribado offline la contribución de recall completa del campeón es
+reproducible por un re-escalado diagonal de \num{192} números, lo que recategoriza
+«la mayor victoria del registro» como un arreglo de condicionamiento que la
+supervisión encontró por casualidad, y predice que seguir aprendiendo métricas
+lineales está casi agotado. Todas estas cifras son de la clase provisional.
+
+\paragraph{El cementerio, que es la parte reutilizable.} Cada entrada es un carril
+que no debería reabrirse sin información nueva. La entropía cruzada de catálogo
+completo o restringida al soporte queda pre-vaciada por una rama existente con
+${\sim}\SI{53}{\percent}$ de cobertura de soporte (\num{0.1223} frente a
+\num{0.1230}) --- el candidato número uno de la literatura no se traslada porque el
+lado de ítem está congelado. Una cabeza softmax factorizada por artista queda
+refutada por su propia pre-eliminación (exactamente \num{0.0}). Dividir la rama de
+Markov en componentes de pista y de retroceso se midió en cada punto de la rejilla
+y perdió en los cinco ($-\num{0.0217}$ a $-\num{0.0384}$, todos con IC bajo cero),
+porque una z-normalización separada destruye estructuralmente el término
+\texttt{trust} dentro del régimen cálido. Un re-ordenador de segunda etapa con
+pool igualado es inalcanzable: la densidad de positivos del pool de entrenamiento
+es \num{0.5975} frente al \num{0.3368} de prueba, así que su propia compuerta de
+avance pasa \emph{a causa} de la confusión. Una cabeza de mezcla de vMF pierde
+frente a su propia descomposición oráculo. Difusión, DreamRec y flow-matching están
+falsificados externamente para este escenario, y la recuperación generativa con IDs
+semánticos queda estrictamente dominada cuando el coseno exacto sobre
+\SI{15}{\mega\byte} ya es asequible y el corpus es
+\SIrange{55}{64}{\percent} frío. El des-sesgado de popularidad no tiene nada que
+des-sesgar (la línea base de popularidad es \num{0.0007}). La minería de negativos
+duros es perjudicial a temperatura baja aquí, porque los negativos más duros son
+pistas del mismo álbum y del mismo artista, es decir, se minan falsos positivos. Y
+la norma de salida pre-normalización de la GRU no es una señal de confianza
+(correlación con la corrección $+\num{0.0073}$, y la pérdida es exactamente
+invariante a la norma); el margen entre la puntuación top-1 y las diez siguientes
+sí lo es, con $+\num{0.294}$.
+
+\paragraph{El único resultado teórico duradero.} La observación transversal del
+memorándum de que \textbf{la anomalía del combinador aprendido queda explicada
+mecánicamente} es la parte que cambia cómo debe leerse el registro. Una búsqueda
+oráculo previa sobre pesos de rama \emph{escalares, globales y estáticos} devolvió
+$+\num{0.004}$ abarcando cero, y ahora se ve por qué eso es compatible con un
+$+\num{0.020}$ real de una compuerta: quitar la rama de Markov \emph{globalmente}
+gana en el bucket de soporte cero y pierde en el bucket cálido, y las dos se
+cancelan casi exactamente. Ninguna constante puede expresar una intervención cuyo
+signo se invierte con un estadístico de datos por consulta, y la z-normalización es
+invariante a escala, así que demostrablemente no puede verla. La trampa registrada
+de «cuatro nulos independientes de combinador aprendido» debería por tanto prohibir
+la \emph{fusión aprendida a nivel de puntuación} --- pesos ajustados, stackers,
+fusión de rangos, fusión de representaciones de extremo a extremo --- y
+\textbf{no} el compuertado por evidencia por consulta, que es una tercera cosa:
+nada se aprende, nada co-adapta y la condición es un conteo del lado de
+entrenamiento.
+\emph{Fuente: \texttt{2026-07-27b-nexttrack-model-topology-research-memo.md}
+(memorándum de investigación; véase la partición de procedencia arriba).}
+
+\section{Pista siguiente: \texttt{markov\_gate}: una rama que se abstiene donde no tiene evidencia}
+\label{sec:nexttrack-markovgate}
+\emph{Motivación.} Esta es la confirmación nativa en dos particiones de la
+propuesta titular del memorándum (Sección~\ref{sec:nexttrack-memo}), y produce la mayor
+ganancia individual de recall de todo el arco de pista siguiente a partir de un
+cambio de nueve líneas sin parámetros nuevos.
+
+\paragraph{El mecanismo, y por qué no es el carril refutado del combinador.} La
+rama de Markov mezcla su fila de bigramas con un retroceso por artista/género a
+través de un peso de confianza $\texttt{trust} = n_u/(n_u+8)$, donde $n_u$ es el
+soporte de bigramas de entrenamiento del último ítem del prefijo de la consulta.
+Con $n_u = 0$ la confianza es cero y la rama es \textbf{puro retroceso}: no lleva
+ninguna evidencia a nivel de pista. Pero el normalizador de candidatos del blend es
+\emph{invariante a escala} por construcción --- lleva el vector de puntuaciones de
+cada rama a varianza unitaria para que tres ramas en escalas muy distintas sean
+comparables --- así que el retroceso sin evidencia se re-infla y habla con un voto
+completo de un tercio de todos modos. En la partición canónica eso ocurre en
+\textbf{\num{795} de \num{1431} consultas de prueba}, el \SI{55.6}{\percent}. La
+intervención consiste en hacer que la rama se \emph{abstenga} con $n_u = 0$ y
+renormalizar el divisor de tres ramas a dos. Nada se aprende; la condición es un
+conteo del lado de entrenamiento. Esa es exactamente la tercera categoría que la
+trampa registrada del combinador aprendido no cubría, y la descomposición por
+bucket de más abajo es una prueba mecánica de que ningún peso global estático podía
+encontrar el efecto: quitar la rama globalmente es un empate de $-\num{0.0070}$,
+porque la ganancia de soporte cero y la pérdida del bucket cálido se cancelan.
+
+\paragraph{Diseño y la compuerta previa.} Seis runs en el hub, todos
+\texttt{seq-blend} desde la definición del campeón, con los controles
+\textbf{re-entrenados en este lote} en lugar de sustituidos del archivo, de modo que
+toda comparación pareada esté igualada en código a una sola generación. Dos
+particiones: la canónica \dsid{seq-20260715-131139} y la disjunta de retención
+anterior \dsid{seq-20260718-211238} (\SI{64}{\percent} frío,
+$n_{\mathrm{test}}$ \num{1431}). El alto duro pre-registrado era que el control sin
+compuerta tenía que reproducir recall@10 \num{0.21174}, exactamente \num{303} de
+\num{1431}, probando que el nuevo indicador dejaba al campeón idéntico bit a bit.
+\textbf{Lo hizo, hasta el último dígito} (\num{0.21174004192872117}).
+
+\emph{Resultados.} La Tabla~\ref{tab:nexttrack-markovgate} es el lote, la
+Tabla~\ref{tab:nexttrack-markovgate-paired} la estadística pareada y la
+Tabla~\ref{tab:nexttrack-markovgate-buckets} la descomposición que sostiene el argumento.
+La Figura~\ref{fig:nexttrack-markov-gate} dibuja ambas.
+
+\begin{table}[ht]
+  \centering
+  \caption{El lote de \texttt{markov\_gate}, seis runs desde la definición campeona
+  \texttt{blend-gru-markov-content-proj}. \dsid{ds1} $=$
+  \dsid{seq-20260715-131139} (canónica, \SI{55}{\percent} frío), \dsid{ds2} $=$
+  \dsid{seq-20260718-211238} (disjunta, \SI{64}{\percent} frío); el recall
+  absoluto de \dsid{ds2} es menor \emph{por construcción}, así que léase solo a
+  través del $\Delta$ pareado. Todo run id es \protect\runid{run-20260728-} más el
+  valor de la columna \emph{run}. Las métricas graduadas también siguen a la
+  compuerta: artist@10 \num{0.333}$\to$\num{0.367} y genre@10
+  \num{0.401}$\to$\num{0.463} de C1 a A1, y \num{0.382} / \num{0.497} en A3. Filas
+  ordenadas por recall@10. H@10 es de generación~3
+  (Sección~\ref{sec:nexttrack-power-generations}). R@10, MRR, H@10, mus@10, \texttt{ild},
+  \texttt{mood} mejor cuanto más alto; \texttt{adj}, \texttt{conc} mejor cuanto más
+  bajo. Mejor celda por métrica en negrita entre las ramas de la partición
+  canónica; la nueva fila de mejor recall A1 en negrita completa.
+  \emph{Fuente: \texttt{2026-07-27c-nexttrack-markov-gate-confirm.md}.}}
+  \label{tab:nexttrack-markovgate}
+  {\scriptsize\setlength{\tabcolsep}{1.6pt}\begin{tabular}{llllllllllll}
+    \toprule
+    id & run & ds & cambios & R@10 (aciertos) & MRR & H@10 & mus@10 & ild & adj & conc & mood \\
+    \midrule
+    \best{A1} & \texttt{005349-507bb} & ds1 & \best{comp.} & \best{0.23201 (332)} & \best{0.13352} & 0.018699 & 0.49319 & 0.43377 & 0.57477 & 0.59821 & \best{0.46226} \\
+    A3 & \texttt{012030-6d1b7} & ds1 & comp.\ $+$ $\lambda$0.7 & 0.21314 (305) & 0.12852 & \best{0.030980} & \best{0.51649} & \best{0.56770} & \best{0.51279} & \best{0.47325} & 0.41885 \\
+    C1 & \texttt{004444-b32ea} & ds1 & --- (camp.) & 0.21174 (303) & 0.12199 & 0.008603 & 0.45379 & 0.40637 & 0.60971 & 0.69165 & 0.39822 \\
+    C3 & \texttt{011245-bfc67} & ds1 & solo $\lambda$0.7 & 0.19357 (277) & 0.11560 & 0.015289 & 0.47592 & 0.52010 & 0.57135 & 0.60823 & 0.36433 \\
+    A2 & \texttt{010658-39e20} & ds2 & comp. & 0.19008 (272) & 0.11801 & 0.008414 & 0.42953 & 0.41401 & 0.58672 & 0.64847 & 0.42618 \\
+    C2 & \texttt{010113-e2599} & ds2 & --- (camp.) & 0.17051 (244) & 0.10498 & 0.003392 & 0.39616 & 0.40177 & 0.61013 & 0.71945 & 0.35364 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Bootstrap pareado sobre las \num{1431} sesiones de prueba (\num{2000}
+  remuestreos, rng \num{1337}, apareado por id de fila). $\Delta H$ se calcula
+  \emph{producto-de-medias por remuestreo} --- las cinco facetas re-agregadas sobre
+  el mismo conjunto de índices remuestreado para ambas ramas, y luego multiplicadas
+  --- no como media de productos por fila. $n_{disc}$ cuenta las sesiones cuyo
+  hit@10 cambió siquiera, con el desglose por signo. Un veredicto WIN significa que
+  el IC de recall queda enteramente sobre cero, EMPATE que abarca; los límites se
+  abrevian a cuatro decimales por ancho.
+  \emph{Fuente: \texttt{2026-07-27c-nexttrack-markov-gate-confirm.md}.}}
+  \label{tab:nexttrack-markovgate-paired}
+  {\scriptsize\setlength{\tabcolsep}{4pt}\begin{tabular}{llllr}
+    \toprule
+    Comparación & $\Delta$R@10 [IC 95\%] & Veredicto & $\Delta H$ [IC 95\%] & $n_{disc}$ ($+$/$-$) \\
+    \midrule
+    A1 $-$ C1 (compuerta, ds1) & \best{$+.02027$ [$+.0105$, $+.0308$]} & \best{WIN} & $+.010096$ [$+.0085$, $+.0117$] & 57 (43/14) \\
+    A2 $-$ C2 (compuerta, ds2) & \best{$+.01957$ [$+.0105$, $+.0301$]} & \best{WIN} & $+.005022$ [$+.0039$, $+.0062$] & 56 (42/14) \\
+    A3 $-$ C3 (compuerta, $\lambda$0.7) & \best{$+.01957$ [$+.0091$, $+.0301$]} & \best{WIN} & $+.015691$ [$+.0136$, $+.0179$] & 64 (46/18) \\
+    A3 $-$ C1 (comp.$+$MMR / campeón) & $+.00140$ [$-.0119$, $+.0147$] & EMPATE & \best{$+.022377$ [$+.0199$, $+.0249$]} & 96 (49/47) \\
+    C3 $-$ C1 (solo MMR $\lambda$0.7) & $-.01817$ [$-.0294$, $-.0077$] & cuesta recall & $+.006686$ [$+.0057$, $+.0077$] & 60 (17/43) \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{La descomposición por bucket, reproducida \emph{nativamente} a través
+  del constructor real de transiciones y agrupada por el soporte de bigramas de
+  entrenamiento $n_u$ del último ítem del prefijo de cada consulta --- la cantidad
+  exacta que calcula el puntuador de Markov. recall@10 dentro del bucket, aciertos
+  entre paréntesis. En ambos buckets cálidos las listas top-$k$ de las dos ramas
+  son \textbf{idénticas byte a byte}, así que la compuerta es una intervención
+  quirúrgicamente pura de $n_u=0$ con literalmente cero costo del lado cálido,
+  sobre tres pares control/rama independientes.
+  \emph{Fuente: \texttt{2026-07-27c-nexttrack-markov-gate-confirm.md}.}}
+  \label{tab:nexttrack-markovgate-buckets}
+  {\footnotesize\setlength{\tabcolsep}{5pt}\begin{tabular}{llrllll}
+    \toprule
+    Par & Bucket & $n$ & control & con compuerta & $\Delta$ & ¿top-$k$ idéntico? \\
+    \midrule
+    \multicolumn{7}{l}{\emph{Partición canónica, A1 vs C1}} \\
+    & $n_u = 0$ & 795 & 0.1660 (132) & 0.2025 (161) & \best{$+0.0365$} & no \\
+    & $n_u$ 1--10 & 292 & 0.3116 (91) & 0.3116 (91) & $+0.0000$ & \best{SÍ} \\
+    & $n_u > 10$ & 344 & 0.2326 (80) & 0.2326 (80) & $+0.0000$ & \best{SÍ} \\
+    \midrule
+    \multicolumn{7}{l}{\emph{Segunda partición, A2 vs C2}} \\
+    & $n_u = 0$ & 892 & 0.1244 (111) & 0.1558 (139) & \best{$+0.0314$} & no \\
+    & $n_u$ 1--10 & 322 & 0.2578 (83) & 0.2578 (83) & $+0.0000$ & \best{SÍ} \\
+    & $n_u > 10$ & 217 & 0.2304 (50) & 0.2304 (50) & $+0.0000$ & \best{SÍ} \\
+    \midrule
+    \multicolumn{7}{l}{\emph{Partición canónica bajo MMR $\lambda$0.7, A3 vs C3}} \\
+    & $n_u = 0$ & 795 & 0.1472 (117) & 0.1824 (145) & \best{$+0.0352$} & no \\
+    & $n_u$ 1--10 & 292 & 0.2945 (86) & 0.2945 (86) & $+0.0000$ & \best{SÍ} \\
+    & $n_u > 10$ & 344 & 0.2151 (74) & 0.2151 (74) & $+0.0000$ & \best{SÍ} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_markov_gate}
+  \caption{\textbf{Izquierda:} la descomposición por bucket sobre los tres pares
+  control/rama (\texttt{ds1} canónica, \texttt{ds2} la segunda partición con
+  \SI{64}{\percent} de fríos, \texttt{ds1 $\lambda$0.7} el mismo par canónico bajo
+  un re-ordenamiento MMR). El efecto entero se sitúa en el bucket de soporte cero;
+  en ambos buckets cálidos las listas top-$k$ de las ramas son idénticas byte a
+  byte, y por eso un peso global de rama no puede expresar demostrablemente esta
+  intervención. \textbf{Derecha:} el mismo resultado en el plano recall $\times$
+  corona. MMR por sí solo (azul) es una palanca \emph{con precio} en el campeón:
+  compra corona y pierde recall con el IC bajo cero. La compuerta (verde) compra
+  \emph{ambos}. Compuestas, compuerta$+$MMR aterriza en el recall del campeón
+  ($\Delta$ $+\num{0.00140}$, abarcando) con $\num{3.6}\times$ su holisticness, así
+  que la compuerta cambia el nivel de MMR en el campeón de CON PRECIO a GRATIS.}
+  \label{fig:nexttrack-markov-gate}
+\end{figure}
+
+\emph{Interpretación.} \textbf{El defecto es real, pertenece al normalizador y vale
+\num{29} aciertos.} La invariancia a escala es exactamente lo que hace robusto al
+z-blend frente a ramas en escalas inconmensurables, y exactamente lo que destruye
+su \emph{confianza}. Una rama de Markov que nunca ha visto la pista actual emite un
+puro retroceso por artista/género; el normalizador lo re-infla a la misma huella
+que una GRU que sí ha modelado el prefijo, y el blend promedia las dos como
+iguales. Apagar ese tercio del voto donde está desinformado convierte \num{43}
+fallos en aciertos y \num{14} aciertos en fallos --- neto $+\num{29}$,
+$+\SI{9.6}{\percent}$ relativo, sobre el mejor modelo del registro. recall@10
+\num{0.23201} (\num{332} de \num{1431}) es \textbf{la mejor cifra de recall de este
+documento}, con el IC pareado sobre cero en dos particiones disjuntas y MRR al alza
+en ambas. Para escala: el margen de coronación del propio campeón sobre la corona
+previa fue $+\num{0.0259}$ en la canónica y $+\num{0.0426}$ en la segunda; esta
+compuerta añade $+\num{0.0203}$ / $+\num{0.0196}$ \emph{sobre eso}, sin costo de
+entrenamiento adicional.
+
+\textbf{La compuerta es además una palanca de corona, lo que no se predijo.}
+$\Delta H$ está sobre cero en las tres comparaciones pareadas, y las facetas dicen
+por qué: abstenerse mata la componente de \emph{eco de bigrama} de la
+recomendación. La concentración de artista cae
+\num{0.69165}$\to$\num{0.59821} y la adyacencia
+\num{0.60971}$\to$\num{0.57477} --- la lista deja de repetir un artista --- mientras
+\texttt{mood\_coh} \emph{sube} \num{0.39822}$\to$\num{0.46226} y
+\texttt{music@10} sube \num{0.45379}$\to$\num{0.49319}. Los cuatro factores de
+corona se mueven en la dirección correcta a la vez. Es la primera palanca del
+registro que des-eageriza al campeón \emph{sin} pagar en coherencia de ánimo, y
+resuelve el doble pago exacto que la Sección~\ref{sec:nexttrack-mmr} identificó como
+estructural: allí el des-eagering era un re-ordenamiento peleando contra las
+puntuaciones del propio modelo, así que alejarse del artista semilla también sacaba
+al blend del vecindario de ánimo del prefijo. Aquí el des-eagering es la retirada de
+un voto que no tenía derecho a emitirse.
+
+\textbf{Compuerta y MMR son aditivos, no sustitutivos, y su composición es el
+titular para la tabla de corona.} El $\Delta$ de la compuerta sola
+($+\num{0.02027}$) y el de la compuerta bajo $\lambda\num{0.7}$
+($+\num{0.01957}$) son indistinguibles, y los buckets dicen por qué: MMR
+re-ordena la cabeza de una lista puntuada, la compuerta cambia qué lista se
+puntúa, y actúan sobre partes disjuntas de la tubería. Por sí solo, MMR
+$\lambda\num{0.7}$ en el campeón es NIVEL-2 CON PRECIO ($-\num{0.01817}$ de
+recall, IC bajo cero). Añádase la compuerta y el costo de recall se paga
+exactamente: A3 es $+\num{0.00140}$ $[-\num{0.01188}, +\num{0.01468}]$, un empate
+estadístico con el campeón, con $H$~\num{0.030980} --- $\num{3.6}\times$ el
+\num{0.008603} del campeón, cómodamente sobre el umbral obligatorio de recall
+\num{0.108}. En la tabla de corona eso se sitúa en el \textbf{puesto 2}, solo
+detrás de la GRU única a $\lambda\num{0.7}$, que anota su \num{0.034171} con un
+recall de \num{0.11461}: A3 entrega el \SI{96}{\percent} de la corona del líder
+incumbente con $\num{1.86}\times$ su recall.
+
+\textbf{La cautela honesta, y por qué la estructura fuera de muestra la redime.} El
+memorándum cribó diez variantes de compuerta sobre el conjunto de prueba, así que
+su $+\num{0.02027}$ archivado era optimista por selección y no podía ser evidencia.
+Cuatro cosas lo redimen aquí: el efecto se reproduce en una \emph{segunda partición
+disjunta con \SI{64}{\percent} de fríos sobre la que no se cribó}, dentro de
+\num{0.0007} de la cifra canónica; se reproduce bajo una tercera condición
+($\lambda\num{0.7}$) que tampoco se cribó; cuatro variantes mecánicamente
+relacionadas del memorándum caen todas en \numrange{0.019}{0.020}, así que el
+cribado medía una meseta y no seleccionaba un rincón afortunado; y los buckets
+cálidos no se mueven ni un acierto, que es una predicción \emph{estructural} del
+mecanismo y no un resultado ajustado. Queda un riesgo residual: la \emph{frontera}
+de $n_u = 0$ misma se eligió con conocimiento del conjunto de prueba. La versión
+sin frontera --- escalar la rama por \texttt{trust} \emph{antes} de normalizar en
+lugar de abstenerse en duro --- es el seguimiento principal, y es estrictamente más
+general. Nada de esto es tampoco una casualidad de la tasa de fríos de una
+partición: la segunda es \SI{64}{\percent} fría, su bucket de soporte cero crece al
+\SI{62.3}{\percent} de las consultas mientras la ganancia por consulta se encoge
+ligeramente, y el $\Delta$ neto sale casi idéntico. El valor de la palanca escala
+con cuánta de la distribución de consultas carece de evidencia de bigramas, que es
+la mayoría en cualquier partición de este corpus.
+
+\paragraph{Gobernanza, y un hallazgo de infraestructura que casi se comió el
+resultado.} Nada se promocionó, registró ni etiquetó; por frontera de diseño esta
+campaña lleva solo una \emph{recomendación} de promoción, y la fila de tabla en la
+Tabla~\ref{tab:nexttrack-lb} está etiquetada en consecuencia. El recálculo determinista de
+los doce mejores por holisticness del servidor auto-promocionó no obstante cuatro
+runs del lote, lo cual es comportamiento del servidor y no una acción de campaña, y
+dejó el grupo necesitando re-curación. Por separado: el worker remoto de
+entrenamiento estaba vivo con un \textbf{checkout obsoleto que contenía cero
+apariciones del nuevo indicador}. Si alguna rama con compuerta se hubiera
+despachado allí habría ejecutado la ruta \emph{sin compuerta} y habría devuelto
+silenciosamente un nulo --- la trampa registrada de que «el checkout remoto puede
+divergir en silencio», en su peor forma, porque el fallo es un número equivocado y
+no un error. No pudo ocurrir aquí solo porque el despacho remoto es opt-in y todos
+los runs del lote se publicaron sin él (confirmado por un marcador de no-reclamado
+en los seis). Hasta que el checkout se refresque, cualquier run \texttt{seq-blend}
+en cola ignora la compuerta en silencio.
+
+\paragraph{Enmiendas al registro.} Dos, ambas de estrechamiento y no de
+anulación. \textbf{(1)} La trampa del combinador aprendido debería prohibir la
+\emph{fusión aprendida a nivel de puntuación} y no el \emph{compuertado por
+evidencia por consulta}; el nulo oráculo previo y esta victoria de
+$+\num{0.020}$ son ambos verdaderos y se reconcilian con la descomposición por
+bucket, ya que un escalar global estático no puede expresar una compuerta cuyo
+signo se invierte con $n_u$. \textbf{(2)} El borrado de la \emph{confianza} por
+rama que hace el normalizador es un defecto \textbf{general}, del cual el retroceso
+de soporte cero de la rama de Markov es una instancia. Cualquier rama con una
+noción dependiente de la consulta de «aquí no tengo evidencia» queda mal ponderada
+igual, y las ramas de contenido y de GRU no se han auditado para ello.
+\emph{Fuente: \texttt{2026-07-27c-nexttrack-markov-gate-confirm.md}.}
+
+\section{Pista siguiente: el regularizador de eagerness a un margen calibrado: refutado, con mecanismo}
+\label{sec:nexttrack-eagermargin}
+\emph{Motivación.} La Sección~\ref{sec:nexttrack-holisticness} dejó \texttt{eager\_beta}
+--- la única palanca de des-eagering \emph{en tiempo de entrenamiento} del
+repositorio --- registrada como «un mando débil, no recomendado». Ese veredicto
+merecía una re-prueba, porque la sonda que lo respaldaba usó un margen de cero a una
+dosis que valía entre el \SI{1}{\percent} y el \SI{3}{\percent} de la función de
+pérdida. Esta campaña preguntó si la palanca funciona cuando el margen se coloca en
+la \emph{cola derecha} medida de la distribución de cosenos de transición a
+$\numrange{15}{60}\times$ esa dosis. Lo que estaba en juego era la
+desplegabilidad: en ese momento \texttt{mmr\_lambda} entraba solo por la ruta de
+evaluación y nunca llegaba al servicio, así que el regularizador de entrenamiento
+era el único candidato anti-eager que podía llegar a producción.
+
+\paragraph{El diseño se escribió para que un nulo siguiera siendo informativo.} La
+métrica primaria pre-registrada fue el $\Delta$ pareado de
+\texttt{artist\_conc@10} contra un control del mismo lote, con holisticness@10
+\emph{degradada} explícitamente a secundaria porque en el punto de operación
+$\partial H/\partial\texttt{music@10} = +\num{0.2062}$ frente a
+$\partial H/\partial\texttt{eager} = -\num{0.0378}$ --- una razón de
+$\num{5.46}\times$ que habría puntuado un des-eagering \emph{exitoso} como
+aproximadamente cero. Se pre-registró un umbral de relevancia en dos partes:
+\texttt{music@10} absoluto $\ge\num{0.4300}$ \emph{y} un límite inferior del
+$\Delta$\texttt{music@10} pareado por encima de $-\num{0.030}$. Ocho runs de
+\texttt{seq-dualgru} sobre la partición canónica \dsid{seq-20260715-131139}, todos
+remotos, \SI{60}{\minute} de cómputo, ninguno fallido. La compuerta de identidad
+bit a bit pasó con exactamente \num{170} aciertos y la concentración reconstruida
+coincidiendo con la rama registrada a \num{15} decimales, y se pre-registró una
+compuerta de penalización-activa como detector de fallo silencioso: \textbf{pasó en
+tres ramas y FALLÓ --- reportando la penalización inerte --- en cuatro}, que es el
+resultado de la campaña.
+
+\emph{Resultados.} La Tabla~\ref{tab:nexttrack-eagermargin} es el lote y la
+Tabla~\ref{tab:nexttrack-eagermargin-paired} la estadística pareada. La
+Figura~\ref{fig:nexttrack-eager-margin} muestra el mecanismo.
+
+\begin{table}[ht]
+  \centering
+  \caption{El lote de \texttt{eager\_beta} $\times$ margen, ocho runs de
+  \texttt{seq-dualgru} sobre \dsid{seq-20260715-131139} ($n=\num{1431}$). Todo run
+  id es \protect\runid{run-20260730-} más el valor de la columna \emph{run}. $m$ es
+  el margen del hinge y $\beta$ el peso de la penalización. H@10 es de
+  generación~3 (Sección~\ref{sec:nexttrack-power-generations}). «ep» es la mejor época sobre
+  las épocas realmente ejecutadas; recall@10 es \texttt{aciertos}$/\num{1431}$ en
+  todos los casos (C0 \num{0.118798}, A1 \num{0.053809}, A2 \num{0.013976}, B1
+  \num{0.114605}, y \num{0.118798} en cada rama inerte). \texttt{ild} se omite por
+  ancho y se mueve solo en las ramas que disparan (\num{0.4506} en C0,
+  \num{0.5572} en A1, \num{0.6762} en A2, \num{0.4530} en B1,
+  \numrange{0.4504}{0.4506} en las inertes). \texttt{mood}, mus@10, H@10 mejor
+  cuanto más alto; \texttt{conc}, \texttt{adj} mejor cuanto más bajo. Las celdas de
+  menor eagerness están en negrita y pertenecen a ramas \emph{degeneradas}, que es
+  para lo que existe el umbral de relevancia.
+  \emph{Fuente: \texttt{2026-07-30-eager-margin-calibrated-refutation.md}.}}
+  \label{tab:nexttrack-eagermargin}
+  {\scriptsize\setlength{\tabcolsep}{2.5pt}\begin{tabular}{llllrlllllll}
+    \toprule
+    Rama & run & $m$ & $\beta$ & aciertos & conc & adj & mood & mus@10 & H@10 & ep & veredicto \\
+    \midrule
+    C0 & \texttt{175402-cd006} & 0 & 0 & \best{170} & 0.370588 & 0.362963 & \best{0.479846} & \best{0.455347} & \best{0.023785} & 8/14 & CONTROL \\
+    A1 & \texttt{181405-53088} & 0 & 3 & 77 & 0.240717 & 0.206010 & 0.346867 & 0.399997 & 0.013339 & 18/24 & DEGENERADA \\
+    A2 & \texttt{181405-0bc1a} & 0 & 12 & 20 & \best{0.133535} & \best{0.107687} & 0.221756 & 0.358132 & 0.003569 & 37/40 & DEGENERADA \\
+    B1 & \texttt{181405-84da4} & 0.40 & 9 & 164 & 0.367606 & 0.364151 & 0.463440 & 0.447386 & 0.021601 & 15/21 & sin efecto \\
+    B2 & \texttt{175402-7c304} & 0.5843 & 19 & 170 & 0.370634 & 0.363103 & 0.479955 & 0.455210 & 0.023751 & 8/14 & INERTE \\
+    B3 & \texttt{184556-b08c1} & 0.70 & 35 & 170 & 0.370588 & 0.362963 & 0.479846 & 0.455347 & 0.023785 & 8/14 & INERTE (bit) \\
+    B4 & \texttt{175402-0d310} & 0.8304 & 92 & 170 & 0.370588 & 0.362963 & 0.479846 & 0.455347 & 0.023785 & 8/14 & INERTE (bit) \\
+    B5 & \texttt{184556-47d7b} & 0.5843 & 57 & 170 & 0.370743 & 0.363103 & 0.479955 & 0.455379 & 0.023771 & 8/14 & INERTE \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Estadística pareada contra el control C0 del mismo lote (\num{2000}
+  remuestreos, rng \num{1337}, $n=\num{1431}$). $n_{disc}$ cuenta las sesiones cuyo
+  hit@10 cambió. Los semianchos medidos en las ramas \emph{activas}
+  (\numrange{0.0080}{0.0173}) coinciden con el \num{0.0102} previsto por el
+  diseño, así que el instrumento estaba correctamente dimensionado --- el eje
+  falló igualmente.
+  \emph{Fuente: \texttt{2026-07-30-eager-margin-calibrated-refutation.md}.}}
+  \label{tab:nexttrack-eagermargin-paired}
+  {\footnotesize\setlength{\tabcolsep}{4.5pt}\begin{tabular}{lllrrr}
+    \toprule
+    Rama & $\Delta$\texttt{artist\_conc} [IC 95\%] & $\Delta$\texttt{music@10} [IC 95\%] & $\Delta H$ & $n_{disc}$ & media $|\Delta$conc$|$ \\
+    \midrule
+    A1 & $-0.12987$ [$-0.14354$, $-0.11605$] & $-0.05535$ [$-0.06606$, $-0.04465$] & $-0.010445$ & 125 & 0.191304 \\
+    A2 & $-0.23705$ [$-0.25493$, $-0.22026$] & $-0.09721$ [$-0.11107$, $-0.08333$] & $-0.020215$ & 166 & 0.282895 \\
+    B1 & $-0.00298$ [$-0.01085$, $+0.00519$] & $-0.00796$ [$-0.01411$, $-0.00194$] & $-0.002183$ & 62 & 0.093734 \\
+    B2 & $+0.00005$ [$-0.00028$, $+0.00039$] & $-0.00014$ [$-0.00037$, $+0.00000$] & $-0.000034$ & \best{0} & 0.000419 \\
+    B3 & $+0.00000$ [$+0.00000$, $+0.00000$] & $+0.00000$ [$+0.00000$, $+0.00000$] & $+0.000000$ & \best{0} & \best{0.000000} \\
+    B4 & $+0.00000$ [$+0.00000$, $+0.00000$] & $+0.00000$ [$+0.00000$, $+0.00000$] & $+0.000000$ & \best{0} & \best{0.000000} \\
+    B5 & $+0.00016$ [$-0.00031$, $+0.00068$] & $+0.00003$ [$-0.00036$, $+0.00045$] & $-0.000014$ & \best{0} & 0.000901 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_eager_margin}
+  \caption{\textbf{Izquierda:} el resultado central de la campaña. La penalización
+  realizada del hinge en la inicialización, reconstruida a partir de la inflación de
+  la pérdida en la época 1 con inicialización compartida (semilla idéntica, así que
+  inicialización y orden de lotes idénticos). Los márgenes se calibraron desde el
+  coseno de transición \emph{ítem}$\to$\emph{ítem} (mediana \num{0.262}, p75
+  \num{0.584}, p90 \num{0.830}), pero la penalización actúa sobre
+  \emph{predicción}$\to$\emph{actual}, cuyo techo a lo largo del entrenamiento se
+  sitúa entre \num{0.5843} y \num{0.70}: con $m\ge\num{0.5843}$ la cantidad
+  penalizada nunca entra en el soporte del hinge y la traza de pérdida es idéntica
+  bit a bit a la del control en las \num{14} épocas, con $\beta$ hasta el tope del
+  esquema. \textbf{Derecha:} donde el mando \emph{sí} dispara, eagerness y
+  relevancia son el mismo mecanismo. Empujar la predicción lejos del latente de la
+  pista actual la empuja también fuera de la región donde vive la verdadera pista
+  siguiente, así que no hay ventana entre un des-eagering real y romper el umbral de
+  relevancia. La línea de trazo y punto marca el comparador gratuito ya registrado
+  que ninguna rama de aquí igualó dentro del umbral.}
+  \label{fig:nexttrack-eager-margin}
+\end{figure}
+
+\emph{Interpretación.} \textbf{La refutación es expresiva, no de dosis, y ese es el
+hallazgo completo: la calibración midió la distribución equivocada.} Los márgenes se
+extrajeron de $\cos(x_t, x_{t+1})$ --- cuán separadas están dos pistas reproducidas
+consecutivamente --- pero el hinge actúa sobre $\cos(\mathrm{pred}_t, x_t)$, cuán
+cerca queda la \emph{predicción} del modelo de la pista actual. Esas distribuciones
+no son comparables. Reconstruir el hinge desde la inflación de la pérdida en la
+época 1 sitúa el techo de la cantidad penalizada entre \num{0.5843} y \num{0.70},
+así que p75 y p90 de la distribución de transiciones reales quedan \emph{fuera del
+soporte de la cantidad que se penaliza}, y las ramas B3 y B4 reprodujeron la pérdida
+del control a \num{16} cifras significativas en cada una de \num{14} épocas. La
+cobertura del diseño --- que la penalización realizada \emph{excedería} su valor
+nominal --- queda empíricamente invertida por órdenes de magnitud. La razón es
+estructural: una predicción entrenada con InfoNCE es un \emph{promedio cercano
+cubierto} sobre muchas continuaciones plausibles, así que su coseno absoluto a
+cualquier ítem individual está acotado bajo. \textbf{La eagerness es una propiedad
+de ordenamiento --- si los vecinos de la pista actual ocupan los primeros puestos ---
+y un hinge sobre un coseno absoluto no puede expresarla.}
+
+\textbf{Donde el mando sí dispara, eagerness y relevancia resultan ser el mismo
+mecanismo.} Con $m=0$ la palanca funciona espectacularmente sobre la faceta --- A2
+recorta la concentración \num{0.371}$\to$\num{0.134} y lleva \texttt{ild} a
+\num{0.676} --- mientras \texttt{music@10} se derrumba a \num{0.358} y el recall a
+\num{20} de \num{1431}. No hay ventana de separación: el \SI{27}{\percent} de las
+transiciones reales tiene coseno negativo, así que empujar la predicción lejos del
+latente de la pista actual la empuja también fuera de la región donde vive la
+verdadera pista siguiente, y \texttt{mood\_coh} también se derrumba
+(\num{0.480}$\to$\num{0.222}). Ya con $\beta=3$ se rompe el umbral absoluto de
+relevancia. El modo de fallo pre-registrado se disparó exactamente como estaba
+escrito.
+
+\textbf{El resultado previo queda afinado en lugar de retirado, y la banda usable
+queda identificada.} La sonda del 2026-07-22 con $\beta \le \num{0.2}$, $m=0$
+reportó «débil» --- correcto en banda, equivocado en interpretación. Ese ajuste
+queda justo \emph{por debajo} del umbral de destrucción, y con $\beta=3$ el mismo
+ajuste es un destructor de relevancia. Todo el rango dinámico usable con $m=0$ está
+por tanto entre $\beta=\num{0.2}$ y $\beta=\num{3}$, un factor de \num{15}, sin
+explorar, acotado arriba por la degeneración y abajo por la nulidad de efecto. La
+escalera de dosis ejecutada aquí \textbf{no tenía poca potencia; apuntaba más allá
+del blanco}.
+
+\textbf{Dos resultados de segundo orden que conviene conservar.} Primero, degradar
+$H$ a secundaria fue portante: A2 tiene con mucho las mejores facetas y el $H$
+\emph{peor} (\num{0.003569}), porque el factor de anclaje la aniquila exactamente
+como predecía la razón de derivadas de $\num{5.46}\times$. Si $H$ hubiera sido
+primaria, esta campaña se habría leído como un nulo plano en lugar de una frontera
+cartografiada. Segundo, el des-eagering real más barato del registro sigue siendo un
+ajuste de \emph{arquitectura} y no este mando: el comparador gratuito ya registrado
+con \texttt{fusion\_layers}${}=1$ da $\Delta$concentración $-\num{0.051}$ a un
+costo de recall de $-\num{0.016}$, y ninguna rama de aquí igualó eso dentro del
+umbral de relevancia --- las ramas que respetan el umbral entregaron entre
+$-\num{0.003}$ y $+\num{0.0002}$, y las que superaron $-\num{0.051}$ pagaron
+$\numrange{4}{8}\times$ el recall.
+
+\paragraph{Por qué no se ejecutaron las fases posteriores aprobadas.} Las tres
+estaban condicionadas a una victoria en la fase A, y no la hay. Las ramas de la fase
+C estaban además definidas \emph{por referencia} al margen y $\beta$ de la
+ganadora, así que sin ganadora quedan indefinidas; aplicada literalmente a las ramas
+que pasaron los umbrales, la regla de selección habría gastado tres runs
+transfiriendo un ajuste \emph{demostrablemente inerte} a otra familia. El ejecutor
+se detuvo en lugar de improvisar, que es el resultado correcto: el siguiente paso es
+un diseño re-apuntado, no la fase C aprobada. Concretamente, re-especificar la
+penalización en lugar de re-ajustarla --- un hinge sobre una cantidad \emph{de
+ordenamiento} como $\cos(\mathrm{pred}, x_t) - \cos(\mathrm{pred}, x_{t+1})$, o un
+término explícito de masa del mismo artista sobre el top-$k$ --- y, por eliminación,
+hacer que el re-ordenamiento en tiempo de evaluación llegue a la ruta de servicio,
+ya que con la palanca de entrenamiento refutada la única palanca que funcionaba era
+en ese momento una que la ruta de servicio no podía reproducir. Esa última
+observación es sobre lo que actúa la sección siguiente.
+\emph{Fuente: \texttt{2026-07-30-eager-margin-calibrated-refutation.md}.}
+
+\section{Pista siguiente: el tope duro por artista y la segunda superficie de evaluación}
+\label{sec:nexttrack-artistcap}
+\emph{Motivación.} Dos palancas anti-eager \emph{blandas} habían sido refutadas el
+día anterior. El regularizador en tiempo de entrenamiento está mal especificado
+(Sección~\ref{sec:nexttrack-eagermargin}): se apoya en un coseno absoluto que una
+predicción InfoNCE cubierta nunca lleva por encima de ${\sim}\num{0.6}$, mientras
+la eagerness es una propiedad \emph{de ordenamiento}. El re-ordenamiento MMR en
+tiempo de evaluación es real (Sección~\ref{sec:nexttrack-mmr}) pero se mide
+\textbf{inerte en el caso patológico}: en una playlist real del usuario el modelo
+ordena \num{59} de sus \num{60} candidatos principales como un solo artista y el
+siguiente artista aparece por primera vez en el \textbf{puesto \num{75}}, mientras
+todo el presupuesto de diversidad de MMR allí vale
+$\num{0.3}\times\num{0.26}\approx\num{0.078}$ de puntuación normalizada --- ni de
+lejos suficiente para pagar una caída de relevancia de 70 puestos. Los dos fallos
+comparten un mecanismo: \textbf{una penalización blanda en el espacio de puntuación
+pierde ante un gradiente de relevancia empinado.} La palanca probada aquí no compite
+en puntuación en absoluto. Un tope \emph{duro} por artista sobre el top-$k$
+\textbf{no puede ser superado en puntuación} --- la misma propiedad en la que ya se
+apoyaba el enfriamiento de artista del recorrido --- y es la primera palanca de
+des-eagering de este proyecto que funciona.
+
+\paragraph{La segunda superficie de evaluación, en breve.}
+\label{sec:nexttrack-walksurface}
+Cada número de pista siguiente de las secciones anteriores es un top-10 de
+\emph{un solo disparo}: puntuar el catálogo una vez desde un prefijo de sesión
+retenido y buscar la siguiente pista distinta. El escaparate desplegado, en cambio,
+sirve una \emph{caminata autorregresiva} --- añade su propia predicción al prefijo y
+vuelve a dar un paso, veinte veces --- y una serie de pasos individualmente legales
+puede terminar en una región completamente distinta del espacio latente mientras
+cada paso por separado parece correcto. De hecho la deriva es invisible \emph{por
+construcción} en la superficie de un solo disparo, porque la faceta
+\texttt{mood\_coh} de holisticness@10 mide el coseno de cada candidato al centroide
+del \emph{prefijo}, que en una caminata viaja con el modelo. Una línea de medición
+separada --- consolidada por completo en el documento compañero de pista siguiente y
+anclada en las propias \num{73632} transiciones consecutivas reales del usuario, con
+un coseno de paso mediano de \num{0.261} y el \SI{27.0}{\percent} de los pasos
+\emph{negativos} --- añadió por tanto cuatro métricas de nivel de caminata:
+\texttt{vibe} (coseno medio de cada pista generada al centroide \emph{fijo} de la
+semilla: ¿el recorrido sostiene su ánimo?), \texttt{stride\_err}
+($|$coseno de paso mediano $-\,\num{0.261}|$, mejor cuanto más bajo: ¿se mueve como
+el oyente al que imita?), \texttt{drift} (desplazamiento al final del recorrido,
+mejor cuanto más cerca de cero), \texttt{genres} (géneros distintos visitados,
+contados como \emph{crédito}) y \texttt{ground} (un umbral de degeneración:
+concordancia graduada con la continuación real). Dos controles deterministas en
+tiempo de recuperación ajustan la caminata sin tocar el modelo --- un \emph{ancla}
+de semilla $a$ y un término de \emph{zancada} $s$, uno tirando hacia un punto fijo y
+otro empujando desde el último punto --- así que una configuración de caminata se
+escribe como una celda $a$/$s$. El motor desplegado es una GRU de torre doble que lee
+las vistas \texttt{latent} y \texttt{cummean} con una fusión puramente lineal, en la
+celda $a\num{0.8}$/$s\num{0.5}$; es la única \emph{victoria} de arquitectura medida
+en este corpus, y ganó en la superficie de caminata después de que tres campañas
+refutaran a su familia en recall.
+
+\paragraph{Implementación, y por qué se traslada donde MMR no puede.} El tope se
+aplica al \emph{ordenamiento}, después de MMR, tanto en la evaluación en tiempo de
+entrenamiento como en el ordenador de servicio, de modo que evaluación y servicio
+coinciden por construcción --- lo que evita la clase de divergencia corregida ese
+mismo día. Está enhebrado en las cinco familias de predictor que lo declaran con un
+valor por defecto de «apagado», así que todo run y modelo preexistente es idéntico
+byte a byte. Es \textbf{de mejor esfuerzo y no absoluto} (verificado con pruebas
+unitarias): el barrido recorre todo el ordenamiento buscando artistas admisibles,
+pero donde el espacio de candidatos de un prefijo se agota las ranuras restantes se
+rellenan con ítems diferidos en lugar de devolver menos de $k$; la identidad se
+mantiene cuando el tope está apagado o es $\ge k$, y los ítems de artista desconocido
+nunca se topan. Crucialmente no necesita vectores sónicos, así que a diferencia de
+MMR se traslada sin cambios a un cliente delgado --- MMR exigiría enviar un dial de
+similitud de \SI{48}{\mega\byte} frente al de ${\sim}\SI{6}{\mega\byte}$ ya
+horneado.
+
+\emph{Resultados.} La Tabla~\ref{tab:nexttrack-artistcap} es el tope en la
+superficie de un solo disparo, medido fuera de run: las puntuaciones se calculan una
+vez por modelo y se memoizan, así que cada rama de tope ve vectores de puntuación
+\emph{idénticos bit a bit} y el emparejamiento es exacto y no meramente apareado. La
+Figura~\ref{fig:nexttrack-artist-cap} dibuja el compromiso.
+
+\begin{table}[ht]
+  \centering
+  \caption{El tope duro por artista en la superficie de un solo disparo, partición
+  canónica \dsid{seq-20260715-131139} ($n=\num{1431}$), sobre el campeón desplegado
+  y sobre el campeón más la compuerta de evidencia de la
+  Sección~\ref{sec:nexttrack-markovgate}. Pareado sobre puntuaciones en caché
+  idénticas bit a bit (\num{2000} remuestreos, rng \num{1337}). H@10 es de
+  generación~3 (Sección~\ref{sec:nexttrack-power-generations}). R@10, MRR, mus@10,
+  \texttt{ild}, H@10 mejor cuanto más alto; \texttt{conc}, \texttt{adj} mejor cuanto
+  más bajo. Mejor celda por métrica en negrita dentro de cada bloque; el candidato
+  de despliegue recomendado (compuerta $+$ tope 3) en negrita completa.
+  \emph{Fuente: \texttt{2026-07-30c-artist-cap-measurement.md}.}}
+  \label{tab:nexttrack-artistcap}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{lccccccccc}
+    \toprule
+    tope & R@10 & aciertos & MRR & conc & adj & ild & mood & mus@10 & H@10 \\
+    \midrule
+    \multicolumn{10}{l}{\emph{Campeón \Rp+M+\Cp\ (desplegado, sin compuerta)}} \\
+    off & \best{0.211740} & \best{303} & \best{0.121985} & 0.691653 & 0.609713 & 0.406374 & \best{0.398222} & 0.453790 & 0.008603 \\
+    5   & 0.178896 & 256 & 0.119693 & 0.252613 & 0.337247 & 0.563417 & 0.358768 & 0.474291 & 0.027258 \\
+    3   & 0.160727 & 230 & 0.116915 & 0.122975 & 0.215304 & 0.613641 & 0.339311 & \best{0.476787} & 0.033862 \\
+    2   & 0.138365 & 198 & 0.112313 & \best{0.061946} & \best{0.150384} & \best{0.639717} & 0.328459 & 0.474317 & \best{0.036331} \\
+    \midrule
+    \multicolumn{10}{l}{\emph{Campeón $+$ \texttt{markov\_gate} (el candidato desplegable)}} \\
+    off & \best{0.232006} & \best{332} & \best{0.133521} & 0.598214 & 0.574773 & 0.433765 & \best{0.462264} & 0.493189 & 0.018699 \\
+    5   & 0.198463 & 284 & 0.131137 & 0.231338 & 0.335849 & 0.580367 & 0.413910 & 0.505703 & 0.040056 \\
+    \best{3} & \best{0.175402} & \best{251} & \best{0.127788} & \best{0.113440} & 0.217191 & 0.631939 & 0.386846 & \best{0.505762} & \best{0.048063} \\
+    2   & 0.150943 & 216 & 0.122627 & \best{0.057365} & \best{0.152690} & \best{0.660122} & 0.368732 & 0.503767 & 0.051175 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_artist_cap}
+  \caption{\textbf{Izquierda:} la concentración de artista se derrumba,
+  \num{0.692}$\to$\num{0.113} con tope 3 en el campeón con compuerta.
+  \textbf{Centro:} el resultado que \emph{no} se predijo --- la relevancia graduada
+  \emph{sube}, con el IC pareado sobre cero en todos los topes y en ambos modelos, y
+  se replica en la partición disjunta con \SI{64}{\percent} de fríos con
+  $+\num{0.026}$. La preocupación pre-registrada era que un tope des-eagerizara
+  degenerando en relleno genérico; ocurre lo contrario, porque los ítems promovidos
+  desde el puesto \num{75} en adelante son \emph{más} aptos musicalmente para la
+  continuación real que las pistas del mismo artista que desplazan.
+  \textbf{Derecha:} el precio, en el plano recall $\times$ corona. El tope tiene
+  \emph{precio}, no es gratis: compuerta $+$ tope 3 cuesta \num{52} de \num{1431}
+  aciertos exactos frente al statu quo desplegado, mientras aterriza una
+  holisticness@10 de generación 3 en torno al \SI{40}{\percent} por encima de la
+  corona incumbente con $\num{1.5}\times$ su recall. Todas las ramas superan el
+  umbral de \num{155} aciertos, así que ninguna es una instancia de la patología de
+  «maximizar holisticness prediciendo peor».}
+  \label{fig:nexttrack-artist-cap}
+\end{figure}
+
+\emph{Interpretación.} \textbf{\texttt{music@10} sube, con el IC sobre cero, en
+todos los topes y en ambos modelos} ($+\num{0.0105}$ a $+\num{0.0230}$). Es el
+resultado más importante de la campaña y no se predijo: \textbf{el tope cambia
+relevancia \emph{literal} por relevancia \emph{graduada}}. Solo el recall@10 exacto
+regresa. Con compuerta $+$ tope 5 frente al statu quo desplegado, el recall cae
+\num{0.2117}$\to$\num{0.1985} ($-\num{19}$ aciertos) mientras el MRR \emph{sube}
+\num{0.1220}$\to$\num{0.1311}, la concentración cae
+\num{0.692}$\to$\num{0.231}, \texttt{ild} sube \num{0.406}$\to$\num{0.580},
+\texttt{mood\_coh} sube \num{0.398}$\to$\num{0.414}, \texttt{music@10} sube
+\num{0.454}$\to$\num{0.506} y holisticness@10 sube
+\num{0.0086}$\to$\num{0.0401}.
+
+\textbf{El tope no se paga con la ganancia de la compuerta, y hay que decirlo con
+claridad.} La compuerta son $+\num{29}$ aciertos; el tope más suave cuesta
+$-\num{48}$ en el modelo con compuerta. Así que compuerta $+$ tope es un neto de
+$\mathbf{-52}$ aciertos frente al statu quo desplegado con tope 3. Quien le importe
+el recall exacto debe leer esto como un compromiso, no como una victoria gratuita;
+el objetivo declarado del proyecto es la holisticness de sesión, donde es una
+ganancia de $\num{5.6}\times$. Todas las ramas de tope superan el umbral de recall
+\num{0.108} (\numrange{0.151}{0.198}), así que no son instancias de la patología que
+el umbral existe para rechazar.
+
+\textbf{El tope solo aprieta donde hay un problema.} Sobre un top-10 ya variado es
+literalmente inocuo en todos los valores de tope. La comprobación puntual sobre tres
+playlists reales del usuario lo hace concreto, contando artistas distintos en el
+top-10: en una playlist que el campeón ya sirve con 8 artistas distintos, el tope no
+cambia \emph{nada} en ningún valor. En la playlist patológica --- el caso que derrotó
+a ambas palancas blandas de plano --- pasa de \num{1} artista distinto a \num{5} con
+tope 3, es decir, de diez pistas consecutivas de un artista a un reparto genuino
+entre cinco. Y \textbf{repara exactamente la única regresión de la compuerta}: la
+compuerta sola lleva una playlist de 8 artistas distintos a 4 (concentración
+\num{0.044}$\to$\num{0.467}), y con tope 3 vuelve a 7 (\num{0.089}) y con tope 2 a 8
+(\num{0.044}) --- idéntico al campeón desplegado. La ganancia de precisión de la
+compuerta queda por tanto disponible \emph{sin} su costo de diversidad.
+
+\paragraph{Confirmado por runs registrados y luego endurecido en una segunda
+partición.} Tres runs registrados en la partición canónica, lanzados desde los
+hiperparámetros declarados en el registro del campeón con compuerta y variando solo
+el tope, reprodujeron \textbf{cada cifra reportada hasta el último dígito}
+(\runid{run-20260730-235524-0ec1d-seq-blend} con el tope apagado,
+\runid{run-20260730-235524-93d38-seq-blend} con tope 3,
+\runid{run-20260730-234635-a6252-seq-blend} con tope 5), así que la medición fuera
+de run se traslada exactamente y la fontanería queda verificada de extremo a extremo.
+Cuatro runs más en la partición disjunta con \SI{64}{\percent} de fríos
+\dsid{seq-20260718-211238} probaron entonces dos piernas pre-registradas,
+\emph{ambas} requeridas: $\Delta$concentración $\le-\num{0.05}$ con el IC bajo cero,
+\emph{y} un límite inferior del $\Delta$\texttt{music@10} \emph{sobre} cero --- la
+relevancia graduada tenía que seguir \emph{mejorando}, no meramente evitar el
+colapso. \textbf{Ambas se sostienen} con tope 3 (concentración $-\num{0.52699}$
+[$-\num{0.54546}$, $-\num{0.50825}$]; \texttt{music@10} $+\num{0.02644}$
+[$+\num{0.01919}$, $+\num{0.03368}$]), con el costo de recall \emph{menor} y la
+ganancia de relevancia \emph{mayor} en la ventana más fría, y con la concentración
+absoluta con tope 3 a \num{0.008} de la cifra canónica. El mismo lote entregó una
+tercera reproducción independiente del efecto pareado de la compuerta de evidencia,
+coincidiendo exactamente con el $+\num{0.01957}$ registrado.
+
+\paragraph{Tres cautelas, una de ellas una lección sobre umbrales.} Primero, el
+umbral \emph{absoluto} de \texttt{music@10} $\ge\num{0.43}$ de la partición canónica
+\textbf{no} se traslada: el control propio de esa partición se sitúa en \num{0.4295}
+sobre una ventana legítimamente más fría, así que pre-registrar la regla sobre el
+$\Delta$ pareado en lugar de sobre un umbral absoluto es la única razón por la que
+esto no se leyó como un falso fallo. \textbf{Derive los umbrales por línea base.}
+Segundo, la medición es solo con $k=\num{10}$, y $k$ interactúa con el tope: un tope
+\emph{fijo} de 3 con $k=\num{50}$ lleva la concentración a \num{0.021} --- cinco
+veces más allá del punto de operación endurecido --- y alcanza el puesto base p95
+\num{278}, mientras escalar el tope para preservar la \emph{proporción} alcanza solo
+p95 \num{156} y mantiene la concentración en \num{0.118}. Escalado es a la vez más
+suave con la relevancia y fiel a lo validado, y ambos son idénticos con
+$k=\num{10}$; está implementado como el \SI{30}{\percent} de las ranuras con un
+mínimo de 3, tanto en el cliente como en el ordenador del servidor, de modo que las
+dos rutas coinciden por construcción. Tercero, nada de esto se promocionó, se
+registró como campeón ni se desplegó, y la recomendación registrada es
+\texttt{markov\_gate} con tope 3 como siguiente candidato de despliegue (el tope 5
+como alternativa conservadora, cuyo MRR sigue por encima del actual). Una divergencia
+abierta entre evaluación y servicio a nivel de fila, documentada por separado,
+implica que la salida en producción será cercana a estos números pero no idéntica.
+
+\paragraph{Dos hallazgos de ingeniería que generalizan.} Primero, una compuerta de
+identidad bit a bit atrapó un \emph{lanzamiento inválido}: el control inicial corrió
+contra un checkout remoto obsoleto que contenía cero apariciones de ninguno de los
+dos indicadores nuevos, así que ambos hiperparámetros se ignoraron en silencio y el
+run reportó las métricas del campeón \emph{sin compuerta y sin tope} bajo
+hiperparámetros con compuerta --- un número equivocado, no un error. La lección es
+más afilada que «resincronice el worker»: \textbf{calcule la suma de verificación de
+los archivos de predictor de la familia que se va a lanzar inmediatamente antes de
+publicar}, no en tiempo de diseño, porque la campaña anterior había verificado los
+archivos de \emph{otras dos} familias. Segundo, el mismo incidente dejó una fila de
+run huérfana atascada en \texttt{running}, que ni el endpoint de parada ni el de
+borrado pueden limpiar (el primero solo rastrea runs locales, el segundo rechaza
+runs reclamados por un worker) --- una brecha que conviene cerrar antes de que vuelva
+a ocurrir. Ambas palancas se portaron después a los dos clientes del escaparate como
+puro post-procesado, sin reconstrucción de modelo, sin vectores nuevos y sin
+reentrenamiento, y con pruebas de paridad que fijan el ordenamiento portado contra la
+referencia de Python; en uno de los clientes el motor campeón resulta
+\textbf{degenerado sin tope} --- treinta pistas de un solo artista sobre una semilla
+de rock argentino --- así que allí el tope es portante y no cosmético.
+\emph{Fuente: \texttt{2026-07-30c-artist-cap-measurement.md}.}
+
+\section{Pista siguiente: topología de pila de etapas: la profundidad refutada en ambas superficies}
+\label{sec:nexttrack-stagestack}
+\emph{Motivación.} La pregunta del usuario fue directa: ¿una \emph{pila} explícita
+de etapas de MLP por paso y etapas recurrentes supera a una GRU única, en un corpus
+donde cinco campañas de arquitectura consecutivas han devuelto nulos? Se
+especificaron cuatro disposiciones --- \texttt{ann+gru+ann+gru},
+\texttt{ann+gru+gru+ann}, \texttt{ann+gru+gru+gru}, \texttt{gru+gru+gru+gru} ---
+más una quinta, \texttt{gru+ann+gru+gru}, elegida por el usuario para probar
+\emph{por qué} un MLP líder perjudicaba con $N=1$: la
+Sección~\ref{sec:nexttrack-preencoder} atribuía esa pérdida a que la rectificación de media
+onda destruye información de signo del prefijo que la transformación lineal de
+entrada compuertada de una GRU preserva, así que poner el MLP sobre un \emph{estado
+oculto compuertado} en lugar de sobre PCA con signo crudo debería hacer desaparecer
+el daño. Es además la primera campaña de este arco juzgada en \emph{dos}
+superficies por diseño y no a posteriori, y fija el estándar que hereda la campaña
+siguiente.
+
+\paragraph{Diseño, y la prueba de equivalencia que hizo posible un control.} Siete
+runs de un nuevo predictor, \texttt{seq-stack}, sobre la partición canónica
+\dsid{seq-20260715-131139} (\num{1431} sesiones de prueba), \SI{90}{\minute} de
+cómputo, cero fallos, cero runs de contingencia gastados. La capacidad se igualó en
+${\sim}\num{1282000}$ parámetros entre las cinco ramas de 4 etapas (dispersión
+mutua \SI{0.445}{\percent}), y los siete conteos se re-verificaron instanciando el
+modelo en lugar de confiar en el diseño. Todo excepto la cadena de etapas y las
+anchuras se mantiene fijo: dropout \num{0.1}, InfoNCE, $\tau$~\num{0.07},
+\num{40} épocas, paciencia \num{6}, lr \num{0.001}, lote \num{128}, semilla
+\num{1337}, MMR apagado, tope de artista apagado.
+
+La identidad bit a bit con los \num{176} aciertos históricos de la familia \emph{no
+está disponible} aquí y su ausencia no es un fallo: el entrenador re-siembra al
+entrar, así que entregarle un modelo pre-construido desfasa el flujo de dropout
+incluso cuando los pesos iniciales coinciden. La campaña se apoyó por tanto en una
+\textbf{prueba de equivalencia funcional} más un \textbf{control del mismo lote}, y
+todo veredicto se enuncia contra ese control. La prueba se ejecutó \emph{antes} de
+la edición del registro y del reinicio del servidor, así que un fallo no habría
+costado nada: con \texttt{stages=["gru"]} el nuevo modelo calcula la misma función
+que la GRU única incumbente, con $\max|\Delta|$ \textbf{\texttt{0.00e+00}} en
+\texttt{forward} y en \texttt{predict\_next} a longitudes de prefijo
+$T=1,2,5,17,40$ y \num{394944} parámetros en ambos lados. El control del mismo lote
+devolvió entonces \textbf{\num{178} de \num{1431}}, dentro de la banda
+pre-registrada $[\num{155},\num{198}]$ y a solo \num{2} aciertos de los \num{176}
+históricos --- exactamente el pequeño desfase que predice el argumento de la
+re-siembra. Dos compuertas más importaron: la completitud de métricas fue verde en
+los siete runs (sin descarte de claves por imagen del worker del tipo que documenta
+la Sección~\ref{sec:nexttrack-mmr}), y el instrumento de caminata se verificó contra el
+motor desplegado, cuyos $\Delta$\texttt{vibe} ($-\num{0.0033}$) y
+$\Delta$\texttt{stride\_err} ($+\num{0.0137}$) abarcan ambos cero contra el control
+recién entrenado. El arnés de caminata reprodujo además \emph{las diez} medias
+registradas previamente de forma exacta y se mantuvo estable bit a bit al añadir
+ramas, que es lo que autoriza el emparejamiento entre invocaciones separadas.
+
+\emph{Resultados, la superficie de un solo disparo.} Tabla~\ref{tab:nexttrack-stagestack-s1}.
+
+\begin{table}[ht]
+  \centering
+  \caption{El lote de pila de etapas en la superficie de un solo disparo, siete
+  runs sobre \dsid{seq-20260715-131139}
+  ($n_{\mathrm{test}}=\num{1431}$), ordenados por recall@10. Los run ids son
+  \protect\runid{run-20260801-} más la hora de bloque y el sufijo hexadecimal, en
+  completo: \texttt{003536-eaf81} (C0), \texttt{003536-bcedf} (C1),
+  \texttt{003646-07994} (B), \texttt{003646-8cc2d} (E), \texttt{003646-dbe68} (C),
+  \texttt{003536-d612e} (D), \texttt{003646-6e3bf} (A). Códigos de etapa:
+  \texttt{a} $=$ MLP por paso, \texttt{g} $=$ GRU. Cada H@10 se recalculó desde
+  \texttt{predictions.json} bajo la definición viva y coincide exactamente con el
+  valor almacenado. El $\Delta$ pareado es contra el control C0 del mismo lote
+  (\num{2000} remuestreos, rng \num{1337}). El MRR@10 truncado y
+  \texttt{mood\_coh} se omiten por ancho y siguen de cerca al recall: MRR@10
+  \num{0.04555} (C0), \num{0.04579} (C1), y luego
+  \numrange{0.02080}{0.02894} en las cinco ramas de 4 etapas;
+  \texttt{mood\_coh} \num{0.4788} (C0), \num{0.4856} (C1), y luego
+  \numrange{0.3821}{0.3964}. R@10, H@10, mus@10 mejor cuanto más alto;
+  \texttt{conc}, \texttt{adj} mejor cuanto más bajo --- y las celdas de menor
+  eagerness pertenecen a ramas \emph{refutadas}, que es para lo que existe el
+  umbral de recall. \texttt{ild} sube monótonamente a medida que las ramas empeoran
+  (\num{0.4549} en C0, \num{0.4424} en C1, y luego
+  \numrange{0.5112}{0.5373} en las cinco ramas de 4 etapas) y se omite aquí por
+  ancho.
+  \emph{Fuente: \texttt{2026-08-01-stage-stack-topology.md}.}}
+  \label{tab:nexttrack-stagestack-s1}
+  {\scriptsize\setlength{\tabcolsep}{2.0pt}\begin{tabular}{lllrllllll}
+    \toprule
+    Rama & id & etapas / anchura & params & R@10 (aciertos) & $\Delta$R@10 [IC 95\%] & H@10 & conc & adj & mus@10 \\
+    \midrule
+    C0 \emph{ctrl} & \texttt{eaf81} & \texttt{gru} h256 & \num{394944} & \best{0.12439 (178)} & --- & \best{0.024378} & 0.3589 & 0.3482 & \best{0.4552} \\
+    C1 \emph{cap.} & \texttt{bcedf} & \texttt{gru} h537 & \num{1280937} & 0.12159 (174) & $-0.00280$ [$-.0119$, $+.0056$] & 0.023418 & 0.3773 & 0.3653 & 0.4556 \\
+    B & \texttt{07994} & \texttt{agga} h299 & \num{1281407} & 0.08595 (123) & $-0.03843$ [$-.0538$, $-.0231$] & 0.017558 & 0.3176 & 0.2639 & 0.4264 \\
+    E & \texttt{8cc2d} & \texttt{gagg} h259 & \num{1277321} & 0.08246 (118) & $-0.04193$ [$-.0566$, $-.0280$] & 0.021053 & 0.2704 & 0.2376 & 0.4310 \\
+    C & \texttt{dbe68} & \texttt{aggg} h256 & \num{1283008} & 0.07966 (114) & $-0.04472$ [$-.0601$, $-.0301$] & 0.021442 & \best{0.2626} & 0.2375 & 0.4324 \\
+    D & \texttt{d612e} & \texttt{gggg} h229 & \num{1282821} & 0.07687 (110) & $-0.04752$ [$-.0622$, $-.0328$] & 0.018529 & 0.2644 & 0.2326 & 0.4222 \\
+    A & \texttt{6e3bf} & \texttt{agag} h299 & \num{1281407} & 0.07058 (101) & $-0.05381$ [$-.0685$, $-.0391$] & 0.017374 & 0.2730 & \best{0.2335} & 0.4168 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+Ninguna rama cumple ninguna cláusula de victoria. Cada rama de 4 etapas pierde
+recall \emph{y} holisticness por IC pareado, y las cinco quedan \textbf{por debajo
+del umbral absoluto obligatorio de recall \num{0.108}}
+(\numrange{0.0706}{0.0860}). Derivado por línea base a partir del propio
+\texttt{music@10} del control, \num{0.45519}, cada rama de 4 etapas queda
+\SIrange{5.0}{8.4}{\percent} por debajo del umbral de relevancia también, así que
+ninguna es siquiera neutra en relevancia. Las pérdidas son
+$\numrange{2.5}{3.7}\times$ el semiancho medido: no es una cuestión de banda de
+ruido.
+
+\emph{Resultados, la superficie de caminata.} Tabla~\ref{tab:nexttrack-stagestack-s2}, en la
+celda primaria igualada $a\num{0.4}$/$s\num{0.3}$, pareada contra el control del
+mismo lote sobre las métricas de caminata de la Sección~\ref{sec:nexttrack-walksurface}. \texttt{vibe} se
+reporta siempre con \texttt{stride\_err} al lado, a zancada igualada, según la
+cautela permanente de que una ganancia de vibe comprada dando pasos más cortos no es
+una ganancia.
+
+\begin{table}[ht]
+  \centering
+  \caption{El lote de pila de etapas sobre la caminata generada: \num{40} sesiones
+  retenidas $\times$ \num{20} pasos con tope de artista 1, pareado contra el
+  control C0 \emph{del mismo lote} (\num{2000} remuestreos). La cláusula de
+  refutación es «$\Delta$\texttt{vibe} con IC bajo cero \emph{y}
+  $\Delta$\texttt{stride\_err} sin IC bajo cero». \texttt{vibe},
+  \texttt{genres}, \texttt{ground} mejor cuanto más alto; \texttt{stride\_err}
+  mejor cuanto más bajo; \texttt{drift} mejor cuanto más cerca de cero. Los límites
+  del IC se citan donde el intervalo se separa de cero.
+  \emph{Fuente: \texttt{2026-08-01-stage-stack-topology.md}.}}
+  \label{tab:nexttrack-stagestack-s2}
+  {\footnotesize\setlength{\tabcolsep}{2.2pt}\begin{tabular}{lccccclc}
+    \toprule
+    Rama & vibe & stride\_err & drift & genres & ground & $\Delta$vibe [IC 95\%] & V2 \\
+    \midrule
+    GRU despl.\ $a$0.4 $s$0.0 & \best{0.609} & 0.399 & $-0.089$ & 9.925 & 0.345 & $+0.0376$ IC$>$0 & referencia \\
+    motor despl.\ $a$0.4 $s$0.3 & 0.568 & 0.129 & $-0.080$ & \best{10.450} & \best{0.357} & $-0.0033$ abarca & puerta \\
+    \textbf{C0} $a$0.4 $s$0.3 & 0.571 & 0.116 & $-0.080$ & 10.325 & 0.344 & base & base \\
+    C1 \texttt{gru} h537 & 0.561 & 0.122 & $-0.082$ & 10.625 & 0.359 & $-0.0100$ abarca & indist. \\
+    D \texttt{gggg} & 0.557 & 0.122 & $-0.071$ & 10.225 & 0.319 & $-0.0140$ [$-.0255$, $-.0022$] & REFUTADA $\times2$ \\
+    C \texttt{aggg} & 0.548 & \best{0.113} & $-0.064$ & 10.250 & 0.340 & $-0.0231$ [$-.0381$, $-.0084$] & REFUTADA \\
+    B \texttt{agga} & 0.545 & 0.126 & \best{$-0.061$} & 9.675 & 0.335 & $-0.0258$ [$-.0421$, $-.0108$] & REFUTADA \\
+    E \texttt{gagg} & 0.540 & 0.109 & $-0.084$ & 9.225 & 0.335 & $-0.0316$ [$-.0494$, $-.0144$] & REFUTADA \\
+    A \texttt{agag} & 0.534 & 0.117 & $-0.085$ & 9.125 & 0.336 & $-0.0375$ [$-.0559$, $-.0214$] & REFUTADA \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+Cada rama de 4 etapas dispara la cláusula de refutación. D la dispara \emph{dos
+veces}, fallando también el umbral de anclaje ($\Delta$\texttt{ground}
+$-\num{0.0250}$ [$-\num{0.0474}$, $-\num{0.0048}$]), y A pierde además variedad de
+género ($-\num{1.200}$ [$-\num{2.125}$, $-\num{0.300}$]). Ninguna rama se acerca a
+una cláusula de victoria. Dos comprobaciones de robustez cierran las vías de
+escape. Se corrió una \textbf{sonda de zancada} pre-registrada sobre
+$s\in\{\num{0.2},\num{0.3},\num{0.4}\}$ para las dos únicas ramas con algún
+movimiento direccional hacia una victoria de caminata, y \emph{ambas alcanzan su
+máximo en $s\num{0.3}$ --- la celda en la que ya se habían medido} (C:
+vibe/stride\_err \num{0.586}/\num{0.183}, \num{0.548}/\num{0.113},
+\num{0.517}/\num{0.153}; E: \num{0.576}/\num{0.155}, \num{0.540}/\num{0.109},
+\num{0.516}/\num{0.174}); con $s\num{0.4}$ ambas pierden vibe con el IC bajo cero
+mientras \texttt{stride\_err} \emph{empeora}. Y la mejor rama se re-midió en la
+celda \textbf{desplegada} $a\num{0.8}$/$s\num{0.5}$, donde queda refutada otra vez
+($\Delta$\texttt{vibe} $-\num{0.0158}$ [$-\num{0.0267}$, $-\num{0.0059}$],
+$\Delta$\texttt{stride\_err} abarcando).
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_stage_stack}
+  \caption{\textbf{Izquierda:} las cinco ramas de 4 etapas caen \emph{por debajo}
+  del umbral absoluto obligatorio de recall, mientras el control de capacidad
+  $\num{3.24}\times$ empata con el ancla --- así que el daño es la profundidad, no
+  la capacidad. Las barras de error son el IC bootstrap pareado contra el control
+  del mismo lote, proyectado sobre la escala de aciertos. \textbf{Centro:} el
+  número más interesante de la campaña. La rama B alcanza la \emph{mejor} pérdida
+  InfoNCE de validación del lote y recupera \num{55} aciertos menos que el control:
+  el objetivo que entrena toda la familia y la calidad de recuperación del top-10 se
+  desacoplan en profundidad, así que cualquier búsqueda de arquitectura que
+  seleccione por pérdida de validación elegiría la rama equivocada.
+  \textbf{Derecha:} el cierre en dos superficies. La lectura de caminata en la
+  celda primaria igualada refuta las mismas cinco ramas que refuta la superficie de
+  un solo disparo; el control de capacidad empata en ambas. El eje no falla
+  meramente en cerrarse en una superficie: se cierra en dos.}
+  \label{fig:nexttrack-stage-stack}
+\end{figure}
+
+\emph{Interpretación.} \textbf{El eje queda cerrado, y es el primer nulo de este
+arco que cierra en ambas superficies.} Las cinco ramas de 4 etapas quedan refutadas
+por IC pareado en recall de un solo disparo \emph{y} en la caminata con la compuerta
+del instrumento en verde, y el control de capacidad es indistinguible en ambas. Es
+el sexto nulo consecutivo de arquitectura en este corpus y, a diferencia de los
+cinco anteriores, satisface la regla permanente de que un veredicto de un solo
+disparo no dice nada sobre la superficie que sirve el producto.
+
+\textbf{La hipótesis de mecanismo del usuario queda refutada, y ese es el hecho más
+reutilizable de aquí.} La rama E puso el MLP sobre un \emph{estado oculto
+compuertado} en lugar de sobre PCA con signo crudo, lo que según la historia del
+rectificador debería eliminar el daño. No lo hace: E alcanza \num{118} de
+\num{1431}, empata con otras dos disposiciones, solo supera a la peor y no se acerca
+a los \num{178} del control. Así que la rectificación de media onda de la
+\emph{entrada cruda} no es el mecanismo --- lo que está mal sobrevive a mover el
+rectificador aguas abajo de una compuerta. Un run compró la refutación limpia de una
+historia plausible y fácil de creer.
+
+\textbf{El daño es la profundidad misma, y tres controles cierran las alternativas
+simultáneamente.} No es la capacidad: el control de $\num{3.24}\times$ empata en
+ambas superficies. No es la regularización ni la parada temprana: \emph{cada} rama
+de 4 etapas entrena \emph{más} que el control (\numrange{21}{40} épocas contra
+\num{14}) y dos de cinco alcanzan una pérdida de validación \emph{menor}, así que la
+contingencia pre-autorizada por conteo de dropout falló en sus dos cláusulas de
+disparo y no se gastó --- la aplicación cuádruple de dropout queda exculpada. Y no es
+el MLP: un MLP líder por paso en profundidad 4 es neutro en recall y
+\emph{positivo} en holisticness contra la disposición puramente recurrente
+($\Delta H$ $+\num{0.00291}$, IC sobre cero). Lo que queda es la profundidad de la
+cadena recurrente, y su costo es grande: \numrange{55}{77} aciertos de \num{1431}.
+
+\textbf{Enmarcar supera a intercalar a capacidad idéntica bit a bit.}
+\texttt{ann+gru+gru+ann} supera a \texttt{ann+gru+ann+gru} por $+\num{0.01537}$ de
+recall con el IC sobre cero \emph{con el mismo conteo de parámetros por fórmula} ---
+la comparación de topología con el control más estrecho que la campaña podía hacer.
+Interponer un MLP por paso \emph{entre} dos recurrencias es peor que ponerlos por
+fuera, lo que es coherente con la lectura de profundidad: romper la cadena
+recurrente por el medio cuesta más que añadir profundidad en los extremos. Dos
+contrastes más son planos: el número de etapas recurrentes (2 frente a 3) abarca en
+recall, y la posición del rectificador no compra nada más allá de superar a la peor
+disposición.
+
+\textbf{Un MLP líder por paso \emph{no} es perjudicial en profundidad 4, lo que
+estrecha en lugar de confirmar el resultado con $N=1$.} El «un ann líder es
+perjudicial» de la Sección~\ref{sec:nexttrack-preencoder} se midió con $N=1$ contra una GRU
+única; en profundidad 4 la misma adición es gratuita o ligeramente buena. La trampa
+del pre-codificador debería acotarse al caso superficial.
+
+\textbf{El objetivo y la recuperación se desacoplan en profundidad, y esta es la
+instancia más nítida hasta ahora.} La rama B logra la pérdida InfoNCE de validación
+\emph{más baja} de todo el lote (\num{6.5378} contra el \num{6.5832} del control)
+mientras recupera \textbf{\num{55} aciertos menos} (\num{123} contra \num{178}).
+Todo nulo previo de arquitectura en este corpus era coherente con «la maquinaria
+extra no hace nada»; este muestra que la maquinaria extra hace algo medible a la
+pérdida y que es lo \emph{equivocado}. La consecuencia operativa es contundente:
+seleccione por recall@10 y por la caminata, nunca por el objetivo de entrenamiento.
+Una cautela viaja con ello: B llegó al tope de \num{40} épocas sin que la paciencia
+se disparara, así que su recall es un \emph{límite inferior}, y una re-ejecución más
+larga es la prueba limpia del desacoplamiento (la predicción es una mejor pérdida de
+validación y no un mejor recall).
+
+\textbf{Las facetas de eagerness mejoran monótonamente a medida que las ramas
+empeoran, y los umbrales lo atraparon.} Cada rama de 4 etapas des-eageriza
+sustancialmente (concentración \num{0.359}$\to$\numrange{0.263}{0.318}) y eleva
+\texttt{ild}; bajo una lectura ingenua con holisticness como primaria algunas
+parecerían interesantes. Todas mueren por el umbral absoluto de recall y por el
+umbral de relevancia por línea base --- el mismo mecanismo que ya ha salvado cuatro
+campañas. Nótese que la cifra \emph{absoluta} canónica de relevancia \num{0.43}
+habría dejado pasar a varias de estas ramas, así que el umbral debe derivarse por
+línea base.
+
+\paragraph{Dos subproductos, y la línea de gobernanza.} Un pariente con $N=2$
+cerrado previamente --- una torre doble con un pre-MLP en un lado, cerrada por un
+empate de recall de un solo disparo --- se evaluó en la caminata por primera vez aquí
+y queda \textbf{refutado en la caminata} ($\Delta$\texttt{vibe} $-\num{0.0255}$
+[$-\num{0.0432}$, $-\num{0.0096}$]), siendo su única ganancia real menos deriva. Es
+la misma firma que mostró antes una variante de celda recurrente --- mejor zancada y
+deriva, peor vibe --- lo que ahora parece una propiedad general de añadir maquinaria
+pre-recurrencia y no algo específico de ninguna de las dos ramas. Segundo, la
+métrica de anclaje volvió a discriminar casi nada, separando una rama de nueve,
+coherentemente con su aritmética registrada (rango entre ramas \num{0.0060} frente a
+una desviación típica por sesión de \num{0.1417}, que necesitaría
+${\sim}\num{2140}$ sesiones): es un umbral que atrapa degeneración, no una métrica
+de ordenamiento, y solo se usó así. Nada se promocionó como campeón, nada se
+registró como reclamo de corona y nada se desplegó; las siete ramas se promocionaron
+\emph{solo para medición}, cada una con la nota literal «promovida para habilitar la
+evaluación de caminata; no es un reclamo de corona», lo que inundó el grupo de
+mejores modelos y se entregó al agente de curación.
+
+\paragraph{Dos hallazgos de proceso que conviene conservar.} Primero, la compuerta
+de suma de verificación de predictores se disparó \emph{sobre un archivo que el
+diseño no nombró para copiar} --- listaba un módulo a copiar y un módulo compartido
+solo a \emph{verificar}, y la verificación falló. La divergencia resultó inerte para
+este lote, pero eso es un juicio \emph{a posteriori} que requirió leer el diff; la
+regla que lo atrapó es la que conviene conservar. \textbf{Verifique la suma de cada
+archivo del cierre de importación de la familia, no solo de los que copió.}
+Segundo, el cuerpo de lanzamiento aprobado fue rechazado por el bloque de registro
+aprobado: el JSON del diseño enviaba seis hiperparámetros que el bloque no declara,
+así que las primeras publicaciones fallaron sin más. Se resolvió eliminando las seis
+claves \emph{tras probar que eliminarlas es inocuo} --- los valores por defecto del
+predictor suministran exactamente esos valores y el diccionario resuelto de
+hiperparámetros es idéntico en ambos casos, verificado por comparación directa --- y
+el bloque de registro se dejó exactamente como se aprobó.
+\emph{Fuente: \texttt{2026-08-01-stage-stack-topology.md}.}
+
+\section{Pista siguiente: bancos de torres paralelas cerrados en ambas superficies}
+\label{sec:nexttrack-towerbank}
+Esta es la séptima campaña de arquitectura sobre el corpus de pista siguiente y la
+que cierra la rama \emph{paralela} del eje. Es la segunda campaña consolidada
+aquí juzgada en \textbf{ambas} superficies de evaluación, según el estándar que
+fijó la Sección~\ref{sec:nexttrack-stagestack}, así que necesita un párrafo de
+orientación antes de los resultados.
+
+\paragraph{La segunda superficie, en breve.} Todos los números de pista siguiente
+de las secciones anteriores son un top-10 \emph{de un disparo}: se puntúa el
+catálogo una vez desde un prefijo de sesión y se busca la pista siguiente
+held-out. El showcase despachado, en cambio, sirve una \emph{caminata}
+autorregresiva --- añade su propia predicción al prefijo y vuelve a dar un paso,
+veinte veces --- y una serie de pasos individualmente legales puede acabar en una
+región del espacio latente completamente distinta aunque cada paso por separado
+parezca correcto. Una línea de medición aparte (introducida en la
+Sección~\ref{sec:nexttrack-walksurface} y consolidada por completo en el
+documento complementario de pista siguiente, y anclada en las \num{73632}
+transiciones consecutivas reales del propio usuario, cuyo coseno de paso mediano
+es \num{0.261}) añadió por eso cuatro métricas a nivel de caminata:
+\texttt{vibe} (coseno medio de cada pista generada al centroide de la
+\emph{semilla}: ¿sostiene el viaje su mood?), \texttt{stride\_err}
+($|$coseno de paso mediano $-\,\num{0.261}|$, mejor cuanto más bajo: ¿se mueve
+como la persona a la que imita?), \texttt{drift} (desplazamiento al final del
+viaje, mejor cuanto más cerca de cero), \texttt{genres} (géneros distintos
+visitados) y \texttt{ground} (un suelo de degeneración: coincidencia con la
+continuación real). Dos controles deterministas en tiempo de recuperación ajustan
+la caminata sin tocar el modelo --- un \emph{ancla} de semilla $a$ y un término de
+\emph{zancada} $s$ ---, así que una configuración de caminata se escribe como una
+celda $a$/$s$. El motor desplegado es una GRU de torre doble que lee las vistas
+\texttt{latent} y \texttt{cummean} con fusión puramente lineal
+(\texttt{fusion\_layers}${}=0$) en la celda $a\num{0.8}$/$s\num{0.5}$; es la
+única \emph{victoria} de arquitectura medida de este corpus, y ganó en la
+superficie de la caminata después de que tres campañas refutasen su familia en
+recall.
+
+\emph{Motivación.} Esa victoria vino con un mecanismo declarado: la torre lleva
+una \textbf{referencia fija que la recurrencia nunca sobrescribe}, que es lo que
+sostiene un mood. Un
+mecanismo de esa forma hace una predicción comprobable: debería ser
+\emph{sensible a la dosis}. Si una torre de referencia fija compra un vibe
+sostenido más $+\num{1.5}$ géneros, entonces $N$ torres --- las suficientes sobre
+la vista \texttt{latent} cruda para sostener el suelo de recall y el resto sobre
+\texttt{cummean} --- deberían comprar \emph{más} de lo mismo. Esta campaña
+recorre esa curva de dosis, y es el seguimiento que esa propia victoria pedía.
+
+El vehículo es un predictor nuevo, \texttt{seq-bank}: $N$ torres GRU desnudas
+\emph{paralelas} de una sola capa sobre vistas causales configurables, con sus
+estados ocultos por paso concatenados y leídos por \textbf{una única cabeza
+lineal}. Su decisión de diseño es colapsar el número de torres y el multiconjunto
+de vistas en un \emph{único} hiperparámetro \texttt{views}, de modo que $N$ no
+puede desincronizarse de las vistas. Lo que el predictor \emph{no} puede expresar
+importa tanto como lo que puede: declara exactamente \num{15} hiperparámetros y
+ninguno de \texttt{fusion\_layers}, \texttt{fusion\_hidden},
+\texttt{pre\_hidden}, \texttt{pre\_layers}, \texttt{layers},
+\texttt{num\_layers}, \texttt{arch}, \texttt{bidirectional}, \texttt{residual} o
+\texttt{eager\_beta} está entre ellos. Todo mecanismo que las secciones anteriores ya han
+refutado --- la cabeza de fusión MLP (Sección~\ref{sec:nexttrack-dualtower}), el
+pre-codificador por paso (Sección~\ref{sec:nexttrack-preencoder}), el regularizador
+anti-eager blando (Sección~\ref{sec:nexttrack-holisticness}) --- queda por tanto
+\emph{estructuralmente inalcanzable} y no solo sin usar, y una guarda
+\texttt{parse\_views} rechaza cualquier especificación sin una torre
+\texttt{latent}, lo que también pone fuera de alcance las patologías registradas
+de \texttt{delta}/\texttt{cummean} en \numrange{0.058}{0.087}.
+
+Se pre-registraron dos hipótesis. La primaria es la hipótesis de \emph{dosis}
+anterior. La sub-hipótesis independiente es el mecanismo que el barrido de torre
+doble ya había establecido: si la vista \texttt{latent} cruda \emph{subsume} a sus
+hermanas, entonces $N$ torres \texttt{latent} idénticas no compran nada, sea cual
+sea $N$.
+
+\paragraph{Diseño.} Diez ejecuciones sobre la partición canónica
+\dsid{seq-20260715-131139} (\num{1431} sesiones de prueba, tasa de ítems fríos
+\num{0.5507}), \SI{84.2}{\minute} de cómputo, cero fallos. Todo salvo
+\texttt{views} / \texttt{hidden} / \texttt{dropout} queda fijo: \texttt{loss}
+InfoNCE, $\tau=\num{0.07}$, \num{40} épocas, paciencia \num{6}, lr \num{0.001},
+batch \num{128}, semilla \num{1337}, MMR apagado, tope por artista apagado.
+\textbf{La capacidad está igualada a \num{3.00}$\times$ la línea base h256} en
+todas las ramas de banco \emph{y} en el control de GRU única C1 (h512), con los
+conteos re-verificados desde los artefactos en vez de confiados al diseño ---
+\texttt{seq\_bank} emite \texttt{n\_params} en \texttt{metrics.json}, y la
+dispersión mutua entre las siete ramas a \num{3.00}$\times$ incluyendo C1 es del
+\SI{0.405}{\percent}. La regla de decisión se escribió sobre ambas superficies
+antes del lanzamiento. En \textbf{S1} (recall@10 de un disparo) una victoria exige
+un $\Delta$ pareado por encima de cero contra \emph{ambos}: el ancla h256 C0
+\emph{y} la C1 con parámetros igualados, sujeto a un suelo absoluto de recall
+($\ge\num{0.108}$, es decir \num{155} de \num{1431}) y a un suelo de relevancia
+por línea base (el $\Delta$\,music@10 pareado frente a C0 no puede caer por debajo
+de cero). En \textbf{S2} (la caminata: \num{40} sesiones held-out $\times$
+\num{20} pasos con tope por artista 1, pareadas contra la C0 \emph{del mismo
+lote}) la celda primaria es $a\num{0.4}$/$s\num{0.3}$, y guardar una definición
+exige además \textbf{el mismo signo en la celda desplegada}
+$a\num{0.8}$/$s\num{0.5}$.
+
+\paragraph{El instrumento se fijó antes de medir nada.} Las diez puertas
+pre-registradas salieron en verde, y tres merecen constar porque hacen la
+comparación inusualmente estrecha. Una puerta de \emph{equivalencia funcional}
+mostró que \texttt{seq-bank} es una generalización estricta de ambos incumbentes
+y no una familia nueva: con \texttt{views="latent"} reproduce
+\texttt{SeqNextLatent} y con \texttt{views="latent+latent"} reproduce el
+\texttt{DualTowerNextLatent} a \texttt{fusion\_layers}${}=0$, con
+$\max|\Delta|$ \textbf{\texttt{0.00e+00}} tanto en \texttt{forward} como en
+\texttt{predict\_next} para longitudes de prefijo $T=1,2,5,17,40$ y conteos de
+parámetros idénticos en ambos lados; una comprobación adicional del flujo de
+entrenamiento igualó la pérdida de train \emph{y} de validación por época hasta el
+último dígito a lo largo de tres épocas, con los diez tensores del state-dict a
+$\max|\Delta|$ \texttt{0.00e+00}. Las dos puertas de identidad bit a bit dieron
+entonces exacto: C0 reprodujo su recall@10 registrado
+\num{0.12299091544374564} $=$ \num{176} de \num{1431} (una \textbf{décima}
+reproducción, con \texttt{music@10}, H@10 y MRR coincidiendo hasta el último
+dígito) y R2 reprodujo la rama \texttt{latent/latent} f0 de torre doble en
+\num{0.1187980433263452} $=$ \num{170} de \num{1431}, así que la banda de reserva
+del diseño nunca fue necesaria. Y el instrumento de caminata se contrastó contra
+el \texttt{gru.onnx} despachado: $\Delta$\texttt{vibe} $+\num{0.0028}$ y
+$\Delta$\texttt{stride\_err} $+\num{0.0005}$ cruzan ambos el cero, así que los
+veredictos de S2 contra la C0 del lote no son un artefacto de la base.
+
+\emph{Resultados, S1.} La Tabla~\ref{tab:nexttrack-towerbank-s1} es el lote. \textbf{Ninguna
+rama va en negrita como ganadora porque no hay ninguna}: ninguna rama logra
+siquiera la primera pata de la regla de victoria, las nueve ramas no-ancla empatan
+contra C0, y \emph{cinco de las ocho ramas de banco pierden contra la GRU única
+con parámetros igualados C1 con el IC por debajo de cero}. Los dos suelos pasan en
+todas las ramas: la peor es V1 con \num{162} aciertos, lejos del suelo de
+\num{155}, y el $\Delta$ de relevancia más negativo es el de V2,
+$-\num{0.006109}$, que cruza el cero.
+
+\begin{table}[ht]
+  \centering
+  \caption{El lote de bancos de torres en S1, diez ejecuciones sobre
+  \dsid{seq-20260715-131139} (\num{1431} sesiones de prueba), ordenadas por
+  aciertos. El lote se lanzó en cuatro tandas; cada id de ejecución es
+  \protect\runid{run-20260802-} más la hora de la tanda y el sufijo hexadecimal de
+  la columna id, en detalle: \texttt{182050-91b54}, \texttt{182050-2e6f2},
+  \texttt{183404-91e31}, \texttt{183404-62604}, \texttt{183404-67185},
+  \texttt{190415-1d662}, \texttt{190415-90866}, \texttt{190415-b5928},
+  \texttt{192627-17502}, \texttt{192627-836b1}. El $\Delta$ pareado es un bootstrap
+  pareado por sesión (\num{2000} remuestreos, rng \num{1337}) calculado desde los
+  artefactos \texttt{predictions.json} fila a fila; un IC que cruza el cero es un
+  \emph{empate}, y \textsuperscript{$\ast$} marca un $\Delta$ frente a C1 cuyo IC
+  queda enteramente \emph{por debajo} de cero. d\num{0.1}\,/\,d\num{0.0} es el
+  dropout del par D2\,/\,R2 de parámetros idénticos byte a byte. Capacidad: las
+  siete ramas C1, B2, B3, B4, V1, V2 y V3 abarcan
+  \numrange{2.996}{3.007}$\times$ la línea base h256 (dispersión mutua
+  \SI{0.405}{\percent}), D2 y R2 están exactamente en \num{2.000}$\times$ y C0 en
+  \num{1.000}$\times$. Códigos de vista: lat\,$=$\,\texttt{latent},
+  cum\,$=$\,\texttt{cummean}, del\,$=$\,\texttt{delta}. H@10 es la holisticidad de
+  \emph{generación 3} (Sección~\ref{sec:nexttrack-power-generations}), en unidades crudas de
+  pista siguiente. R@10, H@10 y mus@10 mejor cuanto más alto; a\_conc es mejor
+  cuanto más bajo, pero es solo de visualización y deliberadamente \emph{no} va en
+  negrita: el eagerness de ninguna rama es una afirmación de esta campaña. Mejor
+  celda por métrica en negrita; C1 y B4 empatan exactamente en R@10 y ambas van en
+  negrita.
+  \emph{Fuente: \texttt{2026-08-02-tower-bank-parallel-towers.md}.}}
+  \label{tab:nexttrack-towerbank-s1}
+  {\scriptsize\setlength{\tabcolsep}{1.9pt}\begin{tabular}{lllrlllccc}
+    \toprule
+    Rama & id & views / anchura & params & R@10 (crudo) & $\Delta$ vs C0 [IC 95\%] & $\Delta$ vs C1 & H@10 & mus@10 & a\_conc \\
+    \midrule
+    C1 \emph{ctrl} & \texttt{91e31} & 1$\times$GRU h512 & \num{1182912} & \best{0.12998 (186)} & $+0.0070$ [$-.002$, $+.016$] & --- & 0.02380 & 0.4581 & 0.3825 \\
+    B4 & \texttt{1d662} & lat$\times$4 h211 & \num{1187700} & \best{0.12998 (186)} & $+0.0070$ [$-.002$, $+.017$] & $+0.0000$ & 0.02446 & \best{0.4594} & 0.3716 \\
+    D2 & \texttt{62604} & lat$\times$2 h256 d\num{0.1} & \num{789696} & 0.12369 (177) & $+0.0007$ [$-.008$, $+.008$] & $-0.0063$ & 0.02426 & 0.4567 & 0.3698 \\
+    C0 \emph{base} & \texttt{91b54} & 1$\times$GRU h256 & \num{394944} & 0.12299 (176) & --- & $-0.0070$ & \best{0.02454} & 0.4558 & 0.3559 \\
+    B3 & \texttt{90866} & lat$\times$3 h256 & \num{1184448} & 0.12020 (172) & $-0.0028$ [$-.010$, $+.006$] & $\mathbf{-0.0098}$\textsuperscript{$\ast$} & 0.02358 & 0.4554 & 0.3764 \\
+    R2 & \texttt{2e6f2} & lat$\times$2 h256 d\num{0.0} & \num{789696} & 0.11880 (170) & $-0.0042$ [$-.013$, $+.004$] & $\mathbf{-0.0112}$\textsuperscript{$\ast$} & 0.02378 & 0.4554 & 0.3706 \\
+    B2 & \texttt{67185} & lat$\times$2 h334 & \num{1186560} & 0.11880 (170) & $-0.0042$ [$-.013$, $+.003$] & $\mathbf{-0.0112}$\textsuperscript{$\ast$} & 0.02336 & 0.4554 & 0.3799 \\
+    V3 & \texttt{17502} & lat$+$cum$+$cum h256 & \num{1184448} & 0.11880 (170) & $-0.0042$ [$-.016$, $+.006$] & $-0.0112$ & 0.02320 & 0.4497 & 0.3581 \\
+    V2 & \texttt{836b1} & lat$+$cum$+$del h256 & \num{1184448} & 0.11600 (166) & $-0.0070$ [$-.020$, $+.005$] & $\mathbf{-0.0140}$\textsuperscript{$\ast$} & 0.02245 & 0.4497 & 0.3547 \\
+    V1 & \texttt{b5928} & lat$\times$2$+$cum h256 & \num{1184448} & 0.11321 (162) & $-0.0098$ [$-.022$, $+.001$] & $\mathbf{-0.0168}$\textsuperscript{$\ast$} & 0.02299 & 0.4500 & 0.3572 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\paragraph{El número más nítido del lote es un cero.} B4 --- cuatro torres h211
+\texttt{latent} independientes, \num{1187700} parámetros --- y C1 --- una GRU h512,
+\num{1182912} parámetros --- devuelven los \textbf{mismos \num{186} aciertos de
+\num{1431}}, con un $\Delta$ pareado de exactamente $\num{0.000000}$
+$[-\num{0.00839},+\num{0.00839}]$. Con un presupuesto igualado de
+${\sim}\num{3.00}\times$, \emph{la topología y la anchura son intercambiables en
+este corpus}: lo que descubren cuatro torres con inicializaciones aleatorias
+distintas, una única recurrencia más ancha ya lo tenía. La
+Figura~\ref{fig:nexttrack-tower-bank} (izquierda) dibuja el eje $N$ a capacidad
+igualada, y la línea que pasa por $\num{186}/\num{170}/\num{172}/\num{186}$ es
+plana dentro de la propia resolución medida de la partición
+(Sección~\ref{sec:nexttrack-power-stats}).
+
+Es además la demostración más limpia del registro de \emph{por qué la pata de
+control con parámetros igualados es obligatoria}. Leídos solo contra el ancla
+h256, los $+\num{10}$ aciertos de B4 habrían parecido una victoria de topología y
+las cinco ramas que pierden contra C1 habrían pasado todas por empates: el ancla
+no puede distinguir «el banco ayudó» de «los parámetros extra ayudaron, y el banco
+los gastó peor de lo que lo habría hecho la anchura». La pata C1 hace exactamente
+eso, y es lo que convierte un lote de nueve empates en un cierre. Nótese también
+lo que la planitud cuesta en la dirección \emph{contraria}: los $+\num{10}$
+aciertos de C1 sobre C0 tampoco son significativos ($+\num{0.006988}$
+$[-\num{0.00210},+\num{0.01607}]$), el \textbf{séptimo} empate de anchura con
+parámetros igualados del registro, de modo que la campaña tampoco puede reclamar
+h512 como una mejora pese a ser el mayor conteo de aciertos de GRU única medido
+(\num{186} frente a los \num{179} de h454). Los puntos de anchura de GRU única
+sobre PCA-192 se leen ahora h256\,$\to$\,\num{176}, h297\,$\to$\,\num{162},
+h425\,$\to$\,\num{173}, h454\,$\to$\,\num{179}, h512\,$\to$\,\num{186},
+h537\,$\to$\,\num{174}: no monótonos, con un rango de \num{0.0168} y sin
+tendencia.
+
+\emph{Resultados, S2.} La Tabla~\ref{tab:nexttrack-towerbank-s2} es la caminata. Dos ramas
+--- B2 (\texttt{latent}$+$\texttt{latent} h334) y V3
+(\texttt{latent}$+$\texttt{cummean}$+$\texttt{cummean}) --- alcanzaron un
+\textbf{TRADE} genuino en la celda primaria, comprando cada una una mejora de
+deriva con el IC por encima de cero y sosteniendo el vibe. Ambas
+\textbf{voltean} en la celda desplegada: la ganancia de deriva se evapora en un
+cruce del cero y el \texttt{vibe} --- la línea no negociable --- se va por debajo
+de cero en las dos. Bajo la regla pre-acordada, \textbf{no se guardó ninguna
+definición}.
+
+\begin{table}[ht]
+  \centering
+  \caption{El lote de bancos de torres en S2, la caminata generada: \num{40}
+  sesiones held-out $\times$ \num{20} pasos con tope por artista 1, pareadas
+  contra la C0 \emph{del mismo lote} (\num{2000} remuestreos). El bloque superior
+  es la celda primaria $a\num{0.4}$ / $s\num{0.3}$; el inferior re-mide las dos
+  ramas TRADE en la celda \emph{desplegada} $a\num{0.8}$ / $s\num{0.5}$, donde la
+  cláusula de guardado exige el mismo signo. \texttt{vibe}, $\Delta$drift,
+  $\Delta$genres y $\Delta$ground mejor cuanto más alto; \texttt{stride\_err}
+  mejor cuanto más bajo. Los límites del IC se citan solo donde el intervalo no
+  cruza el cero, como en el informe fuente, y \textsuperscript{$\ast$} marca todos
+  esos intervalos --- una \emph{ganancia} en $\Delta$drift, una
+  \emph{refutación} en $\Delta$vibe y $\Delta$genres.
+  \emph{Fuente: \texttt{2026-08-02-tower-bank-parallel-towers.md}.}}
+  \label{tab:nexttrack-towerbank-s2}
+  {\scriptsize\setlength{\tabcolsep}{2.6pt}\begin{tabular}{lccllllc}
+    \toprule
+    Rama & vibe & stride\_err & $\Delta$vibe & $\Delta$stride\_err & $\Delta$drift & $\Delta$genres & $\Delta$ground \\
+    \midrule
+    \multicolumn{8}{l}{\emph{Celda primaria $a\num{0.4}$ / $s\num{0.3}$}} \\
+    C0 (base) & 0.566 & 0.130 & --- & --- & --- & --- & --- \\
+    \textbf{B2} \emph{TRADE} & 0.567 & 0.139 & $+0.0017$ & $+0.0099$ & $\mathbf{+0.0339}$ [$+.007$, $+.063$]\textsuperscript{$\ast$} & $-0.225$ & $+0.0044$ \\
+    \textbf{V3} \emph{TRADE} & 0.556 & 0.124 & $-0.0094$ & $-0.0045$ & $\mathbf{+0.0286}$ [$+.001$, $+.059$]\textsuperscript{$\ast$} & $-0.450$ & $-0.0024$ \\
+    C1 & 0.563 & 0.130 & $-0.0020$ & $+0.0015$ & $+0.0194$ & $-0.375$ & $+0.0008$ \\
+    D2 & 0.559 & 0.129 & $-0.0065$ & $+0.0005$ & $+0.0104$ & $-0.750$ & $+0.0003$ \\
+    B4 & 0.566 & 0.139 & $+0.0006$ & $+0.0103$ & $+0.0164$ & $-0.775$ & $+0.0004$ \\
+    B3 & 0.557 & 0.135 & $-0.0078$ & $+0.0060$ & $+0.0146$ & $\mathbf{-1.025}$\textsuperscript{$\ast$} & $+0.0154$ \\
+    V2 \emph{refutada} & 0.551 & 0.127 & $\mathbf{-0.0144}$ [$-.029$, $-.001$]\textsuperscript{$\ast$} & $-0.0019$ & $+0.0259$ & $-0.025$ & $-0.0148$ \\
+    V1 \emph{refutada} & 0.548 & 0.119 & $\mathbf{-0.0174}$ [$-.035$, $-.001$]\textsuperscript{$\ast$} & $-0.0099$ & $+0.0227$ & $\mathbf{-1.725}$\textsuperscript{$\ast$} & $+0.0017$ \\
+    \midrule
+    \multicolumn{8}{l}{\emph{Celda desplegada $a\num{0.8}$ / $s\num{0.5}$ --- los dos TRADE se derrumban}} \\
+    B2 \emph{refutada} & --- & --- & $\mathbf{-0.0064}$ [$-.012$, $-.001$]\textsuperscript{$\ast$} & $-0.0107$ & $-0.0052$ & $-0.175$ & $+0.0006$ \\
+    V3 \emph{refutada} & --- & --- & $\mathbf{-0.0112}$ [$-.017$, $-.006$]\textsuperscript{$\ast$} & $-0.0074$ & $+0.0043$ & $-0.400$ & $-0.0039$ \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_tower_bank}
+  \caption{El eje de bancos de torres paralelas, cerrado en ambas superficies.
+  \textbf{Izquierda:} el eje $N$ a capacidad igualada (${\sim}\num{3.00}\times$ la
+  línea base h256). Las barras de error son el IC bootstrap pareado contra C0
+  proyectado a la escala de aciertos; la banda gris es la resolución medida de la
+  partición ($\pm\num{0.0124}$ recall@10 $=$ $\pm\num{17.7}$ aciertos,
+  Figura~\ref{fig:nexttrack-power}), y todas las ramas caen dentro. Cuatro torres
+  h211 (B4) y una GRU h512 (C1) devuelven los mismos \num{186} aciertos, con
+  $\Delta$ pareado $\num{0.000000}$. \textbf{Centro:} las dos ramas que lograron un
+  TRADE de caminata en la celda primaria voltean en la celda desplegada: la
+  ganancia de deriva que compró el TRADE decae hasta cruzar el cero mientras el
+  \texttt{vibe} se va por debajo. Los marcadores grises son estimaciones puntuales
+  cuyo IC cruza el cero (el informe fuente solo cita límites para los intervalos
+  que no lo cruzan). \textbf{Derecha:} el único resultado positivo de la campaña, y
+  no es sobre topología --- con parámetros idénticos byte a byte (\num{789696} en
+  ambos, \texttt{model.pt} de \num{3162277} bytes en ambos) el dropout \num{0.1}
+  supera al dropout \num{0.0}, con el IC por encima de cero.}
+  \label{fig:nexttrack-tower-bank}
+\end{figure}
+
+\emph{Interpretación.} \textbf{La hipótesis de dosis queda refutada, y falla en la
+dirección opuesta a la predicción.} Añadir torres \texttt{cummean} de referencia
+fija no compró más de lo que compró $N=2$: destruyó la caminata de forma
+monótona. Ordenadas por $\Delta$\texttt{vibe} en la celda primaria, la secuencia es
+B4/B2 (todo-\texttt{latent}, ${\approx}0$) $>$ B3 $>$ V3 (una \texttt{cummean},
+$-\num{0.0094}$) $>$ V2 ($-\num{0.0144}$, IC por debajo de cero) $>$ V1
+($-\num{0.0174}$, IC por debajo de cero), y el mismo orden se mantiene en S1,
+donde las tres ramas con \texttt{cummean} ocupan los \emph{tres últimos} puestos
+(\num{162}, \num{166}, \num{170} aciertos) y son las únicas cuyas estimaciones
+puntuales de $\Delta$\,music@10 pasan de $-\num{0.005}$. La ironía merece decirse
+sin rodeos: \textbf{la torre añadida para sostener un mood es la torre que empeoró
+la medida de mood de la caminata}; las dos únicas ramas cuyo \texttt{vibe} queda
+refutado sin paliativos son las dos que cargan más \texttt{cummean}. Haga lo que
+haga el motor desplegado \texttt{latent}/\texttt{cummean} con $N=2$, no es «más
+\texttt{cummean} es más sostén del mood», y la lectura estructural que motivó el
+diseño no sobrevive a ser dosificada.
+
+\textbf{La sub-hipótesis queda confirmada y se extiende limpiamente de $N=2$ a
+$N=4$.} B2 (\num{170}), B3 (\num{172}) y B4 (\num{186}) cruzan todas el cero
+frente a C0 y no muestran tendencia distinguible del ruido de anchura. Es el mismo
+mecanismo que encontró el barrido de torre doble (Sección~\ref{sec:nexttrack-dualtower})
+--- la vista \texttt{latent} cruda subsume a sus hermanas --- ahora medido en tres
+recuentos de torres en lugar de dos, que es lo que exige cerrar un eje por dosis y
+no por un único punto.
+
+\textbf{El único hallazgo positivo es un subproducto del nulo, y aterriza sobre el
+motor desplegado.} D2 y R2 difieren en \emph{un} hiperparámetro: los parámetros
+son idénticos byte a byte (\num{789696} en ambos, \texttt{model.pt} de
+\num{3162277} bytes en ambos), solo se mueve \texttt{dropout}, y el
+$\Delta$recall@10 es $+\num{0.004892}$
+$[+\num{0.000699},+\num{0.009783}]$, \textbf{IC por encima de cero}: el dropout
+\num{0.1} \emph{supera} al dropout \num{0.0} (\num{177} frente a \num{170}
+aciertos). Leído con cuidado, esto no revierte el resultado
+«\texttt{fusion\_layers}${}=0$ supera a \texttt{fusion\_layers}${}=1$»
+confirmado tres veces en el
+registro; hace algo más incómodo. El dropout entra en
+\texttt{seq\_dualgru} solo por un pre-MLP, un hueco entre capas o el MLP de
+fusión, y con \texttt{fusion\_layers}${}=0$, una capa y sin pre-codificador
+\emph{los tres están ausentes}: la ruta f0 construye \textbf{cero} módulos de
+dropout. Así que toda rama f0 del registro, \textbf{incluido el motor desplegado
+del showcase}, entrenó sub-regularizada y dejaba
+${\approx}+\num{0.005}$ de recall sobre la mesa; y los tres huecos f0-vs-f1
+registrados ($+\num{0.016}$ / $+\num{0.020}$ / $+\num{0.0266}$,
+Tabla~\ref{tab:nexttrack-fusion-depth}) se midieron contra
+un f1 que \emph{sí} tenía la regularización que le faltaba a su comparador f0, de
+modo que no son comparables en igualdad de condiciones y la ventaja topológica
+real de f0 es, si acaso, \emph{mayor} que la registrada. Donde esas tres cifras se
+citen como mediciones limpias de topología deben re-enunciarse como no
+igualmente-regularizadas. De aquí sale el seguimiento más barato de todo el
+tablero: reentrenar el motor desplegado con \texttt{dropout}${}=\num{0.1}$ y
+releer ambas superficies --- una mejora gratuita, no una apuesta de arquitectura.
+
+\textbf{La disociación con la pérdida de validación recibe una cuarta
+confirmación, ahora como correlación de rangos}
+(Figura~\ref{fig:nexttrack-bank-valloss}). En las diez ramas,
+Spearman(mejor InfoNCE de validación, aciertos) $=-\num{0.2954}$,
+$p=\num{0.407}$: ningún poder predictivo utilizable y, si acaso, con el signo
+equivocado. Los casos nítidos son brutales: B4 y B2 difieren en \num{0.0003} de
+pérdida de validación y en \num{16} aciertos; V1 tiene la cuarta mejor pérdida de
+validación del lote y el \emph{peor} conteo de aciertos; C0 tiene la \emph{peor}
+pérdida de validación y supera a seis de las ocho ramas de banco; y R2 alcanza
+mejor pérdida de validación que D2 recuperando siete aciertos menos, lo que hace
+de la disociación y del hallazgo del dropout dos caras de la misma moneda. La
+regla de decisión nunca leyó la pérdida de validación, y esto es por qué.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_bank_valloss}
+  \caption{El objetivo de entrenamiento no ordena la recuperación: cuarta
+  confirmación, y su instancia más nítida hasta ahora. Diez ramas del lote de
+  bancos de torres: mejor InfoNCE de validación frente a aciertos de \num{1431}.
+  Spearman $=-\num{0.2954}$, $p=\num{0.407}$. B4 y B2 distan \num{0.0003} en
+  pérdida de validación y \num{16} aciertos; C0, el peor ajuste del lote, supera a
+  seis de los ocho bancos. Todas las ramas pararon temprano (época \num{14} siete
+  veces, luego \num{21} y \num{24} dos veces), así que el recall de ninguna rama es
+  una cota inferior impuesta por el techo de épocas.}
+  \label{fig:nexttrack-bank-valloss}
+\end{figure}
+
+\textbf{Los dos TRADE de caminata eran locales a la celda, lo cual es un
+resultado metodológico por derecho propio.} B2 y V3 lograron cada una un
+$\Delta$drift real por encima de cero en $a\num{0.4}$/$s\num{0.3}$ con el vibe
+sostenido, y las dos voltearon a vibe por debajo de cero en
+$a\num{0.8}$/$s\num{0.5}$ con la ganancia de deriva desaparecida. Si el diseño no
+hubiera pre-registrado el requisito de la celda secundaria, esta campaña habría
+reportado dos resultados positivos de caminata y habría guardado dos definiciones.
+\textbf{La cláusula de la celda secundaria es la cláusula que hizo el trabajo
+aquí}, y debería seguir siendo obligatoria en todo diseño futuro de caminata. La
+sonda de zancada pre-registrada apunta en la misma dirección: en $a\num{0.4}$
+sobre $s\in\{\num{0.2},\num{0.3},\num{0.4}\}$ las tres ramas con
+\texttt{cummean} hacen pico en $s\num{0.3}$, la celda en la que ya estaban
+medidas --- la tercera campaña consecutiva en la que re-ajustar la zancada no
+rescata nada --- y en $s\num{0.2}$ su $\Delta$\texttt{vibe} pasa a positivo que
+cruza el cero solo a costa de dar pasos visiblemente más cortos
+($\Delta$\texttt{stride\_err} por encima de cero en las tres) y de perder variedad
+de géneros ($-\num{1.90}$ / $-\num{1.78}$ / $-\num{1.00}$, todos por debajo de
+cero). Ese es exactamente el intercambio que la cláusula de victoria de caminata
+existe para rechazar.
+
+\textbf{La firma del fallo es la opuesta a la de la campaña de arquitectura
+anterior, y eso es diagnóstico.} Ninguna rama fue refutada aquí por un suelo: el
+suelo de recall y el de relevancia pasan en las diez ejecuciones, y ocho de las
+nueve ramas no-ancla se sitúan en una concentración por artista \emph{más alta}
+que el ancla (\numrange{0.3547}{0.3799} frente a \num{0.3559}), es decir, las
+ramas no se de-eagerizaron. Los suelos no fueron entonces el mecanismo operativo:
+estas ramas no son degeneradas, son simplemente \textbf{planas}. Es un modo de
+fallo distinto al de la campaña inmediatamente anterior de profundidad en serie
+(Sección~\ref{sec:nexttrack-stagestack}), en la que las cinco ramas cayeron
+\emph{por debajo} del suelo de recall, y es por lo que este eje cierra como un
+nulo y no como un daño.
+
+\paragraph{El alcance del cierre, con precisión.} Lo que cierra es «bancos de
+$N\ge3$ torres GRU desnudas paralelas a \texttt{fusion\_layers}${}=0$», y solo
+eso, al estándar que la Sección~\ref{sec:nexttrack-stagestack} fijó para un
+cierre en este corpus: ambas superficies, con el instrumento de caminata
+verificado. \textbf{No} vuelve a cerrar la familia de torre doble, que sigue
+reabierta en la superficie de la caminata
+(Sección~\ref{sec:nexttrack-walksurface}) y sigue siendo el motor desplegado. Nada se promovió como campeón, no se guardó ninguna
+definición y no se construyó ningún dataset; las ocho ramas de medición se
+promovieron solo para medir, cada una con la nota literal «promoted to enable walk
+evaluation; not a crown claim», y la inundación resultante del grupo de mejores
+modelos (hasta \num{15} entradas) se declaró por adelantado y se derivó al agente
+de curación. Cero de las tres ejecuciones de contingencia pre-autorizadas se
+gastaron, y la traza de épocas explica por qué: la extensión del confundido de
+dropout requería que R2 parase más tarde que D2 y las dos pararon en la época
+\num{14}; la contingencia del techo de épocas requería que alguna rama llegase al
+tope de \num{40} y todas pararon temprano; la contingencia del bracket de anchura
+requería que C1 perdiese, y no perdió.
+
+\paragraph{Una limitación es heredada, no introducida.} La premisa de esta campaña
+--- el mecanismo de dosis --- se leyó de un hallazgo que \emph{no tiene informe de
+campaña propio}: la reapertura de la familia de torre doble en la superficie de la
+caminata solo existe como acumulado en \texttt{PROJECT-FACTS.md}, un commit de git
+y la transcripción del documento complementario de pista siguiente.
+La puerta de reproducción del arnés re-derivó exactamente las diez medias
+registradas de esa reapertura y sus deltas, así que la \emph{medición} es
+reproducible y el instrumento no se ha movido; lo que falta es la redacción
+primaria, y debería reponerse desde el commit y las entradas del fichero de
+hechos.
+\emph{Fuente: \texttt{2026-08-02-tower-bank-parallel-towers.md}.}
+
 \section{Conclusiones}
 \label{sec:conclusions}
 Trece campañas (jun--jul 2026) sobre el objetivo de rotación girado convergen en
@@ -3885,7 +5861,7 @@ adelante.
 (13) Una línea de trabajo paralela --- recomendación de \emph{pista siguiente}
 (next-track), cuya tarea y métricas no tienen relación con las tablas de rotación de
 arriba (Secciones~\ref{sec:nexttrack}--\ref{sec:nexttrack-phase2}) --- se consolidó a
-través de catorce campañas. Una GRU de sesión por sí sola solo \emph{empata} con la
+través de veintiuna campañas y un memorándum de investigación. Una GRU de sesión por sí sola solo \emph{empata} con la
 barra de co-escucha de Markov de primer orden y pierde en MRR, y ni el ajuste de
 pérdida ni ninguna topología (profundidad/anchura/residual/dirección) la supera.
 Pero un z-blend R+M de \emph{fusión de rankings} (GRU $\times$ Markov) supera la
@@ -3990,9 +5966,115 @@ líneas de trabajo terminan en una salvedad de medición y no de modelado --- el
 de partición aleatoria de rotación es una cota superior de la habilidad hacia
 adelante, y los nulos de arquitectura de pista siguiente están acotados por el
 tamaño del conjunto de prueba.
+(16) Una séptima campaña de arquitectura de pista siguiente cerró después la rama
+\emph{paralela} del eje, y es el segundo veredicto de este documento que se apoya
+en \textbf{dos} superficies de evaluación (el punto (19) es el primero): el ya
+conocido top-10 de un disparo, y
+la \emph{caminata} autorregresiva que el showcase sirve realmente
+(Sección~\ref{sec:nexttrack-towerbank}). Un banco de $N$ torres GRU desnudas
+paralelas bajo una única cabeza lineal, igualado a \num{3.00}$\times$ la línea
+base h256 y dosificado de $N=2$ a $N=4$, no gana en ninguna de las dos
+superficies: todas las ramas \emph{empatan} con la línea base en recall de un
+disparo mientras \textbf{cinco de ocho pierden contra una GRU única con parámetros
+igualados} con el IC por debajo de cero, y las dos ramas que logran un trade de
+caminata en la celda primaria voltean a \texttt{vibe} por debajo de cero en la
+celda desplegada, así que no se guardó ninguna definición. El dato decisivo es un
+cero: cuatro torres h211 (\num{1187700} params) y una GRU h512 (\num{1182912}
+params) devuelven los \emph{mismos} \num{186} aciertos de \num{1431}, con
+$\Delta$ pareado \num{0.000000} --- \emph{topología y anchura son intercambiables
+con este presupuesto}, que es además la demostración más limpia del registro de por
+qué la pata de control con parámetros igualados es obligatoria: contra el ancla
+sola, cinco ramas perdedoras habrían pasado por empates. La campaña se construyó
+para dosificar el mecanismo declarado de la propia victoria de caminata (una
+referencia fija que la recurrencia nunca sobrescribe) y la dosis queda refutada
+\emph{irónicamente}: las torres \texttt{cummean} añadidas para sostener un mood
+son las peores ramas del lote en ambas superficies y las dos únicas cuyo
+\texttt{vibe} de caminata queda refutado sin paliativos. El único resultado del
+lote con IC lejos del cero es un subproducto sobre \emph{regularización}, no sobre
+topología: con parámetros idénticos byte a byte el dropout \num{0.1} supera al
+dropout \num{0.0} en $+\num{0.0049}$ de recall@10. Eso es consecuente porque la
+ruta \texttt{fusion\_layers}${}=0$ construye \emph{cero} módulos de dropout, de
+modo que toda rama f0 del registro --- incluido el motor desplegado del showcase
+--- entrenó sub-regularizada, los tres huecos f0-vs-f1 registrados no son
+igualmente-regularizados, y la mejora más barata del tablero es un único
+reentrenamiento. Es la misma forma que los puntos (7), (9) y (14): la maquinaria
+apilada sobre una representación ya buena no compra nada, y las palancas durables
+son la representación y el régimen de entrenamiento.
+
+(17) Seis campañas más de pista siguiente completan entonces esa línea, y los dos
+resultados \emph{positivos} en ellas son cambios en tiempo de puntuación y no
+modelos. La frontera de MMR $\lambda$ en tiempo de evaluación
+(Sección~\ref{sec:nexttrack-mmr}) es la primera palanca de holisticness confirmada
+del registro --- ocho de ocho ramas la elevan con el IC sobre cero, tres ramas de la
+GRU única superan la barra histórica con un empate de recall, y tres de los cuatro
+factores de corona mejoran juntos --- y resuelve unánimemente su pregunta de
+mecanismo pre-registrada: la diversificación sónica des-concentra \emph{artistas}
+$\numrange{1.59}{3.06}\times$ más rápido de lo que reduce el eco de la semilla en 8
+de 8 ramas, así que la secuela de penalización explícita de artista queda cancelada.
+Su subproducto es una regla de medición: el emparejamiento de pesos compartidos es
+$\numrange{3}{33}\times$ más afilado que el suelo de ruido de la familia de
+arquitecturas del punto (15), así que las palancas en tiempo de evaluación deben
+presupuestar su efecto mínimo detectable a partir del emparejamiento. Después,
+\texttt{markov\_gate} (Sección~\ref{sec:nexttrack-markovgate}) entrega la mayor
+ganancia individual de recall de todo el arco desde nueve líneas y cero parámetros
+nuevos: hacer que la rama de Markov se \emph{abstenga} donde el último ítem del
+prefijo no tiene soporte de bigramas de entrenamiento (el \SI{55.6}{\percent} de las
+consultas) eleva el recall@10 a \num{0.23201} (\num{332} de \num{1431}), pareado
+$+\num{0.02027}$ en la canónica y $+\num{0.01957}$ en una partición disjunta con
+\SI{64}{\percent} de fríos. El defecto es el normalizador \emph{invariante a escala}
+del blend re-inflando un retroceso sin evidencia a un voto completo de un tercio, y
+la descomposición por bucket --- efecto entero en el bucket de soporte cero, los dos
+buckets cálidos \textbf{idénticos byte a byte} --- prueba mecánicamente que ningún
+peso de rama global y estático podía encontrarlo, lo que \emph{estrecha} la trampa
+del combinador aprendido, confirmada cuatro veces, a la \emph{fusión aprendida a
+nivel de puntuación} y no al compuertado por evidencia por consulta. Es una
+recomendación, no una promoción.
+(18) Los resultados negativos de la misma ventana son igualmente portantes. El
+regularizador anti-eager en tiempo de entrenamiento queda refutado
+\emph{expresivamente} y no por dosis
+(Sección~\ref{sec:nexttrack-eagermargin}): sus márgenes se calibraron desde la cola
+de transición ítem$\to$ítem mientras el hinge actúa sobre predicción$\to$actual,
+cuyo techo queda por debajo de los cuantiles usados, así que cuatro ramas reproducen
+la pérdida del control a \num{16} cifras significativas y las que sí disparan
+destruyen la relevancia en el mismo movimiento que des-eageriza. Lo que \emph{sí}
+funciona es la primera palanca de este proyecto que no puede ser superada en
+puntuación: un \textbf{tope duro por artista} sobre el top-$k$
+(Sección~\ref{sec:nexttrack-artistcap}), que lleva \texttt{artist\_conc@10} de
+\num{0.692} a \num{0.113} y la holisticness@10 de generación 3 de \num{0.0086} a
+\num{0.0481} mientras \texttt{music@10} \emph{sube} con el IC sobre cero en todos
+los ajustes y en ambos modelos --- cambia relevancia \emph{literal} por relevancia
+\emph{graduada} --- endurecido en una partición disjunta con \SI{64}{\percent} de
+fríos sobre dos piernas pre-registradas, a un precio declarado de \num{52} de
+\num{1431} aciertos exactos. Una métrica de despliegue construida a propósito
+(Sección~\ref{sec:nexttrack-rollout}) devuelve un sexto nulo de arquitectura en el
+régimen de despliegue y encuentra que la varianza por semilla domina la identidad
+del modelo; y un memorándum de investigación
+(Sección~\ref{sec:nexttrack-memo}), reportado en un registro más bajo porque nada en
+él se ejecutó en el servidor, converge desde cinco direcciones independientes en la
+tesis de que toda propuesta superviviente es un cambio de
+\emph{condicionamiento por evidencia} y no de capacidad --- la misma forma que los
+puntos (1), (7), (9) y (14) del lado de rotación.
+(19) Una campaña de profundidad de pila de etapas
+(Sección~\ref{sec:nexttrack-stagestack}) cierra finalmente la rama \emph{serie} del
+eje de arquitectura en \emph{ambas} superficies de evaluación, el estándar que
+hereda después la campaña de bancos de torres del punto (16). Cinco disposiciones de
+etapas de MLP por paso y recurrentes igualadas en capacidad caen todas \emph{por
+debajo} del umbral obligatorio de recall y quedan refutadas otra vez en la caminata,
+mientras un control de capacidad de $\num{3.24}\times$ empata en ambas --- así que el
+daño es la profundidad misma, y no la capacidad, la regularización ni el MLP (un MLP
+líder por paso es neutro en recall y positivo en holisticness en profundidad 4, lo
+que estrecha el resultado del pre-codificador con $N=1$ del punto (14) al caso
+superficial). Dos hechos sobreviven al nulo: enmarcar supera a intercalar a
+capacidad idéntica bit a bit ($+\num{0.01537}$, IC sobre cero), y el objetivo de
+entrenamiento se \textbf{desacopla} de la recuperación --- la rama con la mejor
+pérdida InfoNCE de validación del lote recupera \num{55} aciertos menos que el
+control, así que cualquier búsqueda de arquitectura sobre esta familia que
+seleccione por pérdida de validación elige la rama equivocada.
 
 \section{Informes fuente}
-Esta síntesis consolida veintisiete informes de campaña de \texttt{experiments/}:
+Esta síntesis consolida treinta y cinco documentos fuente de \texttt{experiments/}
+--- treinta y cuatro informes de campaña y un memorándum de investigación, este
+último señalado como tal porque nada en él se ejecutó en el servidor:
 \begin{itemize}
   \item \texttt{2026-06-09-ae-xgboost-blend.md} --- blend de latente-autoencoder +
     XGBoost sobre rotación (Sección~\ref{sec:ae-blend}).
@@ -4116,6 +6198,86 @@ Esta síntesis consolida veintisiete informes de campaña de \texttt{experiments
     \texttt{frac\_negative\_coords} $=$ \num{0.5327}), más el análisis de potencia
     medido y las tres generaciones de holisticidad
     (Secciones~\ref{sec:nexttrack-preencoder} y~\ref{sec:nexttrack-power}).
+  \item \texttt{2026-07-26-nexttrack-mmr-lambda-frontier.md} --- la frontera
+    nativa de MMR $\lambda$ en tiempo de evaluación sobre ambas anclas;
+    \textbf{CONFIRMADA} como la primera palanca de holisticness genuina del
+    registro (tres ramas NIVEL-1 «gratis» de la GRU única por encima de la barra
+    histórica con un empate de recall, mejor $H$ \num{0.030355}), con la pregunta
+    de mecanismo pre-registrada resuelta unánimemente a favor de la hipótesis
+    responsiva (8 de 8 ramas, razón \numrange{1.59}{3.06}), con la faceta que liga
+    mostrando su cambio al bajar $\lambda$, con el eje del conjunto de candidatos
+    cerrado como mando de ajuste fino, y con el emparejamiento de pesos compartidos
+    medido $\numrange{3}{33}\times$ más afilado que el suelo de ruido de la familia
+    de arquitecturas (Sección~\ref{sec:nexttrack-mmr}).
+  \item \texttt{2026-07-27-rollout-hold-metric.md} --- \texttt{hold@}$N$, una
+    métrica de generación para el régimen de despliegue autorregresivo
+    (desvanecimiento por eje calibrado sobre \num{2135} sesiones reales de
+    entrenamiento, con el término anti-gaming dentro de la métrica), más cinco
+    barridos y \num{240} recorridos; \textbf{REFUTADA} como discriminador de
+    modelos --- un sexto nulo de arquitectura, obtenido en el régimen de despliegue
+    --- con la varianza por semilla mostrando su dominio sobre la identidad del
+    modelo y tres positivos retirados documentados como catálogo de trampas de las
+    métricas de generación (Sección~\ref{sec:nexttrack-rollout}).
+  \item \texttt{2026-07-27b-nexttrack-model-topology-research-memo.md} ---
+    \textbf{un memorándum de investigación, no un informe de campaña}: nada se
+    ejecutó en el servidor, nada se promovió, nada se registró, y sus números
+    provienen de cribados offline sobre checkpoints congelados. Consolidado en un
+    registro más bajo, con su propia partición verificado/provisional preservada y
+    su cautela de cribado sobre el conjunto de prueba enunciada; su contenido
+    reutilizable es la tesis convergente de que toda propuesta superviviente es un
+    cambio de \emph{condicionamiento por evidencia} y no de capacidad, la
+    explicación mecánica de la anomalía del combinador aprendido, y el cementerio
+    (Sección~\ref{sec:nexttrack-memo}).
+  \item \texttt{2026-07-27c-nexttrack-markov-gate-confirm.md} --- la confirmación
+    nativa en dos particiones de \texttt{markov\_gate}; \textbf{CONFIRMADA} y la
+    mayor ganancia individual de recall del arco (R@10 \num{0.23201} $=$ \num{332}
+    de \num{1431}, pareado $+\num{0.02027}$ en la canónica y $+\num{0.01957}$ en
+    una partición disjunta con \SI{64}{\percent} de fríos, MRR al alza en ambas),
+    con los buckets cálidos de evidencia \emph{idénticos byte a byte}, una ganancia
+    de corona no prevista en la que los cuatro factores se mueven en la dirección
+    correcta a la vez, una primera rama de corona neutra en recall al componerse con
+    MMR, y la trampa del combinador aprendido estrechada en consecuencia
+    (Sección~\ref{sec:nexttrack-markovgate}).
+  \item \texttt{2026-07-30-eager-margin-calibrated-refutation.md} --- el
+    regularizador de eagerness en tiempo de entrenamiento con márgenes calibrados
+    desde la cola de transición medida; \textbf{REFUTADO en todo el eje, con
+    mecanismo}: los márgenes se extrajeron del coseno ítem$\to$ítem mientras el
+    hinge actúa sobre predicción$\to$actual, cuyo techo queda entre \num{0.5843} y
+    \num{0.70}, así que cuatro ramas son demostrablemente inertes (trazas de pérdida
+    idénticas bit a bit con $\beta$ hasta el tope del esquema) y las que sí disparan
+    destruyen la relevancia antes de ayudar (Sección~\ref{sec:nexttrack-eagermargin}).
+  \item \texttt{2026-07-30c-artist-cap-measurement.md} --- el \emph{tope duro por
+    artista}, la primera palanca de des-eagering que funciona, y funciona porque no
+    puede ser superada en puntuación: \texttt{artist\_conc@10}
+    \num{0.692}$\to$\num{0.113} con \texttt{music@10} \emph{al alza} (IC sobre
+    cero) en todos los ajustes y en ambos modelos, endurecido en una partición
+    disjunta con \SI{64}{\percent} de fríos sobre dos piernas pre-registradas, a un
+    precio declarado de \num{52} de \num{1431} aciertos exactos; es además donde
+    este documento introduce la segunda superficie de evaluación, la caminata
+    autorregresiva (Sección~\ref{sec:nexttrack-artistcap}).
+  \item \texttt{2026-08-01-stage-stack-topology.md} --- la campaña de topología de
+    pila de etapas (disposiciones de MLP por paso $\times$ recurrencia a capacidad
+    igualada, vía el nuevo predictor \texttt{seq-stack});
+    \textbf{REFUTADA en ambas superficies} y el primer cierre de este corpus a ese
+    estándar: las cinco ramas de 4 etapas caen \emph{por debajo} del umbral de
+    recall y quedan refutadas otra vez en la caminata, el control de capacidad de
+    $\num{3.24}\times$ empata en ambas, la hipótesis del usuario sobre la posición
+    del rectificador queda refutada, enmarcar supera a intercalar a capacidad
+    idéntica bit a bit, y la rama de mejor ajuste del lote recupera \num{55}
+    aciertos menos que el control (Sección~\ref{sec:nexttrack-stagestack}).
+  \item \texttt{2026-08-02-tower-bank-parallel-towers.md} --- la campaña de dosis
+    de bancos de torres paralelas ($N$ torres GRU desnudas bajo una única cabeza
+    lineal, vía el nuevo predictor \texttt{seq-bank}) y la primera campaña aquí
+    juzgada en \emph{dos} superficies; \textbf{CERRADA en ambas}: ninguna rama
+    gana, cinco de ocho pierden contra una GRU única con parámetros igualados,
+    cuatro torres h211 y una GRU h512 devuelven los mismos \num{186} aciertos
+    ($\Delta$ pareado \num{0.000000}), la dosis de \texttt{cummean} empeora
+    estrictamente la caminata, los dos trades de caminata son locales a la celda, y
+    el único resultado del lote con IC lejos del cero es que el dropout \num{0.1}
+    supera al dropout \num{0.0} con parámetros idénticos byte a byte --- lo que
+    implica que toda rama \texttt{fusion\_layers}${}=0$ del registro, el motor
+    desplegado incluido, entrenó sub-regularizada
+    (Sección~\ref{sec:nexttrack-towerbank}).
 \end{itemize}
 
 \end{document}

@@ -1690,6 +1690,595 @@ def fig_nexttrack_walk_headtohead():
     save(fig, "nexttrack_walk_headtohead.pdf")
 
 
+# Fig 33: the tower-bank campaign in one glance -- three panels, three findings.
+# LEFT: the N-axis at MATCHED capacity (~3.00x the h256 baseline). C1 is a single
+# h512 GRU (N=1), B2/B3/B4 are banks of 2/3/4 parallel bare-GRU towers on the raw
+# `latent` view. The line is flat, and B4 (four h211 towers) returns the IDENTICAL
+# 186 hits as C1 (one h512 GRU) -- paired Delta 0.000000. Topology and width are
+# interchangeable at this budget. Error bars are the paired bootstrap CI against
+# C0 (2,000 resamples, rng 1337) mapped from recall@10 onto the hit scale; the grey
+# band is the split's measured resolution (+-0.0124 recall@10 = +-17.7 hits, Fig 29),
+# which every arm sits inside. MIDDLE: the two arms that earned a walk TRADE at the
+# primary cell both FLIP at the deployed cell -- the drift gain that bought the
+# TRADE evaporates while vibe, the non-negotiable line, goes CI<0. The
+# secondary-cell clause is what closed the axis. RIGHT: the campaign's one positive
+# finding, and it is not about topology -- at BYTE-IDENTICAL parameters (789,696
+# both, model.pt 3,162,277 bytes both) dropout 0.1 beats dropout 0.0 by +0.0049
+# recall@10, CI>0. Because seq_dualgru constructs zero dropout modules at
+# fusion_layers=0, every f0 arm on record -- including the deployed engine --
+# trained under-regularized.
+# (2026-08-02-tower-bank-parallel-towers.md, S1 + S2 + secondary-cell tables.)
+def fig_nexttrack_tower_bank():
+    n_test = 1431
+    hits_c0 = 176  # C0 = h256 anchor, bit-identical 10th reproduction
+
+    # -- LEFT: N at matched capacity. (label, N, hits, dlo, dhi) with the paired
+    # CI against C0 in recall@10 units, converted to hits below.
+    narms = [
+        ("C1\nh512", 1, 186, -0.00210, +0.01607),
+        ("B2\nh334", 2, 170, -0.01328, +0.00349),
+        ("B3\nh256", 3, 172, -0.01048, +0.00559),
+        ("B4\nh211", 4, 186, -0.00210, +0.01677),
+    ]
+    resolution = 0.0124 * n_test  # the split's measured half-width, in hits
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(8.2, 3.6))
+
+    ax1.axhspan(hits_c0 - resolution, hits_c0 + resolution, color=MUTED, alpha=0.18,
+                zorder=0, label="measured resolution ($\\pm$0.0124 R@10)")
+    ax1.axhline(hits_c0, color=MUTED, ls="--", lw=1.3,
+                label=f"C0 h256 anchor ({hits_c0}/{n_test})")
+    xs = [a[1] for a in narms]
+    ys = [a[2] for a in narms]
+    lo = [a[2] - (hits_c0 + a[3] * n_test) for a in narms]
+    hi = [(hits_c0 + a[4] * n_test) - a[2] for a in narms]
+    ax1.errorbar(xs, ys, yerr=[lo, hi], fmt="o-", color=ACCENT, ms=6.0,
+                 ecolor=ACCENT, elinewidth=1.3, capsize=3.0, zorder=4,
+                 label="$\\sim$3.00$\\times$ params")
+    ax1.annotate("B4 $=$ C1: 186 hits both,\n$\\Delta = 0.000000$",
+                 xy=(2.5, 191), fontsize=6.9, color=BAD, ha="center",
+                 bbox=dict(boxstyle="round,pad=0.3", fc="#fef2f2", ec=BAD, lw=0.7))
+    ax1.set_xticks([1, 2, 3, 4])
+    ax1.set_xticklabels([f"{a[1]}\n{a[0].replace(chr(10), ' ')}" for a in narms],
+                        fontsize=7.0)
+    ax1.set_xlabel("$N$ parallel towers (matched capacity)")
+    ax1.set_ylabel(f"hits of {n_test} (recall@10)")
+    ax1.set_ylim(150, 205)
+    ax1.set_title("Topology is flat: four towers\nbuy exactly what width buys", fontsize=8.6)
+    ax1.legend(loc="lower left", fontsize=6.0)
+
+    # -- MIDDLE: both walk TRADEs are cell-local. (metric, marker, per-cell
+    # (delta, lo, hi) or (delta, None, None) where the report gives a point
+    # estimate only because the CI straddles.)
+    cells = [0, 1]
+    flip = {
+        "B2 $\\Delta$vibe": ("o", "-", [(+0.0017, None, None), (-0.0064, -0.0117, -0.0011)]),
+        "V3 $\\Delta$vibe": ("s", "-", [(-0.0094, None, None), (-0.0112, -0.0167, -0.0064)]),
+        "B2 $\\Delta$drift": ("o", ":", [(+0.0339, +0.0066, +0.0629), (-0.0052, None, None)]),
+        "V3 $\\Delta$drift": ("s", ":", [(+0.0286, +0.0009, +0.0592), (+0.0043, None, None)]),
+    }
+    ax2.axhline(0.0, color="#374151", lw=1.0)
+    for name, (marker, ls, rows) in flip.items():
+        ax2.plot(cells, [r[0] for r in rows], ls, color=MUTED, lw=1.0, zorder=2)
+        for c, (d, dlo, dhi) in zip(cells, rows):
+            if dlo is None:
+                col, err = MUTED, None
+            else:
+                col = GOOD if dlo > 0 else BAD
+                err = [[d - dlo], [dhi - d]]
+            ax2.errorbar([c], [d], yerr=err, fmt=marker, ms=5.5, color=col,
+                         ecolor=col, elinewidth=1.3, capsize=2.6, zorder=4)
+        nudge = {"B2 $\\Delta$drift": +7.0, "B2 $\\Delta$vibe": -7.0,
+                 "V3 $\\Delta$vibe": -5.0}.get(name, 0.0)
+        ax2.annotate(name, xy=(cells[-1], rows[-1][0]), xytext=(5, nudge),
+                     textcoords="offset points", fontsize=6.4, va="center",
+                     color="#374151")
+    ax2.set_xticks(cells)
+    ax2.set_xticklabels(["a0.4 / s0.3\n(primary)", "a0.8 / s0.5\n(deployed)"], fontsize=6.8)
+    ax2.set_xlim(-0.25, 1.95)
+    ax2.set_ylabel("paired $\\Delta$ vs in-batch C0")
+    ax2.set_title("Both walk TRADEs are cell-local:\nthe drift gain goes, vibe goes CI$<$0", fontsize=8.6)
+    ax2.grid(axis="x", visible=False)
+
+    # -- RIGHT: the dropout pair at byte-identical parameters.
+    drop = [("R2\ndropout 0.0", 170, MUTED), ("D2\ndropout 0.1", 177, GOOD)]
+    x = np.arange(len(drop))
+    ax3.bar(x, [d[1] for d in drop], color=[d[2] for d in drop], width=0.6)
+    ax3.set_xticks(x)
+    ax3.set_xticklabels([d[0] for d in drop], fontsize=7.0)
+    for xi, (_, h, _) in zip(x, drop):
+        ax3.text(xi, h + 1.2, str(h), ha="center", fontsize=7.4)
+    ax3.set_ylim(150, 190)
+    ax3.set_ylabel(f"hits of {n_test} (recall@10)")
+    ax3.annotate("$\\Delta = +0.004892$\n[$+$0.000699, $+$0.009783]\nCI$>$0",
+                 xy=(0.5, 182), fontsize=6.9, color=GOOD, ha="center",
+                 bbox=dict(boxstyle="round,pad=0.3", fc="#f0fdf4", ec=GOOD, lw=0.7))
+    ax3.set_title("Regularization, not topology:\nsame 789,696 params", fontsize=8.6)
+    ax3.grid(axis="x", visible=False)
+
+    fig.suptitle("The parallel-tower-bank axis, closed on both surfaces: no arm wins, "
+                 "and the only CI$>$0 result in the batch is dropout", fontsize=9.0)
+    save(fig, "nexttrack_tower_bank.pdf")
+
+
+# Fig 34: the validation-loss dissociation, 4th confirmation and its sharpest
+# instance yet. Ten arms of the tower-bank batch, best validation InfoNCE against
+# retrieval hits: Spearman = -0.2954, p = 0.407 -- no usable predictive power, and
+# the sign is the WRONG way round if anything. B4 (6.5657) and B2 (6.5660) differ by
+# 0.0003 in val loss and by 16 HITS; V1 holds the 4th-best val loss in the batch and
+# the worst hit count; C0 holds the WORST val loss and beats six of the eight bank
+# arms. R2 (dropout 0.0) reaches a BETTER val loss than D2 (dropout 0.1) while
+# retrieving 7 fewer hits -- the dissociation and the dropout finding are the same
+# coin. This is why the campaign's decision rule never read validation loss.
+# (2026-08-02-tower-bank-parallel-towers.md, finding 6.)
+def fig_nexttrack_bank_valloss():
+    # (arm, best val InfoNCE, hits, early-stop epoch)
+    arms = [
+        ("C0", 6.5868, 176, 14), ("C1", 6.5653, 186, 14),
+        ("R2", 6.5671, 170, 14), ("D2", 6.5695, 177, 14),
+        ("B2", 6.5660, 170, 14), ("B3", 6.5694, 172, 14),
+        ("B4", 6.5657, 186, 14), ("V1", 6.5664, 162, 21),
+        ("V2", 6.5728, 166, 24), ("V3", 6.5813, 170, 24),
+    ]
+    off = {"C1": (-15, 3), "B4": (6, 2), "B2": (-6, -12), "R2": (5, -4)}
+    fig, ax = plt.subplots(figsize=(6.4, 3.8))
+    for name, vl, h, _ in arms:
+        col = ACCENT if name.startswith(("B", "V")) else BAD
+        ax.plot([vl], [h], "o", ms=6.5, color=col, zorder=4)
+        ax.annotate(name, xy=(vl, h), xytext=off.get(name, (5, 3)),
+                    textcoords="offset points", fontsize=7.0, color="#374151")
+    ax.axhline(176, color=MUTED, ls="--", lw=1.2, label="C0 h256 anchor (176 hits)")
+
+    # the sharpest pair: B4 and B2, 0.0003 apart in val loss and 16 hits apart
+    ax.annotate("", xy=(6.5657, 186), xytext=(6.5660, 170),
+                arrowprops=dict(arrowstyle="<->", color=BAD, lw=1.1))
+    ax.annotate("B4 vs B2: $\\Delta$val loss 0.0003,\n$\\Delta$ 16 hits",
+                xy=(6.5660, 177.5), xytext=(6.5668, 190.5), fontsize=6.9, color=BAD,
+                ha="left", arrowprops=dict(arrowstyle="->", color=BAD, lw=0.8))
+    ax.text(0.97, 0.06,
+            "Spearman(val loss, hits) $= -0.2954$,  $p = 0.407$",
+            transform=ax.transAxes, fontsize=7.4, ha="right", color="#374151",
+            bbox=dict(boxstyle="round,pad=0.35", fc="#f9fafb", ec="#d1d5db", lw=0.7))
+    ax.set_xlabel("best validation InfoNCE (lower is a better fit)")
+    ax.set_ylabel("hits of 1431 (recall@10)")
+    ax.set_ylim(155, 197)
+    ax.legend(loc="upper right", fontsize=7.0)
+    ax.set_title("The training objective does not rank retrieval: the 4th confirmation.\n"
+                 "Red = single-GRU references, blue = tower banks", fontsize=9.0)
+    save(fig, "nexttrack_bank_valloss.pdf")
+
+
+# Fig 35: the MMR lambda frontier under the live 4-factor crown. LEFT: the
+# recall/crown plane. Each engine traces a path as lambda falls from 1.0 (off);
+# three arms of the single GRU land above the all-time crown bar H_bar = 0.024872
+# at a recall that is a statistical TIE with their own control (TIER-1 "FREE"),
+# while every champion arm that reaches a comparable H has already paid recall the
+# CI can see. RIGHT: the decisive mechanism question. H1 (sonic diversification
+# de-concentrates artists) required |dartist_conc| >= |dartist_adj|; H2 (sticky)
+# required the ratio BELOW 0.5. Measured 1.59-3.06x in 8 of 8 arms, and the ratio
+# shrinks monotonically as lambda falls -- the easy de-concentration is bought
+# first and the mechanism saturates.
+# (2026-07-26-nexttrack-mmr-lambda-frontier.md, Results + Findings 2/3/4.)
+def fig_nexttrack_mmr_frontier():
+    H_BAR = 0.024872  # prior all-time crown bar (h425 capacity control)
+    FLOOR = 0.108  # mandatory absolute recall floor
+
+    # (label, recall@10, H@10, tier, label offset) -- tier drives the colour
+    champ = [
+        ("A0 $\\lambda$1.0", 0.21174, 0.008603, "ctrl", (6, -3)),
+        ("A1 0.9", 0.21034, 0.010435, "free", (6, 1)),
+        ("A2 0.7", 0.19357, 0.015289, "priced", (6, -2)),
+        ("A3 0.5", 0.16422, 0.023576, "rejected", (6, -3)),
+        ("A4 0.3", 0.10971, 0.031626, "rejected", (5, 4)),
+    ]
+    gru = [
+        ("B0 $\\lambda$1.0", 0.12299, 0.024539, "ctrl", (5, -9)),
+        ("B1 0.9", 0.12089, 0.026761, "free", (5, -1)),
+        ("B2 0.8", 0.11950, 0.029458, "free", (-38, -2)),
+        ("B4 0.7/p50", 0.12020, 0.030355, "free", (5, 3)),
+        ("B3 0.7", 0.11461, 0.034171, "priced", (5, -1)),
+    ]
+    col = {"ctrl": MUTED, "free": GOOD, "priced": ACCENT, "rejected": BAD}
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.9))
+
+    ax1.axhline(H_BAR, color="#374151", ls="--", lw=1.2,
+                label=f"prior all-time crown bar {H_BAR}")
+    ax1.axvline(FLOOR, color=BAD, ls=":", lw=1.2, label="mandatory recall floor 0.108")
+    for arms in (champ, gru):
+        ax1.plot([a[1] for a in arms], [a[2] for a in arms], "-", color=MUTED,
+                 lw=1.0, zorder=2)
+        for lab, r, h, tier, o in arms:
+            ax1.plot([r], [h], "o", ms=6.2, color=col[tier], zorder=5)
+            ax1.annotate(lab, xy=(r, h), xytext=o, textcoords="offset points",
+                         fontsize=6.4, color="#374151")
+    ax1.text(0.163, 0.0362, "single GRU: three TIER-1\n\"FREE\" arms clear the bar",
+             fontsize=6.6, color=GOOD, ha="center",
+             bbox=dict(boxstyle="round,pad=0.3", fc="#f0fdf4", ec=GOOD, lw=0.7))
+    ax1.text(0.205, 0.0195, "champion path:\nmechanism only\n(2.85$\\times$ behind\nat $\\lambda$1.0)",
+             fontsize=6.4, color="#6b7280", ha="center")
+    ax1.set_xlabel("recall@10 (P(next-track hit))")
+    ax1.set_ylabel("holisticness@10 (live 4-factor)")
+    ax1.set_xlim(0.095, 0.245)
+    ax1.set_ylim(0.004, 0.041)
+    ax1.xaxis.set_major_formatter(afmt)
+    ax1.set_title("The crown is reachable at a recall tie ---\nbut only on the single GRU",
+                  fontsize=8.8)
+    ax1.legend(loc="lower left", fontsize=6.2)
+
+    # -- RIGHT: the H1/H2 mechanism ratio, per arm, against the H2 threshold.
+    ratios_a = [(0.9, 3.06), (0.7, 2.17), (0.5, 1.86), (0.3, 1.59)]
+    ratios_b = [(0.9, 2.92), (0.8, 2.78), (0.7, 2.46)]
+    b4 = (0.7, 2.64)
+    ax2.axhline(1.0, color=MUTED, ls="--", lw=1.1, label="equal movement (H1 boundary)")
+    ax2.axhspan(0.0, 0.5, color=BAD, alpha=0.10, zorder=0,
+                label="H2 (sticky) required this band")
+    ax2.plot([r[0] for r in ratios_a], [r[1] for r in ratios_a], "o-", color=ACCENT,
+             lw=1.8, ms=6.0, label="champion R$'$+M+C$'$")
+    ax2.plot([r[0] for r in ratios_b], [r[1] for r in ratios_b], "s-", color=GOOD,
+             lw=1.8, ms=6.0, label="single GRU h256")
+    ax2.plot([b4[0]], [b4[1]], "s", color=GOOD, ms=6.0, mfc="white", mew=1.4)
+    ax2.annotate("B4 pool 50", xy=b4, xytext=(6, 2), textcoords="offset points",
+                 fontsize=6.4, color=GOOD)
+    ax2.annotate("3.06$\\times$", xy=(0.9, 3.06), xytext=(-2, 7),
+                 textcoords="offset points", fontsize=6.6, color=ACCENT)
+    ax2.annotate("1.59$\\times$", xy=(0.3, 1.59), xytext=(2, -12),
+                 textcoords="offset points", fontsize=6.6, color=ACCENT)
+    ax2.invert_xaxis()
+    ax2.set_xlabel("MMR $\\lambda$ (falling to the right $=$ more diversification)")
+    ax2.set_ylabel("$|\\Delta$artist_conc$|$ / $|\\Delta$artist_adj$|$")
+    ax2.set_ylim(0.0, 3.6)
+    ax2.set_title("H1 confirmed 8/8, H2 refuted by 3--6$\\times$:\nsonic MMR de-concentrates artists",
+                  fontsize=8.8)
+    ax2.legend(loc="lower left", fontsize=6.2)
+
+    fig.suptitle("MMR $\\lambda$ is the first genuine crown lever on record, and its "
+                 "mechanism resolves unanimously", fontsize=9.0)
+    save(fig, "nexttrack_mmr_frontier.pdf")
+
+
+# Fig 36: markov_gate. LEFT: the bucket decomposition that is the whole argument.
+# Bucketed by the train-level bigram support n_u of the query's last prefix item,
+# the entire effect sits in the n_u = 0 bucket while the warm buckets are
+# BIT-IDENTICAL (same hits, and the top-k lists byte-for-byte) on all three
+# control/arm pairs -- which is why no global static leg weight could ever find it
+# (dropping the Markov leg globally is a -0.0070 tie: the two buckets cancel).
+# RIGHT: what the gate does on the recall/crown plane. MMR alone on the champion
+# is priced (recall CI<0); the gate alone buys recall AND crown; the two compose,
+# and gate+MMR is the first arm on record that is recall-NEUTRAL against the
+# champion at 3.6x its holisticness.
+# (2026-07-27c-nexttrack-markov-gate-confirm.md, bucket tables + Findings 3/4/5.)
+def fig_nexttrack_markov_gate():
+    # bucket -> per-pair (control, gated); the warm buckets are one value because
+    # the two arms' top-k lists are byte-for-byte identical there.
+    buckets = [
+        ("$n_u = 0$", [(0.1660, 0.2025), (0.1244, 0.1558), (0.1472, 0.1824)]),
+        ("$n_u$ 1--10", [(0.3116, 0.3116), (0.2578, 0.2578), (0.2945, 0.2945)]),
+        ("$n_u > 10$", [(0.2326, 0.2326), (0.2304, 0.2304), (0.2151, 0.2151)]),
+    ]
+    pair_names = ["ds1", "ds2", "ds1 $\\lambda$0.7"]
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.9))
+
+    positions, ticklabels = [], []
+    for bi, (bname, cells) in enumerate(buckets):
+        for pi, (ctrl, gated) in enumerate(cells):
+            pos = bi * 1.25 + pi * 0.33
+            positions.append(pos)
+            lab = pair_names[pi]
+            ticklabels.append(f"{lab}\n{bname}" if pi == 1 else lab)
+            ax1.bar(pos - 0.075, ctrl, 0.14, color=MUTED,
+                    label="ungated control" if (bi == 0 and pi == 0) else None)
+            ax1.bar(pos + 0.075, gated, 0.14, color=GOOD,
+                    label="markov_gate = true" if (bi == 0 and pi == 0) else None)
+    ax1.set_xticks(positions)
+    ax1.set_xticklabels(ticklabels, fontsize=6.2)
+    ax1.annotate("$+$0.0365 / $+$0.0314 / $+$0.0352\n(43 misses $\\to$ hits, 14 hits lost)",
+                 xy=(0.41, 0.207), xytext=(0.72, 0.318), fontsize=6.5, color=GOOD,
+                 arrowprops=dict(arrowstyle="->", color=GOOD, lw=0.8),
+                 bbox=dict(boxstyle="round,pad=0.3", fc="#f0fdf4", ec=GOOD, lw=0.7))
+    ax1.annotate("warm buckets: top-$k$ lists\nBYTE-FOR-BYTE identical,\n$\\Delta = 0.0000$, $n_{disc} = 0$",
+                 xy=(2.83, 0.245), xytext=(2.55, 0.352), fontsize=6.5, color="#374151",
+                 ha="center", arrowprops=dict(arrowstyle="->", color="#374151", lw=0.8),
+                 bbox=dict(boxstyle="round,pad=0.3", fc="#f9fafb", ec="#d1d5db", lw=0.7))
+    ax1.set_ylabel("recall@10 within bucket")
+    ax1.set_xlabel("bucketed by train bigram support of the last prefix item\n"
+                   "(55.6--62.3% of test queries have $n_u = 0$)")
+    ax1.set_ylim(0.0, 0.40)
+    ax1.set_title("A surgically pure $n_u = 0$ intervention:\nthe warm side does not move at all",
+                  fontsize=8.8)
+    ax1.legend(loc="upper left", fontsize=6.4)
+    ax1.grid(axis="x", visible=False)
+
+    # -- RIGHT: recall x crown plane.
+    pts = [
+        ("champion C1", 0.21174, 0.008603, MUTED, (6, -8)),
+        ("$+$MMR $\\lambda$0.7 (C3)", 0.19357, 0.015289, ACCENT, (-14, -15)),
+        ("$+$gate (A1)", 0.23201, 0.018699, GOOD, (-26, 7)),
+        ("$+$gate$+$MMR (A3)", 0.21314, 0.030980, GOOD, (-16, 8)),
+        ("GRU $\\lambda$0.7/p200 (B3)", 0.11461, 0.034171, MUTED, (6, -3)),
+    ]
+    for lab, r, h, c, o in pts:
+        ax2.plot([r], [h], "o", ms=7.0, color=c, zorder=5)
+        ax2.annotate(lab, xy=(r, h), xytext=o, textcoords="offset points",
+                     fontsize=6.5, color="#374151")
+    ax2.annotate("", xy=(0.23201, 0.018699), xytext=(0.21174, 0.008603),
+                 arrowprops=dict(arrowstyle="->", color=GOOD, lw=1.3))
+    ax2.annotate("", xy=(0.19357, 0.015289), xytext=(0.21174, 0.008603),
+                 arrowprops=dict(arrowstyle="->", color=ACCENT, lw=1.3))
+    ax2.annotate("", xy=(0.21314, 0.030980), xytext=(0.19357, 0.015289),
+                 arrowprops=dict(arrowstyle="->", color=GOOD, lw=1.3))
+    ax2.axvline(0.21174, color=MUTED, ls=":", lw=1.0)
+    ax2.text(0.2095, 0.0225, "champion recall", fontsize=6.0, color="#6b7280",
+             rotation=90, va="center", ha="right")
+    ax2.text(0.150, 0.0275, "gate$+$MMR: recall TIE\n($+$0.00140 straddles) at\n3.6$\\times$ the champion's H",
+             fontsize=6.5, color=GOOD, ha="center",
+             bbox=dict(boxstyle="round,pad=0.3", fc="#f0fdf4", ec=GOOD, lw=0.7))
+    ax2.set_xlabel("recall@10 (P(next-track hit))")
+    ax2.set_ylabel("holisticness@10 (live 4-factor)")
+    ax2.set_xlim(0.10, 0.252)
+    ax2.set_ylim(0.003, 0.038)
+    ax2.xaxis.set_major_formatter(afmt)
+    ax2.set_title("The gate changes MMR's tier on the champion\nfrom PRICED to FREE",
+                  fontsize=8.8)
+
+    fig.suptitle("markov_gate: making one leg abstain where it has no evidence buys "
+                 "$+$0.0203 recall and a 2.2$\\times$ crown", fontsize=9.0)
+    save(fig, "nexttrack_markov_gate.pdf")
+
+
+# Fig 37: the eagerness regularizer at a calibrated margin, refuted with a
+# mechanism. LEFT: the calibration measured the WRONG distribution. The margins
+# were drawn from the item->item transition cosine cos(x_t, x_{t+1}) (median
+# 0.262 / p75 0.584 / p90 0.830), but the hinge acts on cos(pred_t, x_t), whose
+# ceiling over training sits between 0.5843 and 0.70 -- so p75 and p90 lie
+# OUTSIDE the support of the penalized quantity and the arms are provably inert
+# (bit-identical loss traces at beta up to 92). RIGHT: where the knob does fire,
+# eagerness and relevance are the same mechanism -- there is no separating window
+# between de-eagering and breaching the relevance floor.
+# (2026-07-30-eager-margin-calibrated-refutation.md, Findings 1 and 2.)
+def fig_nexttrack_eager_margin():
+    FLOOR = 0.4300  # pre-registered absolute music@10 relevance floor
+
+    # (margin, beta, mean relu(cos - m) reconstructed from epoch-1 loss inflation,
+    #  trace bit-identical to the control?)
+    arms = [
+        (0.0, 3, 0.135478, False), (0.0, 12, 0.058340, False),
+        (0.40, 9, 0.000918, False), (0.5843, 19, 0.000000, False),
+        (0.70, 35, 0.000000, True), (0.8304, 92, 0.000000, True),
+    ]
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.9))
+
+    xs = np.arange(len(arms))
+    cols = [BAD if a[3] else (MUTED if a[2] == 0.0 else ACCENT) for a in arms]
+    ax1.bar(xs, [a[2] for a in arms], width=0.62, color=cols)
+    for xi, a in zip(xs, arms):
+        ax1.text(xi, a[2] + 0.004, f"{a[2]:.6f}", ha="center", fontsize=6.2,
+                 color="#374151")
+    ax1.axvspan(2.5, 5.5, color=BAD, alpha=0.07, zorder=0)
+    ax1.text(4.0, 0.062, "INERT: at $m \\geq 0.5843$ the loss trace is\n"
+             "bit-identical to the control at all 14 epochs,\n"
+             "at $\\beta$ up to the schema cap of 100",
+             ha="center", fontsize=6.4, color=BAD,
+             bbox=dict(boxstyle="round,pad=0.3", fc="#fef2f2", ec=BAD, lw=0.7))
+    ax1.text(0.5, 0.100, "DEGENERATE:\nfires, and destroys\nrelevance", ha="center",
+             fontsize=6.4, color=ACCENT,
+             bbox=dict(boxstyle="round,pad=0.3", fc="#eff6ff", ec=ACCENT, lw=0.7))
+    ax1.set_xticks(xs)
+    ax1.set_xticklabels([f"$m${a[0]:g}\n$\\beta${a[1]:g}" for a in arms], fontsize=6.8)
+    ax1.set_ylabel("mean relu$(\\cos(\\mathrm{pred}_t, x_t) - m)$ at init")
+    ax1.set_ylim(0.0, 0.168)
+    ax1.set_title("The margins were drawn from the item$\\to$item\ntransition tail; the hinge "
+                  "never reaches it", fontsize=8.8)
+    ax1.grid(axis="x", visible=False)
+    ax1.text(0.975, 0.975,
+             "margins drawn from cos$(x_t, x_{t+1})$:\nmedian 0.262 / p75 0.584 / p90 0.830\n"
+             "ceiling of the PENALIZED quantity\ncos$(\\mathrm{pred}_t, x_t)$: 0.5843--0.70",
+             transform=ax1.transAxes, ha="right", va="top", fontsize=6.2,
+             color="#374151",
+             bbox=dict(boxstyle="round,pad=0.35", fc="#f9fafb", ec="#d1d5db", lw=0.7))
+
+    # -- RIGHT: no separating window.
+    pts = [
+        ("C0 control\n170 hits", 0.370588, 0.455347, MUTED, (8, 0)),
+        ("B1 $m$0.40 $\\beta$9\n164 hits", 0.367606, 0.447386, ACCENT, (-18, -24)),
+        ("A1 $m$0 $\\beta$3\n77 hits", 0.240717, 0.399997, BAD, (6, 2)),
+        ("A2 $m$0 $\\beta$12\n20 hits", 0.133535, 0.358132, BAD, (7, -2)),
+    ]
+    ax2.axhline(FLOOR, color=BAD, ls="--", lw=1.2,
+                label="pre-registered relevance floor 0.4300")
+    ax2.plot([p[1] for p in pts], [p[2] for p in pts], "-", color=MUTED, lw=1.0, zorder=2)
+    for lab, conc, mus, c, o in pts:
+        ax2.plot([conc], [mus], "o", ms=7.0, color=c, zorder=5)
+        ax2.annotate(lab, xy=(conc, mus), xytext=o, textcoords="offset points",
+                     fontsize=6.4, color="#374151")
+    ax2.axvline(0.319559, color=GOOD, ls="-.", lw=1.2,
+                label="free on-record comparator: fusion_layers$=1$")
+    ax2.annotate("$\\Delta$conc $-$0.051 for $-$0.016 recall,\nwithout touching this axis",
+                 xy=(0.319559, 0.372), xytext=(0.175, 0.379), fontsize=6.3, color=GOOD,
+                 arrowprops=dict(arrowstyle="->", color=GOOD, lw=0.8))
+    ax2.set_xlabel("artist_conc@10 (lower $=$ less eager)")
+    ax2.set_ylabel("music@10 (graded relevance)")
+    ax2.set_ylim(0.345, 0.475)
+    ax2.set_xlim(0.105, 0.415)
+    ax2.xaxis.set_major_formatter(afmt)
+    ax2.set_title("No separating window: every point of real\nde-eagering is past the "
+                  "relevance floor", fontsize=8.8)
+    ax2.legend(loc="lower right", fontsize=6.0)
+
+    fig.suptitle("eager_beta is not a weak knob --- it is mis-specified and mis-scaled",
+                 fontsize=9.0)
+    save(fig, "nexttrack_eager_margin.pdf")
+
+
+# Fig 38: the hard per-artist cap, the first de-eagering lever that works, and
+# the result nobody predicted -- music@10 goes UP, CI>0, at every cap on both
+# models. LEFT: artist_conc collapses. MIDDLE: graded relevance RISES while it
+# does (the cap trades LITERAL for GRADED relevance: the items promoted from rank
+# 75+ are more musically apt to the true continuation than the same-artist tracks
+# they displace). RIGHT: the price, on the crown plane -- gate+cap3 would top the
+# crown board by ~40% at 1.5x rank 1's recall, and every arm clears the 155-hit
+# recall floor, so none is an instance of the "maximize H by predicting worse"
+# pathology.
+# (2026-07-30c-artist-cap-measurement.md, both split tables + Findings 1-4.)
+def fig_nexttrack_artist_cap():
+    caps = ["off", "5", "3", "2"]
+    x = np.arange(len(caps))
+    # deployed champion, ungated / champion + markov_gate
+    conc_u = [0.691653, 0.252613, 0.122975, 0.061946]
+    conc_g = [0.598214, 0.231338, 0.113440, 0.057365]
+    mus_u = [0.453790, 0.474291, 0.476787, 0.474317]
+    mus_g = [0.493189, 0.505703, 0.505762, 0.503767]
+    hits_u = [303, 256, 230, 198]
+    hits_g = [332, 284, 251, 216]
+    H_u = [0.008603, 0.027258, 0.033862, 0.036331]
+    H_g = [0.018699, 0.040056, 0.048063, 0.051175]
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(8.6, 3.7))
+
+    ax1.plot(x, conc_u, "o-", color=MUTED, lw=1.8, ms=5.6, label="champion (ungated)")
+    ax1.plot(x, conc_g, "s-", color=ACCENT, lw=1.8, ms=5.6, label="$+$ markov_gate")
+    ax1.annotate("0.113", xy=(2, conc_g[2]), xytext=(6, 6), textcoords="offset points",
+                 fontsize=6.6, color=ACCENT)
+    ax1.annotate("0.692", xy=(0, conc_u[0]), xytext=(6, 2), textcoords="offset points",
+                 fontsize=6.6, color="#374151")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(caps)
+    ax1.set_xlabel("per-artist cap on the top-10")
+    ax1.set_ylabel("artist_conc@10 (lower better)")
+    ax1.set_ylim(0.0, 0.80)
+    ax1.yaxis.set_major_formatter(afmt)
+    ax1.set_title("Eagerness collapses:\n0.692 $\\to$ 0.113 at cap 3", fontsize=8.6)
+    ax1.legend(loc="upper right", fontsize=6.2)
+
+    ax2.axhline(0.43, color=BAD, ls="--", lw=1.1)
+    ax2.text(0.05, 0.4325, "canonical relevance floor 0.43", fontsize=6.0, color=BAD)
+    ax2.plot(x, mus_u, "o-", color=MUTED, lw=1.8, ms=5.6)
+    ax2.plot(x, mus_g, "s-", color=GOOD, lw=1.8, ms=5.6)
+    ax2.text(0.53, 0.24, "$\\Delta$music@10 CI$>$0 at EVERY cap on\nBOTH models, and it "
+             "replicates on the\n0.64-cold split ($+$0.026 there)",
+             transform=ax2.transAxes, ha="center", fontsize=6.3, color=GOOD,
+             bbox=dict(boxstyle="round,pad=0.3", fc="#f0fdf4", ec=GOOD, lw=0.7))
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(caps)
+    ax2.set_xlabel("per-artist cap on the top-10")
+    ax2.set_ylabel("music@10 (graded relevance)")
+    ax2.set_ylim(0.418, 0.525)
+    ax2.set_title("The unpredicted result: graded\nrelevance RISES as it de-eagers",
+                  fontsize=8.6)
+
+    ax3.axvline(155, color=BAD, ls=":", lw=1.2)
+    ax3.text(158, 0.0015, "recall floor (155 hits)", fontsize=6.0, color=BAD, rotation=90)
+    ax3.axhline(0.034171, color="#374151", ls="--", lw=1.1)
+    ax3.text(352, 0.0352, "incumbent crown 0.034171", fontsize=6.0, color="#374151",
+             ha="right")
+    ax3.plot(hits_u, H_u, "o-", color=MUTED, lw=1.4, ms=5.6)
+    ax3.plot(hits_g, H_g, "s-", color=GOOD, lw=1.8, ms=5.6)
+    for xi, yi, lab, o in ((hits_g[2], H_g[2], "gate $+$ cap 3", (-4, 7)),
+                           (hits_g[0], H_g[0], "gate, cap off", (-46, -2)),
+                           (hits_u[0], H_u[0], "deployed", (-40, -2))):
+        ax3.annotate(lab, xy=(xi, yi), xytext=o, textcoords="offset points",
+                     fontsize=6.3, color="#374151")
+    ax3.set_xlabel("hits of 1431 (recall@10)")
+    ax3.set_ylabel("holisticness@10 (live 4-factor)")
+    ax3.set_xlim(150, 360)
+    ax3.set_ylim(0.0, 0.062)
+    ax3.set_title("Priced, not free: $-$52 hits vs the\ndeployed status quo at cap 3",
+                  fontsize=8.6)
+
+    fig.suptitle("The hard per-artist cap works because it cannot be outscored --- and it "
+                 "trades LITERAL relevance for GRADED relevance", fontsize=9.0)
+    save(fig, "nexttrack_artist_cap.pdf")
+
+
+# Fig 39: the stage-stack topology campaign, refuted on both surfaces. LEFT: every
+# 4-stage arm falls THROUGH the mandatory 0.108 absolute recall floor (155 of
+# 1431) while the 3.24x capacity control ties the anchor -- the damage is depth,
+# not capacity. MIDDLE: the campaign's most interesting number is that arm B
+# reaches the LOWEST validation InfoNCE in the batch while retrieving 55 fewer
+# hits than the control: the objective the family trains on and top-10 retrieval
+# come apart at depth. RIGHT: the two-surface closure -- the walk read at the
+# matched primary cell a0.4/s0.3 refutes the same five arms, so the axis does not
+# merely fail to close on one surface, it closes on two.
+# (2026-08-01-stage-stack-topology.md, Phase 1 + Phase 2 + epoch diagnostics.)
+def fig_nexttrack_stage_stack():
+    FLOOR_HITS = 155  # 0.108 x 1431, the mandatory absolute recall floor
+    n_test = 1431
+    # (arm, stages, hits, dlo, dhi vs in-batch C0 (recall@10), val loss, dvibe,
+    #  dvibe lo, dvibe hi, drecall)
+    arms = [
+        ("C0", "h256", 178, None, None, 6.5832, None, None, None, None),
+        ("C1", "h537", 174, -0.01188, +0.00559, 6.5723, -0.0100, None, None, -0.00280),
+        ("B", "agga", 123, -0.05381, -0.02306, 6.5378, -0.0258, -0.0421, -0.0108, -0.03843),
+        ("E", "gagg", 118, -0.05660, -0.02795, 6.5795, -0.0316, -0.0494, -0.0144, -0.04193),
+        ("C", "aggg", 114, -0.06010, -0.03005, 6.5842, -0.0231, -0.0381, -0.0084, -0.04472),
+        ("D", "gggg", 110, -0.06219, -0.03284, 6.5977, -0.0140, -0.0255, -0.0022, -0.04752),
+        ("A", "agag", 101, -0.06848, -0.03913, 6.5960, -0.0375, -0.0559, -0.0214, -0.05381),
+    ]
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(8.8, 3.8))
+
+    xs = np.arange(len(arms))
+    cols = [MUTED if a[0] in ("C0", "C1") else BAD for a in arms]
+    ax1.bar(xs, [a[2] for a in arms], width=0.62, color=cols)
+    for xi, a in zip(xs, arms):
+        if a[3] is None:
+            continue
+        lo = a[2] - (arms[0][2] + a[3] * n_test)
+        hi = (arms[0][2] + a[4] * n_test) - a[2]
+        ax1.errorbar([xi], [a[2]], yerr=[[lo], [hi]], fmt="none", ecolor="#374151",
+                     elinewidth=1.1, capsize=2.6, zorder=5)
+    ax1.axhline(FLOOR_HITS, color=BAD, ls="--", lw=1.3,
+                label=f"absolute recall floor ({FLOOR_HITS} hits)")
+    ax1.axhline(arms[0][2], color=MUTED, ls=":", lw=1.2, label="in-batch control C0 (178)")
+    ax1.set_xticks(xs)
+    ax1.set_xticklabels([f"{a[0]}\n{a[1]}" for a in arms], fontsize=6.6)
+    ax1.set_ylabel(f"hits of {n_test} (recall@10)")
+    ax1.set_ylim(80, 212)
+    ax1.set_title("All five 4-stage arms fall THROUGH\nthe floor; 3.24$\\times$ capacity ties",
+                  fontsize=8.5)
+    ax1.legend(loc="upper right", fontsize=6.0)
+    ax1.grid(axis="x", visible=False)
+
+    for a in arms:
+        col = MUTED if a[0] in ("C0", "C1") else BAD
+        ax2.plot([a[5]], [a[2]], "o", ms=6.5, color=col, zorder=4)
+        ax2.annotate(a[0], xy=(a[5], a[2]), xytext=(5, 3), textcoords="offset points",
+                     fontsize=6.8, color="#374151")
+    ax2.axhline(178, color=MUTED, ls=":", lw=1.2)
+    ax2.annotate("B: the BEST validation loss in the\nbatch, and 55 FEWER hits than C0",
+                 xy=(6.5378, 126), xytext=(6.5455, 152), fontsize=6.4, color=BAD,
+                 arrowprops=dict(arrowstyle="->", color=BAD, lw=0.9),
+                 bbox=dict(boxstyle="round,pad=0.3", fc="#fef2f2", ec=BAD, lw=0.7))
+    ax2.set_xlabel("best validation InfoNCE (lower $=$ better fit)")
+    ax2.set_ylabel(f"hits of {n_test} (recall@10)")
+    ax2.set_ylim(90, 200)
+    ax2.set_title("Objective and retrieval dissociate\nat depth", fontsize=8.5)
+
+    ax3.axhline(0.0, color="#374151", lw=1.0)
+    ax3.axvline(0.0, color="#374151", lw=1.0)
+    ax3.fill_between([-0.062, -0.018], -0.048, 0.0, color=BAD, alpha=0.07, zorder=0)
+    for a in arms[1:]:
+        col = MUTED if a[0] == "C1" else BAD
+        err = None
+        if a[7] is not None:
+            err = [[a[6] - a[7]], [a[8] - a[6]]]
+        ax3.errorbar([a[9]], [a[6]], yerr=err, fmt="o", ms=6.5, color=col,
+                     ecolor=col, elinewidth=1.1, capsize=2.6, zorder=4)
+        ax3.annotate(a[0], xy=(a[9], a[6]), xytext=(5, 2), textcoords="offset points",
+                     fontsize=6.8, color="#374151")
+    ax3.text(-0.040, -0.0455, "refuted on BOTH surfaces", ha="center", fontsize=6.5,
+             color=BAD)
+    ax3.text(-0.0045, -0.0165, "C1 ties on both", ha="right", fontsize=6.3, color=MUTED)
+    ax3.set_xlabel("$\\Delta$recall@10 vs C0 (one-shot)")
+    ax3.set_ylabel("$\\Delta$vibe vs C0 (walk, $a$0.4 / $s$0.3)")
+    ax3.set_xlim(-0.062, 0.014)
+    ax3.set_ylim(-0.048, 0.010)
+    ax3.set_title("Two surfaces, one verdict", fontsize=8.5)
+
+    fig.suptitle("Stage-stack topology: depth is a cost, not a lever --- and the training "
+                 "objective would have selected the worst arm", fontsize=9.0)
+    save(fig, "nexttrack_stage_stack.pdf")
+
+
 if __name__ == "__main__":
     fig_ae_latent_knn()
     fig_svm_mae_vs_r2()
@@ -1723,3 +2312,10 @@ if __name__ == "__main__":
     fig_nexttrack_walk_transitions()
     fig_nexttrack_walk_frontier()
     fig_nexttrack_walk_headtohead()
+    fig_nexttrack_tower_bank()
+    fig_nexttrack_bank_valloss()
+    fig_nexttrack_mmr_frontier()
+    fig_nexttrack_markov_gate()
+    fig_nexttrack_eager_margin()
+    fig_nexttrack_artist_cap()
+    fig_nexttrack_stage_stack()

@@ -32,7 +32,7 @@ user actually played, scored on a single leak-free chronological
 \emph{next-distinct} split (\num{7154} sessions / \num{19402} items;
 \num{5723} train / \num{1431} test; cold-item rate \num{0.55}). The headline
 metric is Recall@10, reported beside mean reciprocal rank (MRR) and the
-graded-relevance diagnostics artist@10 / genre@10 / artist\_mrr. Twelve campaigns
+graded-relevance diagnostics artist@10 / genre@10 / artist\_mrr. Twenty-one campaigns and one research memo
 are consolidated. A session GRU alone only \emph{ties} the first-order Markov
 co-listening bar (R@10 \num{0.1069}) on Recall@10 and loses on MRR, and neither
 loss-tuning nor any network topology (depth, width, residual, direction) beats
@@ -102,7 +102,58 @@ error $-\num{0.2545}$, genres $+\num{1.50}$, drift $+\num{0.0351}$, all CI
 clear of zero, vibe \emph{held}), while pushing the single GRU or the champion
 to the same stride \emph{costs} vibe --- but \texttt{ground} straddles zero for
 every arm, so only journey \emph{shape} is established, and the primary metric
-is unchanged.
+is unchanged. A closing architecture campaign then follows that reversal up on its
+own stated mechanism and closes the axis: a \emph{bank} of $N$ parallel bare-GRU
+towers under one linear head, dosed from $N=2$ to $N=4$ at a matched
+\num{3.00}$\times$ parameter budget, wins on neither surface --- every arm ties
+the h256 baseline on one-shot recall while \emph{five of eight lose} to a
+parameter-matched single GRU, the two arms that earn a walk trade at the primary
+cell both flip to \texttt{vibe} below zero at the deployed cell, and the
+fixed-reference \texttt{cummean} towers the dose hypothesis was built on are the
+\emph{worst} arms in the batch. The decisive datapoint is a zero: four h211
+towers and one h512 GRU return the identical \num{186} hits of \num{1431},
+paired $\Delta$ \num{0.000000}, so topology and width are interchangeable at
+this budget. The batch's one CI-clear result is a by-product --- at
+byte-identical parameters dropout \num{0.1} beats dropout \num{0.0} by
+$+\num{0.0049}$ recall@10 --- which matters because the
+\texttt{fusion\_layers}${}=0$ path constructs \emph{zero} dropout modules, so
+every f0 arm on record, including the deployed engine, trained
+under-regularized.
+Six further campaigns close the score-time and depth questions. An eval-time
+\emph{MMR} $\lambda$ frontier, run natively on both anchors, is the \textbf{first
+confirmed crown lever on record} --- three single-GRU arms clear the prior all-time
+holisticness bar at a recall whose paired CI straddles zero, with three of the four
+crown factors (diversity, eagerness, \emph{and} graded relevance) improving at once
+--- and it resolves its pre-registered mechanism question unanimously: sonic
+diversification de-concentrates \emph{artists} $\numrange{1.59}{3.06}\times$ faster
+than it reduces seed-echo in 8 of 8 arms, so an explicit artist penalty is not the
+indicated sequel. A purpose-built \emph{rollout} metric (\texttt{hold@}$N$,
+calibrated on \num{2135} real train sessions with an anti-gaming term inside the
+metric) then returns a sixth architecture null in the deployment regime, and finds
+that \emph{per-seed} variance dominates model identity by two orders of magnitude
+--- which is a product recommendation (serve an ensemble) rather than a modelling
+one. The largest single recall gain in the whole arc then comes from neither:
+\textbf{\texttt{markov\_gate}}, a nine-line score-time change that makes the Markov
+leg \emph{abstain} on the \SI{55.6}{\percent} of queries where it has no bigram
+evidence, because the blend's scale-invariant normalizer had been re-inflating an
+evidence-free back-off to a full one-third vote. It buys $+\num{0.02027}$
+$[+\num{0.01048}, +\num{0.03075}]$ Recall@10 on the canonical split and
+$+\num{0.01957}$ on a disjoint \SI{64}{\percent}-cold one (R@10 \num{0.2320},
+\num{332} of \num{1431} --- the best on record), with the two warm evidence buckets
+\emph{byte-for-byte identical}, which is a mechanical proof that no global static
+leg weight could have found it and which narrows the standing learned-combiner
+pitfall to \emph{learned score-level fusion} rather than per-query evidence gating.
+Composed with MMR it is also the first crown arm that is recall-neutral against the
+champion at $\num{3.6}\times$ its holisticness. Against that, the \emph{training}-time
+anti-eager regularizer is refuted with a mechanism --- its margins were calibrated
+from the item$\to$item transition tail while the hinge acts on
+prediction$\to$current, whose ceiling sits below the quantiles used, so four arms
+are \emph{provably inert} (loss traces bit-identical to the control at $\beta$ up to
+the schema cap) and the arms that do fire destroy relevance before they help. And a
+stage-stack depth campaign closes the serial branch of the architecture axis on
+\emph{both} surfaces, with the sharpest instance yet of a dissociation that
+should change how future searches are run: its best-fitting arm holds the
+\emph{lowest} validation loss in the batch and retrieves \num{55} fewer hits.
 \end{abstract}
 
 \section{Introduction}
@@ -171,7 +222,11 @@ supersedes the three-leg \emph{R+M+C} z-blend on the same PCA-192 space (R@10
 \texttt{POST /api/models/blend-gru-markov-content-proj/predict} --- closing the
 productization gap the earlier off-server fusion drivers left open. The prior
 champions remain useful references (R+M is still the leanest two-leg blend), but
-they are no longer the deployable anchor.
+they are no longer the deployable anchor. One qualification has since been added:
+the best \emph{recall} figure on record is no longer the champion as promoted but
+the same model with its Markov leg \emph{gated} to abstain where it has no bigram
+evidence (R@10 \num{0.2320}; Section~\ref{sec:markovgate}), a nine-line score-time
+change carrying a promotion recommendation that has not yet been executed.
 
 \section{Background: the sequence task, the baselines, and the metrics}
 \label{sec:background}
@@ -300,6 +355,18 @@ capacity control, the best dual-tower arm and the best single-tower pre-encoder
 arm (Sections~\ref{sec:dualtower}--\ref{sec:preencoder}). They are listed
 because they \emph{bound} their axes, not because they are candidates: none
 beats the single-GRU baseline by the paired statistic and none was registered.
+Since 2026-08-02 the board carries two more such bounding rows, the widest
+single-GRU point (h512) and the best parallel-tower-bank arm, which return the
+\emph{identical} hit count at a matched parameter budget --- neither is
+significant against the h256 baseline, and together they close the tower-bank
+axis (Section~\ref{sec:towerbank}).
+Since 2026-07-27c the board's top row is the \emph{evidence-gated} champion
+(Section~\ref{sec:markovgate}): making the Markov leg abstain on the
+\SI{55.6}{\percent} of queries where it has no bigram evidence lifts Recall@10 to
+\num{0.2320} (\num{332} of \num{1431}), paired CI above zero on two disjoint
+splits, with MRR and both graded metrics up. It is the best recall figure on
+record, and it is a promotion \emph{recommendation} only --- nothing was registered
+or promoted --- so the servable champion below it is unchanged.
 On the server-effective primary metric, and on why this board stays denominated
 in Recall@10 across three holisticness generations, see
 Section~\ref{sec:power-generations}.
@@ -315,12 +382,17 @@ Section~\ref{sec:power-generations}.
   architecture rows added 2026-07-25/26 are shown to \emph{bound} their axes and
   are excluded from the best-cell bolding; they carry no marginal CI, only a
   paired $\Delta$ against the single-GRU baseline (Tables~\ref{tab:dualtower}
-  and~\ref{tab:preencoder}).}
+  and~\ref{tab:preencoder}). The top row, added 2026-07-27c, is the evidence-gated
+  champion of Section~\ref{sec:markovgate}: it is a promotion \emph{recommendation}
+  rather than a registered model, so its R@10 is bolded as the best on record but it
+  is otherwise excluded from the best-cell bolding, and it carries a paired $\Delta$
+  (Table~\ref{tab:markovgate-paired}) rather than a marginal CI.}
   \label{tab:lb}
   {\footnotesize\setlength{\tabcolsep}{3.2pt}\begin{tabular}{lcccccl}
     \toprule
     Model & R@10 [95\% CI] & MRR & art@10 & gen@10 & mus@10 & Note \\
     \midrule
+    \best{\Rp+M+\Cp\ $+$ gate} (best recall) & \best{0.2320} & 0.1335 & 0.367 & 0.463 & 0.493 & not promoted \\
     \best{\Rp+M+\Cp, PCA-192} (champion, servable) & \best{0.2117 [0.191, 0.233]} & \best{0.1220} & 0.333 & 0.401 & 0.454 & new champion \\
     R+M+C, PCA-192 (prior fusion champ.)  & 0.1859 [0.166, 0.207] & 0.1025 & 0.331 & 0.394 & 0.449 & content additive \\
     R+M+C, PCA-128                        & 0.1824 [0.162, 0.203] & 0.0993 & 0.332 & 0.396 & --- & content additive \\
@@ -329,6 +401,8 @@ Section~\ref{sec:power-generations}.
     R+M, PCA-192                          & 0.1712 [0.151, 0.192] & 0.0952 & 0.329 & 0.398 & 0.443 & $\approx$ prior champion \\
     R+M, PCA-128                          & 0.1670 [0.148, 0.187] & 0.0920 & 0.329 & 0.398 & 0.444 & GRU gain not carried \\
     R+A+M, AE-64                          & 0.1684 & 0.0943 & --- & --- & --- & ANN leg redundant \\
+    GRU single h512, PCA-192          & 0.1300 & --- & --- & --- & 0.458 & width tie \#7; not sig.\ \\
+    tower bank lat$\times$4 h211, PCA-192 & 0.1300 & --- & --- & --- & 0.459 & bank $=$ width; closed \\
     LSTM single, PCA-128                  & 0.1272 [0.110, 0.145] & 0.0495 & 0.335 & \best{0.458} & 0.451 & best single; $\ll$ blend \\
     GRU single h454, PCA-192          & 0.1251 & 0.0539 & 0.338 & 0.454 & 0.457 & width closed \\
     GRU single, PCA-192                   & 0.1230 [0.106, 0.140] & 0.0534 & \best{0.338} & 0.450 & 0.456 & dim point-optimum \\
@@ -1967,6 +2041,947 @@ reported throughout as a labelled, generation-tagged diagnostic column.
 \emph{Sources: \texttt{2026-07-25-nexttrack-dual-tower-fusion-scan.md},
 \texttt{2026-07-26-nexttrack-pre-encoder-scan.md}.}
 
+\section{The MMR $\lambda$ frontier --- the first confirmed crown lever}
+\label{sec:mmr}
+\emph{Rationale.} Section~\ref{sec:holisticness} left one standing flag: an
+eval-time MMR re-rank at $\lambda\approx\num{0.9}$ was ``the only near-free
+holisticness lever on record'', measured in an \emph{offline} sweep over a stored
+checkpoint and explicitly deferred to a user decision. This campaign is the
+native confirm, and it was designed to settle a second, pre-registered
+\emph{mechanism} question rather than merely to re-measure the knob: does sonic
+diversification de-concentrate \textbf{artists} (H1, ``responsive''), or are
+same-artist tracks far enough apart in the content-metric space that the
+diversity penalty leaves eagerness untouched (H2, ``sticky'')? The answer decides
+whether an explicit artist-diversity penalty is the indicated sequel or a
+redundant one.
+
+\paragraph{What is being maximized.} All ten arms are scored under the
+\emph{live} four-factor crown, taken verbatim from
+\texttt{predictors/seq\_common.py}:
+\[
+  \begin{aligned}
+    H = {}& \max(\texttt{mood\_coh},0)\;\times\;\texttt{ild}\\
+          &\times\;\bigl(1-\mathrm{clamp}(\max(\texttt{artist\_adj},
+             \texttt{artist\_conc}),0,1)\bigr)\\
+          &\times\;\mathrm{clamp}\bigl((\texttt{music@10}-\num{0.34})/\num{0.66},
+             \,0,\,1\bigr),
+  \end{aligned}
+\]
+each facet the \emph{mean over rows} and the product taken \emph{of the
+aggregates} --- generation 3 of Section~\ref{sec:power-generations}. Two anchors
+frame the batch: \textbf{A}, the recall champion \Rp+M+\Cp\ (H \num{0.008603}, its
+eagerness factor bound by \texttt{artist\_conc} \num{0.691653}), and \textbf{B},
+the best \emph{single} model on the live crown, \texttt{gru-infonce-h256} (H
+\num{0.024538}). The bar to beat is the all-time healthy-arm crown maximum
+$H_{\mathrm{bar}} = \num{0.024872}$, held by an h425 capacity control
+(\runid{run-20260725-143502-be11b-seq-nexttrack}). All arms ride the canonical
+split \dsid{seq-20260715-131139}; no dataset work was needed.
+
+\paragraph{Why this batch is unusually sharp.} $\lambda$ is an \emph{eval-only}
+parameter: the trained weights are bit-identical across the arms of one model, so
+$\lambda=\num{1.0}$ is a bit-identity gate and every $\Delta$ is a maximally
+paired comparison. Both controls reproduced their anchors exactly (\num{303} and
+\num{176} hits of \num{1431}, MRR agreeing to \num{3.1e-11}), and every arm's $H$
+was \emph{recomputed} from the stored \texttt{predictions.json} under one code
+path, so the per-row rounding bias cancels in every $\Delta$ (recomputed versus
+stored agreed to \num{7.4e-8} and \num{2.1e-7}). A third gate --- MMR-active ---
+required each $\lambda<1$ arm's \texttt{ild} to differ from its own control by far
+more than \num{1e-6}, which is the registered detector for MMR silently no-opping
+when the content-metric index is unreachable. No arm was a no-op.
+
+\emph{Results.} Table~\ref{tab:mmr-arms} is the frontier, and
+Figure~\ref{fig:nexttrack-mmr-frontier} plots it. Arms are tiered by a
+pre-registered rule: \textbf{TIER-1 FREE} means $\Delta H$ above zero with the
+recall $\Delta$ straddling zero and $|\Delta\text{recall}| \ll \num{0.015}$;
+\textbf{TIER-2 PRICED} means a real $H$ gain at a recall cost the CI can see;
+\textbf{TIER-3 REJECTED} means $\Delta$recall below $-\num{0.03}$.
+
+\begin{table}[ht]
+  \centering
+  \caption{The MMR $\lambda$ frontier on both anchors, canonical split
+  \dsid{seq-20260715-131139} ($n=\num{1431}$), sorted by holisticness@10. Every
+  run id is \protect\runid{run-20260726-} plus a launch time and hex suffix, in
+  arm order: \texttt{184115-bf395} (B3), \texttt{184115-1dc77} (A4),
+  \texttt{184116-20d9b} (B4), \texttt{184115-147a6} (B2),
+  \texttt{184115-e1539} (B1), \texttt{183333-9a0b2} (B0),
+  \texttt{184115-7a2f7} (A3), \texttt{184115-36edb} (A2),
+  \texttt{184115-6cb38} (A1), \texttt{183333-1c361} (A0); the A arms are
+  \texttt{seq-blend}, the B arms \texttt{seq-nexttrack}. Every $\Delta$ is a
+  paired bootstrap (\num{2000} resamples, rng \num{1337}) against the arm's
+  \emph{own} $\lambda=\num{1.0}$ control, with all five facets re-aggregated on
+  the same resampled index set before the product; CI bounds are given to three
+  decimals for width. Tier codes: \emph{t1} TIER-1 FREE, \emph{t2} TIER-2 PRICED,
+  \emph{t3} TIER-3 REJECTED, \emph{ctrl} the arm's own $\lambda=\num{1.0}$
+  control. The binding facet --- the one entering the eagerness factor through the
+  $\max()$ --- is \texttt{conc} on A0/A1/A2, B0 and \texttt{adj} everywhere else.
+  H@10, R@10, \texttt{mus} ($=$ music@10) and \texttt{ild}
+  higher-better; \texttt{adj}, \texttt{conc} lower-better. Best cell per metric
+  bolded; the promotable arm B4 is bolded in full. \texttt{mood\_coh} is omitted
+  for width and read in the interpretation: B0$\to$B3 \num{0.4788}$\to$\num{0.4585}
+  ($-\SI{4}{\percent}$) against A0$\to$A4 \num{0.3982}$\to$\num{0.2378}
+  ($-\SI{40}{\percent}$), the champion's collapse under diversification.
+  \emph{Source: \texttt{2026-07-26-nexttrack-mmr-lambda-frontier.md}.}}
+  \label{tab:mmr-arms}
+  {\scriptsize\setlength{\tabcolsep}{1.9pt}\begin{tabular}{lllllllll}
+    \toprule
+    Arm & $\lambda$/pool & H@10 & $\Delta H$ [95\% CI] & R@10 (hits) & $\Delta$R@10 [95\% CI] & mus & ild & adj / conc \\
+    \midrule
+    B3 \emph{t2} & 0.7 / 200 & \best{0.034171} & $+.0096$ [$+.008$, $+.011$] & 0.11461 (164) & $-.0085$ [$-.016$, $-.001$] & 0.4747 & 0.5314 & 0.313 / 0.271 \\
+    A4 \emph{t3} & 0.3 / 200 & 0.031626 & $+.0230$ [$+.021$, $+.026$] & 0.10971 (157) & $-.1019$ [$-.120$, $-.084$] & \best{0.4925} & \best{0.8146} & 0.293 / \best{0.190} \\
+    \best{B4} \emph{t1} & \best{0.7 / 50} & \best{0.030355} & \best{$+.0058$ [$+.005$, $+.007$]} & \best{0.12020 (172)} & \best{$-.0029$ [$-.008$, $+.003$]} & 0.4670 & 0.5017 & 0.327 / 0.302 \\
+    B2 \emph{t1} & 0.8 / 200 & 0.029458 & $+.0049$ [$+.004$, $+.006$] & 0.11950 (171) & $-.0036$ [$-.009$, $+.001$] & 0.4648 & 0.4961 & 0.330 / 0.307 \\
+    B1 \emph{t1} & 0.9 / 200 & 0.026761 & $+.0022$ [$+.002$, $+.003$] & 0.12089 (173) & $-.0021$ [$-.006$, $+.002$] & 0.4597 & 0.4716 & 0.341 / 0.337 \\
+    B0 \emph{ctrl} & 1.0 / 200 & 0.024539 & --- & 0.12299 (176) & --- & 0.4558 & 0.4536 & 0.347 / 0.356 \\
+    A3 \emph{t3} & 0.5 / 200 & 0.023576 & $+.0150$ [$+.013$, $+.017$] & 0.16422 (235) & $-.0473$ [$-.061$, $-.033$] & 0.4871 & 0.6527 & 0.486 / 0.461 \\
+    A2 \emph{t2} & 0.7 / 200 & 0.015289 & $+.0067$ [$+.006$, $+.008$] & 0.19357 (277) & $-.0181$ [$-.029$, $-.008$] & 0.4759 & 0.5201 & 0.571 / 0.608 \\
+    A1 \emph{t1} & 0.9 / 200 & 0.010435 & $+.0018$ [$+.001$, $+.002$] & 0.21034 (301) & $-.0013$ [$-.008$, $+.005$] & 0.4625 & 0.4362 & 0.603 / 0.671 \\
+    A0 \emph{ctrl} & 1.0 / 200 & 0.008603 & --- & \best{0.21174 (303)} & --- & 0.4538 & 0.4064 & 0.610 / 0.692 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_mmr_frontier}
+  \caption{\textbf{Left:} the $\lambda$ frontier on the recall $\times$ crown
+  plane. Each engine traces a path as $\lambda$ falls from \num{1.0}; colour is
+  the pre-registered tier (green TIER-1 FREE, blue TIER-2 PRICED, red TIER-3
+  REJECTED, grey control). Three single-GRU arms clear the prior all-time crown
+  bar \num{0.024872} at a recall whose paired CI straddles zero --- the first
+  genuinely free crown movement on record. The champion's path reaches comparable
+  $H$ only after paying recall the CI can see, and its two best-$H$ points are
+  rejected as degenerate. \textbf{Right:} the mechanism question. H1 required
+  $|\Delta\texttt{artist\_conc}|\ge|\Delta\texttt{artist\_adj}|$; H2 required the
+  ratio below \num{0.5} (shaded). Measured \numrange{1.59}{3.06} in \emph{8 of 8}
+  arms, so H2 is refuted by a factor of \numrange{3}{6} in the wrong direction ---
+  and the ratio shrinks monotonically as $\lambda$ falls, i.e.\ the easy
+  de-concentration is bought first and the mechanism saturates.}
+  \label{fig:nexttrack-mmr-frontier}
+\end{figure}
+
+\emph{Interpretation.} \textbf{MMR is a real crown lever, and the first one on
+record.} Every one of the eight $\lambda<1$ arms lifts $H$ with the CI entirely
+above zero. What makes the gain legitimate rather than an artefact of the
+composite is that \emph{three} of the four factors improve at once: \texttt{ild}
+rises (\num{0.4536}$\to$\num{0.5314} on the GRU, \num{0.4064}$\to$\num{0.8146} on
+the champion), eagerness falls, and --- the load-bearing part ---
+\texttt{music@10} \emph{also} rises (\num{0.4558}$\to$\num{0.4747}). A lever that
+raised $H$ by degrading relevance would be cancelled by the grounding factor; this
+one is not, which is precisely the distinction the floor was written to enforce
+after the \texttt{cummean/cummean} and \texttt{seq-mood} pathologies.
+
+\textbf{H1 is confirmed unanimously and H2 is refuted, which \emph{cancels} the
+sequel the previous campaign had pre-registered.} In 8 of 8 arms
+$\Delta\texttt{artist\_conc} \le \Delta\texttt{artist\_adj}$ (both negative) at a
+ratio of \numrange{1.59}{3.06}. Same-artist tracks \emph{are} near-neighbours in
+the content-metric space, so a max-similarity penalty de-concentrates artists as a
+side effect, with no explicit notion of artist anywhere in it. Sonic MMR
+therefore \emph{is} a de-eagering lever, and porting \texttt{seq-mood}'s explicit
+\texttt{artist\_penalty} to the blend --- the pre-registered H2 follow-up --- is no
+longer the indicated next move. It stays on file as a \emph{complement}, because
+\texttt{artist\_adj} falls ${\sim}\num{2.5}\times$ slower than
+\texttt{artist\_conc} and becomes the binding facet at low $\lambda$.
+
+\textbf{The binding facet switches, and that locates the end of the lever.} On the
+champion the switch from \texttt{artist\_conc} to \texttt{artist\_adj} happens
+between $\lambda\num{0.7}$ and $\lambda\num{0.5}$; on the GRU it has already
+happened by $\lambda\num{0.9}$. Once \texttt{artist\_adj} binds, the
+$(1-\text{eager})$ factor is the stiff one and each further recall point buys
+progressively less crown --- the structural reason the GRU's frontier flattens
+where it does, and a prediction that pushing below ${\sim}\lambda\num{0.7}$ on the
+GRU is poor value. B3 is the confirmation: the highest $H$ measured anywhere
+(\num{0.034171}) at the cost of losing the recall tie.
+
+\textbf{The promotable operating point is the pool probe.} \textbf{B4}
+($\lambda\num{0.7}$, \texttt{mmr\_pool}~\num{50}) is the single best TIER-1 arm at
+$H$~\num{0.030355} --- $+\SI{22.1}{\percent}$ over $H_{\mathrm{bar}}$ and
+\num{5.4} measured half-widths clear of it --- and it beats B2 on $H$ by
+$+\num{0.000889}$ with the CI above zero at a recall that straddles, so its rank
+is \emph{resolved} rather than nominal. B2 ($\lambda\num{0.8}$) was the design's
+pre-registered promotion hypothesis and fired almost exactly as projected
+($\num{0.0321}$ predicted against \num{0.029458} measured, with a \emph{smaller}
+recall cost than projected). Nothing was promoted: six definitions were
+registered, each carrying the note ``NOT PROMOTED --- robustness confirm $+$ user
+approval pending''. The recall board is untouched --- \textbf{no arm improves
+recall}; MMR only ever costs it.
+
+\textbf{The second axis, \texttt{mmr\_pool}, closes as a fine-tuning knob rather
+than an axis.} Capping the candidate pool at \num{50} recovers recall
+($\Delta$ vs pool~\num{200} $+\num{0.005584}$, CI above zero, as hypothesized ---
+a cap bounds how far MMR can reach for diversity) but gives $H$ back
+($-\num{0.003838}$, CI below zero). It does not win at fixed $\lambda$; it moves
+along the \emph{same} frontier. What earns it a line in the record is the
+cross-comparison above: the cap reaches a slightly \emph{better} point than the
+nearest pure-$\lambda$ setting. Prefer $\lambda$ for coarse movement, pool for
+fine-tuning at a chosen $\lambda$.
+
+\textbf{The champion/GRU contrast resolves in favour of factor health, not
+de-eagering headroom.} The design framed this as the campaign-carrying question:
+the champion is $\num{1.9}\times$ more eager, so a given absolute de-eagering is
+worth ${\sim}\num{2.1}\times$ more relative $H$ there --- yet it starts
+$\num{2.85}\times$ behind, and the gap \emph{widens} under diversification
+($H$~\num{0.015289} against \num{0.034171} at $\lambda\num{0.7}$). The facets say
+why: the champion's \texttt{mood\_coh} \textbf{collapses} as it diversifies
+(\num{0.3982}$\to$\num{0.2378} at $\lambda\num{0.3}$, $-\SI{40}{\percent}$) while
+the GRU's barely moves ($-\SI{4}{\percent}$). The champion's recall comes from
+artist-adjacency --- the Markov bigram leg, per
+Section~\ref{sec:holisticness} --- so diversifying away from the seed artist also
+walks it out of the prefix's mood neighbourhood. It pays twice. \textbf{MMR's
+value scales with the health of the other three factors, not with room to
+de-eager}, and no $\lambda$ closes the champion's crown gap.
+
+\paragraph{Two instrument findings, one of them a warning about the record
+itself.} First, \textbf{the shared-weights instrument is
+$\numrange{3}{33}\times$ sharper than the architecture-family noise floor}:
+measured half-widths run \numrange{0.000382}{0.002476} on $\Delta H$ against the
+family's conservative \num{0.0018}, with the number of sessions whose hit@10
+changed at all as low as \textbf{\num{9}}. Arm A1 had been pre-registered as
+``likely UNRESOLVABLE'' and resolved at \num{4.8} measured half-widths.
+Eval-time levers must therefore budget their minimum detectable effect from the
+\emph{pairing}, not from the architecture figure of
+Section~\ref{sec:power-stats} --- the two regimes differ by more than an order of
+magnitude, and conflating them under-powers a whole class of cheap experiments.
+The corollary is reassuring in the other direction: the 2026-07-22 \emph{offline}
+$\lambda$ sweep projected recall \num{0.2103} / \num{0.1936} / \num{0.1642} /
+\num{0.1097} and the native runs returned \num{0.21034} / \num{0.19357} /
+\num{0.16422} / \num{0.10971} --- four for four to four decimals, which validates
+the offline driver as a \emph{screening} instrument.
+
+Second, a new infrastructure pitfall was found the hard way and it retroactively
+qualifies part of the record: \textbf{a remote worker running a
+\texttt{(deleted)} binary image silently strips metric keys its struct does not
+know}. The metric-completeness gate failed on the first attempt with
+\texttt{artist\_conc\_at\_k} missing, although the predictors were md5-identical
+to the hub and the worker's own \texttt{metrics.json} carried the field: the
+worker \emph{daemon} had started a day before the field existed, \texttt{rsync}
+had replaced the file on disk but not the running image, and the old image
+deserialized the predictor's metrics into a struct lacking the field, dropped it,
+and posted the filtered set \textbf{without erroring}. \texttt{holisticness@10}
+was nevertheless correct throughout, because the predictor computes $H$ itself
+before the server sees it --- which is exactly what made the defect invisible.
+Every remote run in a four-hour window on 2026-07-26 lost
+\texttt{artist\_conc\_at\_k}, which is why anchor B's quoted concentration was a
+\emph{reconstruction} from \texttt{top\_k\_ids} and the dataset artist map. That
+reconstruction is now independently validated: the natively emitted values
+(\num{0.6916530786551751} and \num{0.35591272614333413}) match the rescoring
+tool's reconstructions to the last digit. Remedy: cycle the daemon whenever a
+metric field is added; \texttt{rsync} of the binary is not sufficient.
+\emph{Source: \texttt{2026-07-26-nexttrack-mmr-lambda-frontier.md}.}
+
+\section{Autoregressive rollouts: a generation metric, and five sweeps that say no}
+\label{sec:rollout}
+\emph{Rationale.} This campaign was provoked by a \emph{user preference}, not by a
+metric. On a real 135-track playlist the user strongly preferred one engine's
+20-step journey over another's, while \texttt{holisticness@10} scored those two
+journeys \num{0.003} apart. That gap is the point: every metric on record ---
+Recall@10, holisticness@10 and its four facets, \texttt{music@10}, even the
+multi-step continuation evaluator --- scores \emph{one} ranked list produced from a
+\emph{real} prefix. None of them ever feeds a model its own output. A 20-step
+journey does exactly that, so a trajectory failure --- a rollout whose energy
+decays until a party seed has become a comedown --- is structurally invisible to
+all of them. This is the first campaign in this document to build an instrument
+for the \emph{deployment} regime, and it is the direct ancestor of the walk
+surface of Section~\ref{sec:walk}.
+
+\paragraph{What was built.} Four things, all off the training path.
+\begin{description}
+  \item[\texttt{hold@N}, a generation metric.] Per legible axis $a$ in
+  \{energy, valence, acousticness, tempo\},
+  $\texttt{fade}_a = |\mathrm{mean}(\text{2nd half}) -
+  \mathrm{mean}(\text{1st half})|/\texttt{band}_a$, and then
+  \[
+    \texttt{hold@}N = 1 - \mathrm{clamp}\bigl(\mathrm{mean}_a(\texttt{fade}_a)
+      + \texttt{stasis},\,0,\,1\bigr).
+  \]
+  The per-axis bands are calibrated on \num{2135} real
+  \emph{train} sessions (energy fade p10 \num{0.0141}, p50 \num{0.0769}, p90
+  \num{0.1963}; tempo \num{1.28}, \num{8.05}, \num{22.43}), so axes with
+  incompatible units combine and ``a big fade'' means big \emph{relative to how
+  this listener actually listens}. Real sessions are not flat --- the median energy
+  fade is \num{0.077} --- so a metric rewarding zero fade would rank an
+  unnaturally rigid generator above the listener it imitates.
+  \item[\texttt{stasis}, the anti-gaming term.] A pure fade metric is
+  degenerate: twenty near-identical tracks fade by \num{0} and score \num{1.0},
+  which is the
+  same pathology that forces \texttt{holisticness@10} to carry an \emph{external}
+  recall floor. \texttt{stasis} puts the floor \emph{inside} the metric by
+  penalizing steps smaller than the listener's own p10 jump, and it was verified
+  on a synthetic flatline (moves-naturally \num{1.000}, at-your-floor \num{1.000},
+  half-floor \num{0.500}, barely-moves \num{0.048}).
+  \item[An offline rollout evaluator.] \texttt{seq\_continuation\_eval.py
+  --rollout} scores sampled \emph{test} sessions by \textbf{importing} the
+  generation loop from the serving path rather than reimplementing it, so an
+  offline score describes the journeys the lab actually serves; the refactor was
+  verified byte-identical. It is on-demand and sampled because a rollout costs
+  \texttt{steps} full-vocabulary passes per session against the primary path's one
+  (${\sim}20\times$).
+  \item[A playlist-lab readout.] A mood report card, a comparative journey-shape
+  chart and per-step \texttt{passed\_over} diagnostics, with the holisticness
+  facets demoted to a collapsed detail block.
+\end{description}
+
+\emph{Results.} Table~\ref{tab:rollout} is five sweeps, \num{120} paired
+rollouts and \num{240} journeys, under a paired bootstrap over \emph{seeds} plus a
+leave-one-seed-out jackknife. Rollout policy was frozen throughout at the lab
+defaults (\num{20} steps, artist penalty \num{2}, anchor \num{1}, temperature
+\num{0} --- deterministic, so one seed is one sample and there is no rollout
+variance).
+
+\begin{table}[ht]
+  \centering
+  \caption{Five \texttt{hold@20} sweeps, paired bootstrap over seeds (\num{2000}
+  resamples, rng \num{1337}) with a leave-one-seed-out jackknife (``LOO'' is the
+  number of refits preserving the verdict). Positive $\Delta$ favours the
+  dual-tower arm. The pre-registered rule was CONFIRMED iff the CI lies entirely
+  above zero \emph{and} the verdict survives $\ge\SI{90}{\percent}$ of LOO refits;
+  TIE iff the CI straddles. S2 and S3 met that rule and were nonetheless
+  \emph{retracted} --- see the interpretation.
+  \emph{Source: \texttt{2026-07-27-rollout-hold-metric.md}.}}
+  \label{tab:rollout}
+  {\footnotesize\setlength{\tabcolsep}{4pt}\begin{tabular}{llrlll}
+    \toprule
+    \# & Sweep & $n$ & $\Delta$\,\texttt{hold@20} [95\% CI] & LOO & Verdict \\
+    \midrule
+    S1 & pilot, mood-extreme seeds, 10-track prefix & 8 & $-0.034$ [$-0.138$, $+0.079$] & 0/8 & TIE \\
+    S2 & pilot, mood-extreme seeds, 30-track prefix & 8 & $+0.314$ [$+0.107$, $+0.529$] & 8/8 & \emph{retracted} \\
+    S3 & replication, \textbf{random} seeds & 39 & $+0.122$ [$+0.044$, $+0.201$] & 39/39 & \emph{confounded} \\
+    S4 & \textbf{same-split control} & 39 & $+0.033$ [$-0.030$, $+0.093$] & 0/39 & \best{TIE} \\
+    S4b & same-split, other dual checkpoint & 39 & $+0.051$ [$-0.012$, $+0.118$] & 0/39 & \best{TIE} \\
+    S4c & \textbf{within-architecture} & 39 & $-0.072$ [$-0.141$, $-0.002$] & --- & significant \\
+    S5 & \textbf{the user's own \num{11} playlists} & 11 & $+0.004$ [$-0.088$, $+0.104$] & 0/11 & \best{TIE} \\
+    --- & the single judged playlist & 1 & $+0.379$ (\num{0.623} / \num{0.245}) & --- & outlier \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\emph{Interpretation.} \textbf{Rollout fade does not separate this family.} At
+matched training split the two architectures tie \emph{twice}; on the user's own
+playlists the pair they preferred ties; and the only surviving effect is
+\textbf{checkpoint-level} within one architecture (S4c), which does not transfer to
+the playlist regime. Mean \texttt{hold@20} over the identical \num{39} random
+seeds runs \num{0.6488} / \num{0.6309} for the two dual-tower checkpoints against
+\num{0.5983} / \num{0.5266} for the two single-GRU ones --- so S3's apparent
+architecture win decomposes into a non-significant architecture component
+($+\num{0.05}$) and a significant \emph{checkpoint} component ($+\num{0.072}$).
+Two \texttt{seq-nexttrack} models differ from each other more than dual-tower
+differs from single-GRU at matched split, and the checkpoint the playlist lab
+pre-selected by default happens to be the worst holder of the four. The user's
+original comparison was the best holder against the worst.
+
+Combined with the five prior architecture nulls this is a sixth, and it is the
+strongest form available, because the standing rebuttal to those nulls was
+``Recall@10 cannot see session quality''. It cannot; and when an instrument built
+for the deployment regime looks, there is still nothing there.
+
+\textbf{Per-seed variance dominates model identity, and that is the operational
+finding.} Individual gaps on \emph{one} model pair span $+\num{0.39}$ to
+$-\num{0.27}$, while the model-level mean difference on the user's playlists is
+$+\num{0.004}$. Which seed you hand the generator matters far more than which of
+these models generates. Two consequences: prefer serving an \emph{ensemble} and
+letting the listener choose over hunting a single better generator, and budget
+$\ge\num{40}$ seeds for any future rollout comparison --- \numrange{8}{12} cannot
+resolve anything at this variance.
+
+\textbf{\texttt{hold@N} is a working instrument but not a model ranker.} It fired
+on a real checkpoint difference, it fired on the judged playlist (\num{0.62}
+against \num{0.25}) where \texttt{holisticness@10} saw a \num{0.003} gap, and it
+correctly returned TIE three times. The recommendation is therefore to keep it as
+a per-journey \emph{lab readout} and \textbf{not} to wire it as a leaderboard
+column: its ground truth is listener preference, which stands at $n=1$ blind vote.
+Promoting an unvalidated composite to primary is how the crown ended up needing an
+external recall floor, and replacing one unvalidated composite with another repeats
+the mistake.
+
+\paragraph{Four methodological pitfalls, each of which cost a retracted
+positive.} They are worth more than the null. \textbf{(1) A cross-split comparison
+masquerading as an architecture result.} The lab's two default pre-selects are
+trained on \emph{different} splits with identical vocab and item latents, so
+comparing them attributes checkpoint and split differences to architecture; pair
+from the same batch when the claim is architectural. \textbf{(2) Mood-extreme seed
+selection inflates effects ${\sim}\num{2.5}\times$} (S2's $+\num{0.314}$ became
+S3's $+\num{0.122}$ on a random sample). \textbf{(3) An anti-gaming term can be
+too weak to do its job:} \texttt{stasis} first normalized the shortfall by the
+band \emph{width}, and because this listener's jump band is wide a flatlined
+rollout scored \num{0.740} --- \emph{above} a real generator's \num{0.477}.
+Normalize by the \emph{floor}; a guard beatable by the degeneracy it targets
+launders that degeneracy as a good score. \textbf{(4) A metric that returns
+nothing must drop the \emph{pair}} and report the smaller $n$, or the pairing
+silently breaks. The jackknife earned its keep at $n<40$ throughout: it killed two
+of three per-axis positives at $n=8$ and flagged S4 and S5 as unsupported at 0/39
+and 0/11.
+
+\paragraph{What the per-axis read adds, including a failed negative control.} At
+$n=\num{39}$ only \emph{energy} fade separates the arms ($-\num{0.039}$
+[$-\num{0.069}$, $-\num{0.009}$], favouring dual-tower); valence, acousticness and
+tempo all straddle. But one pre-registered \emph{negative} control moved: the
+energy \emph{level} deviation from the seed favours the single GRU
+($+\num{0.018}$ [$+\num{0.005}$, $+\num{0.032}$]). Those are different properties,
+so the claim had to be re-scoped from ``holds the seed better'' to ``is more
+stationary'' --- and it shows that \texttt{hold@N}'s deliberate exclusion of a level
+term is a choice that \emph{changes the ranking}, not a neutral simplification.
+Two other limits travel with the batch: \SI{74}{\percent} of the corpus carries
+the acoustic fields the metric needs, so seeds were pre-filtered for
+$\ge\SI{60}{\percent}$ prefix coverage (a mild selection effect), and nothing here
+has been listened to.
+
+Nothing was promoted, registered or wired; the champion, the crown board and the
+best-models pins are unchanged. For the record, the live-crown standing relevant
+to the dual-tower question is a \emph{tie} rather than a loss --- the best
+legitimate dual arm \num{0.02378} against the single GRU's \num{0.02454}, a
+\num{0.0008} gap against a ${\sim}\num{0.0018}$ half-width. The family was refuted
+on Recall@10, ties on the live primary, and shows nothing on the rollout axis.
+The indicated next axis is therefore not topology but the \emph{training regime}:
+all five architecture nulls held one-step teacher forcing byte-identical while the
+product rolls twenty steps on its own output, and that exposure-bias mismatch is
+the one thing those nulls could not have detected.
+\emph{Source: \texttt{2026-07-27-rollout-hold-metric.md}.}
+
+\section{A research memo, and what its provenance permits}
+\label{sec:memo}
+\emph{Status, first.} This section consolidates a document that is \textbf{not a
+campaign report}. Nothing was run on the server, nothing was promoted, nothing was
+registered; the champion, the leaderboard, the crown board and the best-models
+pins are all unchanged by it. It was produced by a research workflow (four scouts,
+five proposal lenses, five adversarial screeners, then synthesis) plus
+\emph{offline} scoring against frozen checkpoints. Where it reports a number, that
+number came from an offline screen over stored artifacts, not from a native run.
+It is included here because it is the direct parent of the campaign in
+Section~\ref{sec:markovgate} and because its negative results --- the graveyard
+below --- are cheaper to reuse than to rediscover. It is reported at a lower
+register than the measured campaigns, and its figures are deliberately kept out of
+every board in this document.
+
+\paragraph{The provenance partition, kept visible.} The memo itself distinguishes
+two classes of number, and that distinction survives into this synthesis.
+\begin{description}
+  \item[Independently re-derived by the orchestrator.] The share of test queries
+  whose last prefix item has \emph{zero} train-bigram support:
+  \textbf{\num{795} of \num{1431} $=$ \num{0.5556}}, reproduced by an independent
+  script. The ungated control, which is self-validating because it must equal the
+  champion: \textbf{\num{0.21174}}, exact. The gated arm: \textbf{\num{0.23201}},
+  a paired $\Delta$ of $+\num{0.02027}$ $[+\num{0.01048}, +\num{0.03075}]$ with the
+  CI above zero. And its bucket decomposition: the zero-support bucket moves
+  \num{0.1660}$\to$\num{0.2025} over \num{795} queries while the two warm buckets
+  are \textbf{bit-identical} (\num{0.3116} and \num{0.2326}, unchanged).
+  \item[\textbf{Not} verified by the orchestrator --- agent-reported only, treated
+  as provisional.] The $+\num{0.01957}$ second-split figure, the replay channel's
+  $+\num{0.02865}$, the \texttt{latent\_gamma} numbers, and the recomputed
+  \num{0.0706} discordance with its ${\sim}\num{0.0145}$ noise floor. None of these
+  appears in Table~\ref{tab:lb} or on any crown board, and the first of them is
+  precisely what the follow-up campaign was commissioned to establish natively.
+\end{description}
+
+\paragraph{One caveat the memo states about its own headline.} The ten gating
+variants were screened \textbf{on the test set}, so quoting the best arm's CI is
+optimistic by construction and the screen cannot itself be evidence. Three things
+mitigate it --- four mechanistically related variants all land at
+\numrange{0.019}{0.020}, the bucket decomposition is a mechanical explanation
+rather than a fit, and the warm buckets do not move by a single hit --- but the
+mitigation is an argument, not a measurement. The native two-split confirm is the
+real gate, and it is Section~\ref{sec:markovgate}.
+
+\paragraph{The honest headline: ``a better topology'' is the wrong question.} The
+record had by then answered it six times --- cell and loss on the AE-64 space;
+depth, width and direction; width on PCA-192; dual-tower fusion
+(Section~\ref{sec:dualtower}); the MLP fusion head, an \emph{active} regression
+recovered by deleting it; the per-step pre-encoder, a measured loss with the
+mechanism identified down to \texttt{frac\_exact\_zero} $=$
+\texttt{frac\_negative\_coords} (Section~\ref{sec:preencoder}); and rollout fade
+(Section~\ref{sec:rollout}). Five lenses were pointed at the topology question
+and \emph{every} architecture-shaped proposal came back weakened, sub-noise, or
+pre-killed. Two came back with measured negative results: a split Markov leg lost
+at every point of its own pre-registered grid, and a factored artist softmax head
+was killed by its own pre-kill run, which found that top-5 artist gating on the
+real checkpoint changes recall by \textbf{exactly \num{0.0}} because the trained
+GRU's top-10 already lives inside its own top-5 artists.
+
+\textbf{Where the evidence points instead: the model is not the constraint. What
+it is asked to rank against, and which legs are allowed to speak on a given
+query, are.} Every proposal that survived adversarial screening is a candidate-set
+or evidence-conditioning change --- an evidence-gated Markov leg, a causal
+cross-session replay channel, per-leg reliability scalars, a prefix-only negative
+mask, the never-swept softmax temperature. None is a topology. This is the same
+conclusion the record had reached from the representation side, arrived at from
+five independent directions, and it comes with a measurement rationale: eval-time
+and score-time levers are $\numrange{3}{33}\times$ cheaper to resolve than
+training-time ones (Section~\ref{sec:mmr}), so a shortlist of score-time
+proposals is the rational response to the instrument this lab has.
+
+\paragraph{The two survivors worth naming.} \textbf{(1) \texttt{markov\_gate}} ---
+gate the Markov leg to abstain where it has no bigram evidence, restoring the
+\texttt{trust} term that the blend's z-normalization erases. Twelve lines,
+zero learned parameters, and confirmed natively in the next section.
+\textbf{(2) A causal cross-session replay channel} --- \SI{76.17}{\percent} of the
+held-out targets were played in a \emph{strictly earlier} session and are not in
+the current prefix, and nothing in the family can see this, because the Markov leg
+is a train-frozen bigram and the recency scorer only ever scored prefix items,
+which the evaluator masks to $-\infty$ (its recorded \num{0.001} is dead code, not
+a measurement). Its hit-Jaccard with the GRU is \num{0.060} against \num{0.201}
+for the GRU/Markov pair that produced a working blend, i.e.\ it is genuinely
+different signal. Its catch is \emph{governance}, not code: it is an
+information-set amendment that moves the rankable ceiling from \num{0.4493} to
+\num{0.7617}, which needs its own board column and an explicit decision before any
+number from it is comparable with anything in this document. A third proposal,
+\texttt{latent\_gamma} (a one-scalar spectral rescale of the item latents), is
+worth recording for its \emph{reframe} rather than its delta: on the offline
+screen the champion's entire recall contribution is reproducible by a
+\num{192}-number diagonal rescale, which recasts ``the single biggest win on
+record'' as a conditioning fix that supervision happened to find, and predicts
+that further linear metric learning is near-exhausted. All of these figures are in
+the provisional class.
+
+\paragraph{The graveyard, which is the reusable part.} Each entry is a lane that
+should not be re-opened without new information. Full-catalogue or
+support-restricted cross-entropy is pre-empted by an existing arm at
+${\sim}\SI{53}{\percent}$ support coverage (\num{0.1223} against \num{0.1230}) ---
+the literature's top candidate does not transfer because the item side is frozen.
+A factored artist softmax head is refuted by its own pre-kill (exactly \num{0.0}).
+Splitting the Markov leg into track and back-off components was measured at every
+grid point and lost at all five ($-\num{0.0217}$ to $-\num{0.0384}$, all CIs below
+zero), because separate z-normalization structurally destroys the \texttt{trust}
+term inside the warm regime. A pool-matched stage-2 re-ranker is unobtainable: the
+train pool's positive density is \num{0.5975} against test's \num{0.3368}, so its
+own go-gate passes \emph{because of} the confound. A mixture-of-vMF head loses to
+its own oracle decomposition. Diffusion, DreamRec and flow-matching are
+externally falsified for this setting, and generative retrieval with semantic IDs
+is strictly dominated when exact cosine over \SI{15}{\mega\byte} is already
+affordable and the corpus is \SIrange{55}{64}{\percent} cold. Popularity
+debiasing has nothing to debias (the popularity baseline is \num{0.0007}).
+Hard-negative mining is harmful at low temperature here, because the hardest
+negatives are same-album and same-artist tracks --- i.e.\ mining false positives.
+And the GRU's pre-normalization output norm is not a confidence signal
+(correlation with correctness $+\num{0.0073}$, and the loss is exactly
+norm-invariant); the top-1-minus-next-10 score margin is, at $+\num{0.294}$.
+
+\paragraph{The one durable theoretical result.} The memo's cross-cutting
+observation that \textbf{the learned-combiner anomaly is mechanically explained}
+is the part that changes how the record should be read. A prior oracle search over
+\emph{global static scalar} leg weights returned $+\num{0.004}$ straddling zero,
+and it is now clear why that is compatible with a real $+\num{0.020}$ from a
+gate: dropping the Markov leg \emph{globally} gains in the zero-support bucket and
+loses in the warm bucket, and the two cancel almost exactly. No constant can
+express an intervention whose sign flips with a per-query data statistic, and
+z-normalization is scale-invariant so it provably cannot see one. The registered
+``four independent learned-combiner nulls'' pitfall should therefore forbid
+\emph{learned score-level fusion} --- fitted weights, stackers, rank fusion,
+end-to-end representation fusion --- and \textbf{not} per-query evidence gating,
+which is a third thing: nothing is learned, nothing co-adapts, and the condition
+is a train-side count.
+\emph{Source: \texttt{2026-07-27b-nexttrack-model-topology-research-memo.md}
+(research memo; see the provenance partition above).}
+
+\section{\texttt{markov\_gate}: a leg that abstains where it has no evidence}
+\label{sec:markovgate}
+\emph{Rationale.} This is the native two-split confirm of the memo's headline
+proposal (Section~\ref{sec:memo}), and it produces the largest single recall gain
+in the whole next-track arc from a nine-line change with no new parameters.
+
+\paragraph{The mechanism, and why it is not the refuted combiner lane.} The Markov
+leg mixes its bigram row with an artist/genre back-off through a trust weight
+$\texttt{trust} = n_u/(n_u+8)$, where $n_u$ is the train-level bigram support of
+the query's last prefix item $u$. At $n_u = 0$ the trust is zero and the leg is
+\textbf{pure back-off}: it carries no track-level evidence at all. But the blend's
+candidate normalizer is \emph{scale-invariant} by construction --- it maps each
+leg's score vector to unit variance so that three legs on wildly different scales
+are commensurable --- so the evidence-free back-off is re-inflated and speaks at a
+full one-third weight anyway. On the canonical split that happens on \textbf{\num{795}
+of \num{1431} test queries}, \SI{55.6}{\percent}. The intervention is to make the
+leg \emph{abstain} at $n_u = 0$ and renormalize the divisor from three legs to two.
+Nothing is learned; the condition is a train-side count. That is exactly the third
+category the registered learned-combiner pitfall did not cover, and the bucket
+decomposition below is a mechanical proof that no global static weight could find
+the effect: dropping the leg globally is a $-\num{0.0070}$ tie, because the
+zero-support gain and the warm-bucket loss cancel.
+
+\paragraph{Design and the preflight gate.} Six runs on the hub, all
+\texttt{seq-blend} from the champion definition, with the controls
+\textbf{re-trained in this batch} rather than substituted from the archive so that
+every paired comparison is code-matched to one generation. Two splits: the
+canonical \dsid{seq-20260715-131139} and the disjoint earlier-holdout
+\dsid{seq-20260718-211238} (\SI{64}{\percent} cold, $n_{\mathrm{test}}$
+\num{1431}). The hard pre-registered stop was that the ungated control had to
+reproduce Recall@10 \num{0.21174}, exactly \num{303} of \num{1431}, proving the new
+flag left the champion bit-identical. \textbf{It did, to the last digit}
+(\num{0.21174004192872117}).
+
+\emph{Results.} Table~\ref{tab:markovgate} is the batch,
+Table~\ref{tab:markovgate-paired} the paired statistics, and
+Table~\ref{tab:markovgate-buckets} the decomposition that carries the argument.
+Figure~\ref{fig:nexttrack-markov-gate} plots both.
+
+\begin{table}[ht]
+  \centering
+  \caption{The \texttt{markov\_gate} batch, six runs from the champion definition
+  \texttt{blend-gru-markov-content-proj}. \dsid{ds1} $=$
+  \dsid{seq-20260715-131139} (canonical, \SI{55}{\percent} cold), \dsid{ds2} $=$
+  \dsid{seq-20260718-211238} (disjoint, \SI{64}{\percent} cold);
+  \dsid{ds2}'s absolute recall is lower \emph{by construction}, so read it only
+  through the paired $\Delta$. Every run id is \protect\runid{run-20260728-} plus
+  the value in the \emph{run} column. The graded metrics track the gate too:
+  artist@10 \num{0.333}$\to$\num{0.367} and genre@10 \num{0.401}$\to$\num{0.463}
+  from C1 to A1, and \num{0.382} / \num{0.497} on A3.
+  Rows sorted by Recall@10. H@10 is generation~3
+  (Section~\ref{sec:power-generations}). R@10, MRR, H@10, mus@10, \texttt{ild},
+  \texttt{mood}, art@10, gen@10 higher-better; \texttt{adj}, \texttt{conc}
+  lower-better. Best cell per metric bolded among the canonical-split arms; the
+  new best-recall row A1 is bolded in full.
+  \emph{Source: \texttt{2026-07-27c-nexttrack-markov-gate-confirm.md}.}}
+  \label{tab:markovgate}
+  {\scriptsize\setlength{\tabcolsep}{1.9pt}\begin{tabular}{llllllllllll}
+    \toprule
+    id & run & ds & overrides & R@10 (hits) & MRR & H@10 & mus@10 & ild & adj & conc & mood \\
+    \midrule
+    \best{A1} & \texttt{005349-507bb} & ds1 & \best{gate} & \best{0.23201 (332)} & \best{0.13352} & 0.018699 & 0.49319 & 0.43377 & 0.57477 & 0.59821 & \best{0.46226} \\
+    A3 & \texttt{012030-6d1b7} & ds1 & gate $+$ $\lambda$0.7 & 0.21314 (305) & 0.12852 & \best{0.030980} & \best{0.51649} & \best{0.56770} & \best{0.51279} & \best{0.47325} & 0.41885 \\
+    C1 & \texttt{004444-b32ea} & ds1 & --- (champion) & 0.21174 (303) & 0.12199 & 0.008603 & 0.45379 & 0.40637 & 0.60971 & 0.69165 & 0.39822 \\
+    C3 & \texttt{011245-bfc67} & ds1 & $\lambda$0.7 only & 0.19357 (277) & 0.11560 & 0.015289 & 0.47592 & 0.52010 & 0.57135 & 0.60823 & 0.36433 \\
+    A2 & \texttt{010658-39e20} & ds2 & gate & 0.19008 (272) & 0.11801 & 0.008414 & 0.42953 & 0.41401 & 0.58672 & 0.64847 & 0.42618 \\
+    C2 & \texttt{010113-e2599} & ds2 & --- (champion) & 0.17051 (244) & 0.10498 & 0.003392 & 0.39616 & 0.40177 & 0.61013 & 0.71945 & 0.35364 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Paired bootstrap over the \num{1431} test sessions (\num{2000}
+  resamples, rng \num{1337}, paired by row id). $\Delta H$ is computed
+  \emph{product-of-means per resample} --- all five facets re-aggregated on the same
+  resampled index set for both arms, then multiplied --- not as a mean of per-row
+  products. $n_{disc}$ counts sessions whose hit@10 changed at all, split by sign.
+  A verdict of WIN means the recall CI lies entirely above zero, TIE that it
+  straddles; bounds are abbreviated to four decimals for width.
+  \emph{Source: \texttt{2026-07-27c-nexttrack-markov-gate-confirm.md}.}}
+  \label{tab:markovgate-paired}
+  {\scriptsize\setlength{\tabcolsep}{4pt}\begin{tabular}{llllr}
+    \toprule
+    Comparison & $\Delta$R@10 [95\% CI] & Verdict & $\Delta H$ [95\% CI] & $n_{disc}$ ($+$/$-$) \\
+    \midrule
+    A1 $-$ C1 (gate, ds1) & \best{$+.02027$ [$+.0105$, $+.0308$]} & \best{WIN} & $+.010096$ [$+.0085$, $+.0117$] & 57 (43/14) \\
+    A2 $-$ C2 (gate, ds2) & \best{$+.01957$ [$+.0105$, $+.0301$]} & \best{WIN} & $+.005022$ [$+.0039$, $+.0062$] & 56 (42/14) \\
+    A3 $-$ C3 (gate, $\lambda$0.7) & \best{$+.01957$ [$+.0091$, $+.0301$]} & \best{WIN} & $+.015691$ [$+.0136$, $+.0179$] & 64 (46/18) \\
+    A3 $-$ C1 (gate$+$MMR / champ.) & $+.00140$ [$-.0119$, $+.0147$] & TIE & \best{$+.022377$ [$+.0199$, $+.0249$]} & 96 (49/47) \\
+    C3 $-$ C1 (MMR $\lambda$0.7 alone) & $-.01817$ [$-.0294$, $-.0077$] & costs recall & $+.006686$ [$+.0057$, $+.0077$] & 60 (17/43) \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{The bucket decomposition, reproduced \emph{natively} through the real
+  transition builder and bucketed by the train-level bigram support $n_u$ of each
+  query's last prefix item --- the exact quantity the Markov scorer computes.
+  Recall@10 within bucket, hits in parentheses. In both warm buckets the two arms'
+  top-$k$ lists are \textbf{byte-for-byte identical}, so the gate is a surgically
+  pure $n_u=0$ intervention with literally zero warm-side cost, on three
+  independent control/arm pairs.
+  \emph{Source: \texttt{2026-07-27c-nexttrack-markov-gate-confirm.md}.}}
+  \label{tab:markovgate-buckets}
+  {\footnotesize\setlength{\tabcolsep}{5pt}\begin{tabular}{llrllll}
+    \toprule
+    Pair & Bucket & $n$ & control & gated & $\Delta$ & top-$k$ identical? \\
+    \midrule
+    \multicolumn{7}{l}{\emph{Canonical split, A1 vs C1}} \\
+    & $n_u = 0$ & 795 & 0.1660 (132) & 0.2025 (161) & \best{$+0.0365$} & no \\
+    & $n_u$ 1--10 & 292 & 0.3116 (91) & 0.3116 (91) & $+0.0000$ & \best{YES} \\
+    & $n_u > 10$ & 344 & 0.2326 (80) & 0.2326 (80) & $+0.0000$ & \best{YES} \\
+    \midrule
+    \multicolumn{7}{l}{\emph{Second split, A2 vs C2}} \\
+    & $n_u = 0$ & 892 & 0.1244 (111) & 0.1558 (139) & \best{$+0.0314$} & no \\
+    & $n_u$ 1--10 & 322 & 0.2578 (83) & 0.2578 (83) & $+0.0000$ & \best{YES} \\
+    & $n_u > 10$ & 217 & 0.2304 (50) & 0.2304 (50) & $+0.0000$ & \best{YES} \\
+    \midrule
+    \multicolumn{7}{l}{\emph{Canonical split under MMR $\lambda$0.7, A3 vs C3}} \\
+    & $n_u = 0$ & 795 & 0.1472 (117) & 0.1824 (145) & \best{$+0.0352$} & no \\
+    & $n_u$ 1--10 & 292 & 0.2945 (86) & 0.2945 (86) & $+0.0000$ & \best{YES} \\
+    & $n_u > 10$ & 344 & 0.2151 (74) & 0.2151 (74) & $+0.0000$ & \best{YES} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_markov_gate}
+  \caption{\textbf{Left:} the bucket decomposition on all three control/arm pairs
+  (\texttt{ds1} canonical, \texttt{ds2} the \SI{64}{\percent}-cold second split,
+  \texttt{ds1 $\lambda$0.7} the same canonical pair under an MMR re-rank). The
+  entire effect sits in the zero-support bucket; in both warm buckets the arms'
+  top-$k$ lists are byte-for-byte identical, which is why a global leg weight
+  provably cannot express this intervention. \textbf{Right:} the same result on the
+  recall $\times$ crown plane. MMR alone (blue) is a \emph{priced} lever on the
+  champion --- it buys crown and loses recall with the CI below zero. The gate
+  (green) buys \emph{both}. Composed, gate$+$MMR lands at champion recall
+  ($\Delta$ $+\num{0.00140}$, straddling) with $\num{3.6}\times$ the champion's
+  holisticness, so the gate changes MMR's tier on the champion from PRICED to FREE.}
+  \label{fig:nexttrack-markov-gate}
+\end{figure}
+
+\emph{Interpretation.} \textbf{The defect is real, it belongs to the normalizer,
+and it is worth \num{29} hits.} Scale-invariance is exactly what makes the z-blend
+robust to legs on incommensurable scales, and exactly what destroys their
+\emph{confidence}. A Markov leg that has never seen the current track emits a pure
+artist/genre back-off; the normalizer re-inflates it to the same footprint as a GRU
+that has actually modelled the prefix, and the blend averages the two as equals.
+Turning that third of the vote off where it is uninformed converts \num{43} misses
+into hits and \num{14} hits into misses --- net $+\num{29}$, $+\SI{9.6}{\percent}$
+relative, on the best model on record. Recall@10 \num{0.23201} (\num{332} of
+\num{1431}) is \textbf{the best recall figure in this document}, with the paired CI
+above zero on two disjoint splits and MRR up on both. For scale: the champion's own
+coronation margin over the prior crown was $+\num{0.0259}$ canonical and
+$+\num{0.0426}$ on the second split; this gate adds $+\num{0.0203}$ /
+$+\num{0.0196}$ \emph{on top of that}, at no additional training cost.
+
+\textbf{The gate is also a crown lever, which was not predicted.} $\Delta H$ is
+above zero in all three paired comparisons, and the facets say why: abstaining
+kills the \emph{bigram-echo} component of the recommendation. Artist concentration
+falls \num{0.69165}$\to$\num{0.59821} and adjacency \num{0.60971}$\to$\num{0.57477}
+--- the list stops repeating one artist --- while \texttt{mood\_coh} \emph{rises}
+\num{0.39822}$\to$\num{0.46226} and \texttt{music@10} rises
+\num{0.45379}$\to$\num{0.49319}. All four crown factors move the right way at
+once. This is the first lever on record that de-eagers the champion \emph{without}
+paying in mood coherence, and it resolves the exact double-payment
+Section~\ref{sec:mmr} identified as structural: there, de-eagering was a re-rank
+fighting the model's own scores, so walking away from the seed artist also walked
+the blend out of the prefix's mood neighbourhood. Here the de-eagering is the
+removal of a vote that had no business being cast.
+
+\textbf{Gate and MMR are additive, not substitutive, and their composition is the
+headline for the crown board.} The gate-alone $\Delta$ ($+\num{0.02027}$) and the
+gate-under-$\lambda\num{0.7}$ $\Delta$ ($+\num{0.01957}$) are
+indistinguishable, and the buckets show why: MMR re-ranks the top of a scored list,
+the gate changes which list gets scored, and they act on disjoint parts of the
+pipeline. Standing alone, MMR $\lambda\num{0.7}$ on the champion is TIER-2 PRICED
+($-\num{0.01817}$ recall, CI below zero). Add the gate and the recall cost is paid
+back exactly: A3 is $+\num{0.00140}$ $[-\num{0.01188}, +\num{0.01468}]$, a
+statistical tie with the champion, at $H$~\num{0.030980} --- $\num{3.6}\times$ the
+champion's \num{0.008603}, comfortably above the mandatory \num{0.108} recall
+floor. On the crown board that sits at \textbf{rank 2}, behind only the
+$\lambda\num{0.7}$ single GRU, which scores its \num{0.034171} at recall
+\num{0.11461}: A3 delivers \SI{96}{\percent} of the incumbent leader's crown at
+$\num{1.86}\times$ its recall.
+
+\textbf{The honest caveat, and why the out-of-sample structure redeems it.} The
+memo screened ten gating variants on the test set, so its banked
+$+\num{0.02027}$ was selection-optimistic and could not be evidence. Four things
+redeem it here: the effect reproduces on a \emph{second, disjoint,
+\SI{64}{\percent}-cold split that was not screened on}, within \num{0.0007} of the
+canonical figure; it reproduces under a third condition ($\lambda\num{0.7}$) that
+was not screened either; four mechanistically related variants in the memo all
+landed at \numrange{0.019}{0.020}, so the screen was measuring a plateau rather
+than selecting a lucky corner; and the warm buckets do not move by a single hit,
+which is a \emph{structural} prediction of the mechanism rather than a fitted
+outcome. One residual risk remains: the $n_u = 0$ \emph{boundary} itself was chosen
+with test knowledge. The boundary-free version --- scaling the leg by
+\texttt{trust} \emph{before} normalization instead of hard-abstaining --- is the top
+follow-up, and it is strictly more general. Nor is any of this a fluke of one
+split's cold rate: the second split is \SI{64}{\percent} cold, its zero-support
+bucket grows to \SI{62.3}{\percent} of queries while the per-query gain shrinks
+slightly, and the net $\Delta$ comes out nearly identical. The lever's value scales
+with how much of the query distribution has no bigram evidence, which is the
+majority on any split of this corpus.
+
+\paragraph{Governance, and an infrastructure finding that nearly ate the result.}
+Nothing was promoted, registered or tagged; by design boundary this campaign
+carries a promotion \emph{recommendation} only, and the board row in
+Table~\ref{tab:lb} is labelled accordingly. The server's deterministic
+top-12-by-holisticness recompute nevertheless auto-promoted four of the batch's
+runs, which is server behaviour rather than a campaign action and left the group
+needing re-curation. Separately: the remote training worker was live with a
+\textbf{stale checkout containing zero occurrences of the new flag}. Had any gated
+arm been dispatched there it would have executed the \emph{ungated} path and
+silently returned a null --- the registered ``remote checkout can silently diverge''
+pitfall, in its worst form, because the failure is a wrong number rather than a
+crash. It could not happen here only because remote dispatch is opt-in and every
+run in this batch was posted without it (confirmed by an unclaimed marker on all
+six). Until the checkout is freshened, any queued \texttt{seq-blend} run silently
+ignores the gate.
+
+\paragraph{Record amendments.} Two, both narrowing rather than overturning.
+\textbf{(1)} The learned-combiner pitfall should forbid \emph{learned score-level
+fusion} and not \emph{per-query evidence gating}; the prior oracle null and this
+$+\num{0.020}$ win are both true and are reconciled by the bucket decomposition,
+since a global static scalar cannot express a gate whose sign flips with $n_u$.
+\textbf{(2)} The normalizer's erasure of per-leg \emph{confidence} is a
+\textbf{general} defect, of which the Markov leg's zero-support back-off is one
+instance. Any leg with a query-dependent notion of ``I have no evidence here'' is
+mis-weighted the same way, and the content and GRU legs have not been audited for
+it.
+\emph{Source: \texttt{2026-07-27c-nexttrack-markov-gate-confirm.md}.}
+
+\section{The eagerness regularizer at a calibrated margin: refuted, with a mechanism}
+\label{sec:eagermargin}
+\emph{Rationale.} Section~\ref{sec:holisticness} left \texttt{eager\_beta} --- the
+only \emph{training-time} de-eagering lever in the repository --- on record as ``a
+weak knob, not recommended''. That verdict deserved a re-test, because the probe
+behind it used a margin of zero at a dose worth \SIrange{1}{3}{\percent} of the
+loss. This campaign asked whether the lever works when the margin is placed in the
+measured \emph{right tail} of the transition-cosine distribution at
+$\numrange{15}{60}\times$ that dose. The stake was deployability: at the time,
+\texttt{mmr\_lambda} entered only through the evaluation path and never reached
+serving, so the training-time regularizer was the one anti-eager candidate that
+could actually ship.
+
+\paragraph{The design was written so that a null would still be informative.} The
+pre-registered primary was the paired $\Delta$ on \texttt{artist\_conc@10} against
+an in-batch control, with holisticness@10 explicitly \emph{demoted} to secondary
+because at the operating point $\partial H/\partial\texttt{music@10} =
++\num{0.2062}$ against $\partial H/\partial\texttt{eager} = -\num{0.0378}$ --- a
+$\num{5.46}\times$ ratio that would have scored a \emph{successful} de-eagering as
+approximately zero. A relevance floor was pre-registered in two parts: absolute
+\texttt{music@10} $\ge\num{0.4300}$ \emph{and} a paired $\Delta$\texttt{music@10}
+lower bound above $-\num{0.030}$. Eight \texttt{seq-dualgru} runs on the canonical
+split \dsid{seq-20260715-131139}, all remote, \SI{60}{\minute} of compute, none
+failed. The bit-identity gate passed at exactly \num{170} hits with the
+reconstructed concentration matching the on-record arm to \num{15} decimal places,
+and a penalty-active gate was pre-registered as a silent-failure detector: it
+\textbf{passed on three arms and FAILED --- reporting the penalty inert --- on
+four}, which is the campaign's result.
+
+\emph{Results.} Table~\ref{tab:eagermargin} is the batch and
+Table~\ref{tab:eagermargin-paired} the paired statistics.
+Figure~\ref{fig:nexttrack-eager-margin} shows the mechanism.
+
+\begin{table}[ht]
+  \centering
+  \caption{The \texttt{eager\_beta} $\times$ margin batch, eight
+  \texttt{seq-dualgru} runs on \dsid{seq-20260715-131139} ($n=\num{1431}$). Every
+  run id is \protect\runid{run-20260730-} plus the value in the \emph{run} column.
+  $m$ is the hinge margin, $\beta$ the penalty weight. H@10 is generation~3
+  (Section~\ref{sec:power-generations}). ``best ep/ran'' is the best epoch over
+  the epochs actually run; Recall@10 is \texttt{hits}$/\num{1431}$ throughout
+  (C0 \num{0.118798}, A1 \num{0.053809}, A2 \num{0.013976}, B1 \num{0.114605}, and
+  \num{0.118798} on every inert arm). \texttt{ild} is omitted for width and moves
+  only on the arms that fire (\num{0.4506} on C0, \num{0.5572} on A1, \num{0.6762}
+  on A2, \num{0.4530} on B1, \numrange{0.4504}{0.4506} on the inert arms).
+  \texttt{mood}, mus@10, H@10 higher-better; \texttt{conc}, \texttt{adj}
+  lower-better. The lowest-eagerness
+  cells are bolded and belong to \emph{degenerate} arms, which is what the
+  relevance floor exists to catch.
+  \emph{Source: \texttt{2026-07-30-eager-margin-calibrated-refutation.md}.}}
+  \label{tab:eagermargin}
+  {\scriptsize\setlength{\tabcolsep}{2.8pt}\begin{tabular}{llllrlllllll}
+    \toprule
+    Arm & run & $m$ & $\beta$ & hits & conc & adj & mood & mus@10 & H@10 & ep & verdict \\
+    \midrule
+    C0 & \texttt{175402-cd006} & 0 & 0 & \best{170} & 0.370588 & 0.362963 & \best{0.479846} & \best{0.455347} & \best{0.023785} & 8/14 & CONTROL \\
+    A1 & \texttt{181405-53088} & 0 & 3 & 77 & 0.240717 & 0.206010 & 0.346867 & 0.399997 & 0.013339 & 18/24 & DEGENERATE \\
+    A2 & \texttt{181405-0bc1a} & 0 & 12 & 20 & \best{0.133535} & \best{0.107687} & 0.221756 & 0.358132 & 0.003569 & 37/40 & DEGENERATE \\
+    B1 & \texttt{181405-84da4} & 0.40 & 9 & 164 & 0.367606 & 0.364151 & 0.463440 & 0.447386 & 0.021601 & 15/21 & no effect \\
+    B2 & \texttt{175402-7c304} & 0.5843 & 19 & 170 & 0.370634 & 0.363103 & 0.479955 & 0.455210 & 0.023751 & 8/14 & INERT \\
+    B3 & \texttt{184556-b08c1} & 0.70 & 35 & 170 & 0.370588 & 0.362963 & 0.479846 & 0.455347 & 0.023785 & 8/14 & INERT (bit-id.) \\
+    B4 & \texttt{175402-0d310} & 0.8304 & 92 & 170 & 0.370588 & 0.362963 & 0.479846 & 0.455347 & 0.023785 & 8/14 & INERT (bit-id.) \\
+    B5 & \texttt{184556-47d7b} & 0.5843 & 57 & 170 & 0.370743 & 0.363103 & 0.479955 & 0.455379 & 0.023771 & 8/14 & INERT \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Paired statistics against the in-batch control C0 (\num{2000}
+  resamples, rng \num{1337}, $n=\num{1431}$). $n_{disc}$ counts sessions whose
+  hit@10 changed. Measured half-widths on the \emph{active} arms
+  (\numrange{0.0080}{0.0173}) match the design's predicted \num{0.0102}, so the
+  instrument was correctly powered --- the axis failed anyway.
+  \emph{Source: \texttt{2026-07-30-eager-margin-calibrated-refutation.md}.}}
+  \label{tab:eagermargin-paired}
+  {\footnotesize\setlength{\tabcolsep}{4.5pt}\begin{tabular}{lllrrr}
+    \toprule
+    Arm & $\Delta$\texttt{artist\_conc} [95\% CI] & $\Delta$\texttt{music@10} [95\% CI] & $\Delta H$ & $n_{disc}$ & mean $|\Delta$conc$|$ \\
+    \midrule
+    A1 & $-0.12987$ [$-0.14354$, $-0.11605$] & $-0.05535$ [$-0.06606$, $-0.04465$] & $-0.010445$ & 125 & 0.191304 \\
+    A2 & $-0.23705$ [$-0.25493$, $-0.22026$] & $-0.09721$ [$-0.11107$, $-0.08333$] & $-0.020215$ & 166 & 0.282895 \\
+    B1 & $-0.00298$ [$-0.01085$, $+0.00519$] & $-0.00796$ [$-0.01411$, $-0.00194$] & $-0.002183$ & 62 & 0.093734 \\
+    B2 & $+0.00005$ [$-0.00028$, $+0.00039$] & $-0.00014$ [$-0.00037$, $+0.00000$] & $-0.000034$ & \best{0} & 0.000419 \\
+    B3 & $+0.00000$ [$+0.00000$, $+0.00000$] & $+0.00000$ [$+0.00000$, $+0.00000$] & $+0.000000$ & \best{0} & \best{0.000000} \\
+    B4 & $+0.00000$ [$+0.00000$, $+0.00000$] & $+0.00000$ [$+0.00000$, $+0.00000$] & $+0.000000$ & \best{0} & \best{0.000000} \\
+    B5 & $+0.00016$ [$-0.00031$, $+0.00068$] & $+0.00003$ [$-0.00036$, $+0.00045$] & $-0.000014$ & \best{0} & 0.000901 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_eager_margin}
+  \caption{\textbf{Left:} the campaign's central result. The hinge's realized
+  penalty at initialization, reconstructed from epoch-1 loss inflation at shared
+  initialization (identical seed, so identical init and batch order). The margins
+  were calibrated from the \emph{item}$\to$\emph{item} transition cosine (median
+  \num{0.262}, p75 \num{0.584}, p90 \num{0.830}), but the penalty acts on
+  \emph{prediction}$\to$\emph{current}, whose ceiling over training sits between
+  \num{0.5843} and \num{0.70}: at $m\ge\num{0.5843}$ the penalized quantity never
+  enters the hinge's support and the loss trace is bit-identical to the control at
+  all \num{14} epochs, at $\beta$ up to the schema cap. \textbf{Right:} where the
+  knob \emph{does} fire, eagerness and relevance are the same mechanism. Pushing
+  the prediction off the current track's latent also pushes it off the region where
+  the true next track lives, so there is no window between real de-eagering and
+  breaching the relevance floor. The dash-dotted line marks the free on-record
+  comparator that no arm here matched inside the floor.}
+  \label{fig:nexttrack-eager-margin}
+\end{figure}
+
+\emph{Interpretation.} \textbf{The refutation is expressive, not dosimetric, and
+that is the whole finding: the calibration measured the wrong distribution.} The
+margins were drawn from $\cos(x_t, x_{t+1})$ --- how far apart two consecutively
+played tracks are --- but the hinge acts on $\cos(\mathrm{pred}_t, x_t)$, how close
+the model's \emph{prediction} sits to the current track. Those distributions are
+not comparable. Reconstructing the hinge from epoch-1 loss inflation puts the
+ceiling of the penalized quantity between \num{0.5843} and \num{0.70}, so p75 and
+p90 of the real-transition distribution lie \emph{outside the support of the
+quantity being penalized}, and arms B3 and B4 reproduced the control's loss to
+\num{16} significant digits at every one of \num{14} epochs. The design's hedge ---
+that the realized penalty would \emph{exceed} its nominal value --- is empirically
+inverted by orders of magnitude. The reason is structural: an InfoNCE-trained
+prediction is a \emph{hedged near-average} over many plausible continuations, so its
+absolute cosine to any single item is bounded low. \textbf{Eagerness is a ranking
+property --- whether the current track's neighbours occupy the top slots --- and a
+hinge on an absolute cosine cannot express it.}
+
+\textbf{Where the knob does fire, eagerness and relevance turn out to be the same
+mechanism.} At $m=0$ the lever works spectacularly on the facet --- A2 cuts
+concentration \num{0.371}$\to$\num{0.134} and drives \texttt{ild} to \num{0.676}
+--- while \texttt{music@10} collapses to \num{0.358} and recall to \num{20} of
+\num{1431}. There is no separating window: \SI{27}{\percent} of real transitions
+are negative-cosine, so pushing the prediction away from the current track's latent
+also pushes it out of the region where the true next track lives, and
+\texttt{mood\_coh} collapses too (\num{0.480}$\to$\num{0.222}). Already at
+$\beta=3$ the absolute relevance floor is breached. The pre-registered failure mode
+fired exactly as written.
+
+\textbf{The prior is sharpened rather than retired, and the usable band is
+identified.} The 2026-07-22 probe at $\beta \le \num{0.2}$, $m=0$ reported ``weak''
+--- correct in band, wrong in interpretation. That setting sits just \emph{under}
+the destruction threshold, and by $\beta=3$ the same setting is a relevance
+destroyer. The entire usable dynamic range at $m=0$ therefore lies between
+$\beta=\num{0.2}$ and $\beta=\num{3}$, a factor of \num{15}, unexplored, bounded
+above by degeneration and below by no effect. The dose ladder run here was
+\textbf{not underpowered; it was aimed past the target}.
+
+\textbf{Two second-order results worth keeping.} First, demoting $H$ to secondary
+was load-bearing: A2 has by far the best facets and the \emph{worst} $H$
+(\num{0.003569}), because the grounding factor annihilates it exactly as the
+$\num{5.46}\times$ derivative ratio predicted. Had $H$ been primary this campaign
+would have read as a flat null instead of a mapped frontier. Second, the cheapest
+real de-eagering on record remains an \emph{architecture} setting, not this knob:
+the free on-record comparator at \texttt{fusion\_layers}${}=1$ gives
+$\Delta$concentration $-\num{0.051}$ at a $-\num{0.016}$ recall cost, and no arm
+here matched that inside the relevance floor --- the floor-respecting arms delivered
+between $-\num{0.003}$ and $+\num{0.0002}$, and the arms that beat $-\num{0.051}$
+paid $\numrange{4}{8}\times$ the recall.
+
+\paragraph{Why the approved later phases did not run.} All three were gated on a
+phase-A win, and there is none. Phase C's arms were additionally defined \emph{by
+reference} to the winner's margin and $\beta$, so with no winner they are
+undefined; applied literally to the arms that passed the floors, the selection rule
+would have spent three runs transferring a \emph{provably inert} setting to another
+family. The runner stopped rather than improvise, which is the correct outcome: the
+next move is a re-aimed design, not the approved phase C. Concretely, re-specify
+the penalty rather than re-tune it --- hinge on a \emph{ranking} quantity such as
+$\cos(\mathrm{pred}, x_t) - \cos(\mathrm{pred}, x_{t+1})$, or an explicit
+same-artist mass term over the top-$k$ --- and, by elimination, make the eval-time
+re-rank reach the serving path, since with the training-time lever refuted the only
+lever that works was at that moment one the serving path could not reproduce. That
+last observation is what the next section acts on.
+\emph{Source: \texttt{2026-07-30-eager-margin-calibrated-refutation.md}.}
+
 \section{The walk surface: measuring what the product actually serves}
 \label{sec:walk}
 \emph{Rationale.} Every verdict up to this point --- including the crown board
@@ -2157,14 +3172,15 @@ makes them cheap to ship and cheap to re-tune.
 \paragraph{Why a cap and not a penalty --- the two refuted controls.} Both soft
 anti-eager levers of Section~\ref{sec:holisticness} fail for one shared reason: a
 soft penalty in score space loses to a steep relevance gradient.
-\texttt{eager\_beta}, the training-time regularizer, is \emph{mis-specified}: it
-hinges on the absolute value of $\cos(\text{prediction},\ \text{current
-track})$, which a hedged InfoNCE prediction never drives above ${\sim}0.6$,
+\texttt{eager\_beta}, the training-time regularizer, is \emph{mis-specified}
+(Section~\ref{sec:eagermargin}): it hinges on the absolute value of
+$\cos(\text{prediction},\ \text{current track})$, which a hedged InfoNCE prediction never drives above ${\sim}0.6$,
 whereas eagerness is a \emph{ranking} property --- whether same-artist items
 occupy the top slots --- not a property of an absolute similarity.
 \texttt{mmr\_lambda}, the eval-time re-rank, was additionally \emph{eval-only}
-until the serving path was fixed, so the $\lambda$ frontier had never been a
-deployable lever at all; and even fixed it measures inert on the pathological
+until the serving path was fixed, so the $\lambda$ frontier of
+Section~\ref{sec:mmr} --- genuine, confirmed, and the first crown lever on record
+--- had never been a deployable lever at all; and even fixed it measures inert on the pathological
 case. On the real playlist \texttt{rock chabon ahre} the model ranks \num{59} of
 its top \num{60} candidates as one artist and the next artist first appears at
 \textbf{rank \num{75}}, while MMR's entire diversity budget there is worth
@@ -2191,9 +3207,9 @@ the pre-registered failure mode --- de-eagering by degrading into generic filler
 --- does not occur, because the items promoted from rank 75 and beyond are
 \emph{more} musically apt to the true continuation than the same-artist tracks
 they displace. The cap trades \emph{literal} relevance for \emph{graded}
-relevance. On the champion plus \texttt{markov\_gate} (a serving-time gate that
-suppresses the Markov leg where the current item has no bigram support; its own
-campaign, dated 2026-07-27c, is not yet consolidated into this synthesis) the same cap 3 gives \texttt{artist\_conc}
+relevance. On the champion plus \texttt{markov\_gate} (the evidence gate of
+Section~\ref{sec:markovgate}, which suppresses the Markov leg where the current
+item has no bigram support) the same cap 3 gives \texttt{artist\_conc}
 \num{0.598}$\to$\num{0.113} and holisticness@10
 \num{0.018699}$\to$\num{0.048063}, reproduced to every digit by three
 registered confirming runs (\runid{run-20260730-235524-0ec1d-seq-blend} at cap
@@ -2234,6 +3250,28 @@ paired $\Delta$.
     \bottomrule
   \end{tabular}}
 \end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_artist_cap}
+  \caption{The cap, across both models measured.
+  \textbf{Left:} artist concentration collapses,
+  \num{0.692}$\to$\num{0.113} at cap 3 on the gated champion.
+  \textbf{Middle:} the result that was \emph{not} predicted --- graded relevance
+  \emph{rises}, with the paired CI above zero at every cap on both models, and it
+  replicates on the disjoint \SI{64}{\percent}-cold split at $+\num{0.026}$. The
+  pre-registered worry was that a cap would de-eager by degrading into generic
+  filler; the opposite happens, because the items promoted from rank \num{75} and
+  beyond are \emph{more} musically apt to the true continuation than the
+  same-artist tracks they displace. \textbf{Right:} the price, on the recall
+  $\times$ crown plane. The cap is \emph{priced}, not free: gate $+$ cap 3 costs
+  \num{52} of \num{1431} exact hits against the deployed status quo, while landing
+  a generation-3 holisticness@10 about \SI{40}{\percent} above the incumbent crown
+  at $\num{1.5}\times$ its recall. Every arm clears the \num{155}-hit recall
+  floor, so none is an instance of the ``maximize holisticness by predicting
+  worse'' pathology.}
+  \label{fig:nexttrack-artist-cap}
+\end{figure}
 
 \paragraph{The anchor $\times$ stride frontier.} With the two score-space
 controls in hand the question becomes whether the \emph{conjunction} is
@@ -2503,9 +3541,634 @@ refuted family wins.
 \texttt{tools/walk\_eval.py}, \texttt{tools/walk\_frontier.py},
 \texttt{tools/walk\_dualgru.py}, \texttt{tools/walk\_headtohead.py}.}
 
+\section{Stage-stack topology: depth refuted on both surfaces}
+\label{sec:stagestack}
+\emph{Rationale.} The user's question was direct: does an explicit \emph{stack} of
+per-step MLP and recurrent stages beat a single GRU, on a corpus where five
+consecutive architecture campaigns have returned nulls? Four arrangements were
+specified --- \texttt{ann+gru+ann+gru}, \texttt{ann+gru+gru+ann},
+\texttt{ann+gru+gru+gru}, \texttt{gru+gru+gru+gru} --- plus a fifth,
+\texttt{gru+ann+gru+gru}, chosen by the user to test \emph{why} a leading MLP hurt
+at $N=1$: Section~\ref{sec:preencoder} attributed that loss to half-wave
+rectification destroying signed prefix information that a GRU's gated linear input
+transform preserves, so putting the MLP on a \emph{gated hidden state} instead of
+raw signed PCA should make the harm vanish. This is also the first campaign in this
+arc to be judged on \emph{two} surfaces by design rather than in retrospect, and it
+sets the standard the campaign after it inherits.
+
+\paragraph{Design, and the equivalence proof that made a control possible.} Seven
+runs of a new predictor, \texttt{seq-stack}, on the canonical split
+\dsid{seq-20260715-131139} (\num{1431} test sessions), \SI{90}{\minute} of compute,
+zero failures, zero contingency runs spent. Capacity was equalised at
+${\sim}\num{1282000}$ parameters across the five 4-stage arms (mutual spread
+\SI{0.445}{\percent}), and all seven counts were re-verified by instantiating the
+model rather than trusted from the design. Everything but the stage string and the
+widths is held: dropout \num{0.1}, InfoNCE, $\tau$~\num{0.07}, \num{40} epochs,
+patience \num{6}, lr \num{0.001}, batch \num{128}, seed \num{1337}, MMR off, artist
+cap off.
+
+Bit-identity with the family's historical \num{176} hits is \emph{not available}
+here and its absence is not a failure: the trainer re-seeds on entry, so handing it
+a pre-built model offsets the dropout stream even when the initial weights match.
+The campaign therefore gated on a \textbf{functional-equivalence proof} plus an
+\textbf{in-batch control}, and every verdict is stated against that control. The
+proof was run \emph{before} the registry edit and the server restart, so a failure
+would have cost nothing: at \texttt{stages=["gru"]} the new model computes the same
+function as the incumbent single GRU, with $\max|\Delta|$ \textbf{\texttt{0.00e+00}}
+on both \texttt{forward} and \texttt{predict\_next} at prefix lengths
+$T=1,2,5,17,40$ and \num{394944} parameters on both sides. The in-batch control
+then returned \textbf{\num{178} of \num{1431}}, inside the pre-registered band
+$[\num{155},\num{198}]$ and only \num{2} hits off the historical \num{176} ---
+exactly the small offset the re-seeding argument predicts. Two further gates
+mattered: metric completeness was green on all seven runs (no worker-image key
+stripping of the kind Section~\ref{sec:mmr} documents), and the walk instrument
+was verified against the shipped engine, whose $\Delta$\texttt{vibe}
+($-\num{0.0033}$) and $\Delta$\texttt{stride\_err} ($+\num{0.0137}$) both straddle
+zero against the freshly-trained control. The walk harness additionally reproduced
+\emph{all ten} previously recorded means exactly and stayed bit-stable as arms were
+added, which is what licenses pairing across separate invocations.
+
+\emph{Results, the one-shot surface.} Table~\ref{tab:stagestack-s1}.
+
+\begin{table}[ht]
+  \centering
+  \caption{The stage-stack batch on the one-shot surface, seven runs on
+  \dsid{seq-20260715-131139} ($n_{\mathrm{test}}=\num{1431}$), sorted by
+  Recall@10. Run ids are \protect\runid{run-20260801-} plus the chunk time and hex
+  suffix, in full: \texttt{003536-eaf81} (C0), \texttt{003536-bcedf} (C1),
+  \texttt{003646-07994} (B), \texttt{003646-8cc2d} (E), \texttt{003646-dbe68} (C),
+  \texttt{003536-d612e} (D), \texttt{003646-6e3bf} (A). Stage codes: \texttt{a}
+  $=$ per-step MLP, \texttt{g} $=$ GRU. MRR is truncated at \num{10} and
+  recomputed from the stored predictions (the stored MRR is over the full ranking
+  and is therefore not pairable). Every H@10 was recomputed from
+  \texttt{predictions.json} under the live definition and matches the stored value
+  exactly. The paired $\Delta$ is against the in-batch control C0 (\num{2000}
+  resamples, rng \num{1337}). Truncated MRR@10 and \texttt{mood\_coh} are omitted
+  for width and track recall closely: MRR@10 \num{0.04555} (C0), \num{0.04579}
+  (C1), then \numrange{0.02080}{0.02894} across the five 4-stage arms;
+  \texttt{mood\_coh} \num{0.4788} (C0), \num{0.4856} (C1), then
+  \numrange{0.3821}{0.3964}. R@10, H@10, mus@10
+  higher-better; \texttt{conc}, \texttt{adj} lower-better --- and the
+  lowest-eagerness cells belong to \emph{refuted} arms, which is what the recall
+  floor is for. \texttt{ild} rises monotonically as the arms get worse
+  (\num{0.4549} on C0, \num{0.4424} on C1, then \numrange{0.5112}{0.5373} across
+  the five 4-stage arms) and is omitted here for width.
+  \emph{Source: \texttt{2026-08-01-stage-stack-topology.md}.}}
+  \label{tab:stagestack-s1}
+  {\scriptsize\setlength{\tabcolsep}{2.0pt}\begin{tabular}{lllrllllll}
+    \toprule
+    Arm & id & stages / width & params & R@10 (hits) & $\Delta$R@10 [95\% CI] & H@10 & conc & adj & mus@10 \\
+    \midrule
+    C0 \emph{ctrl} & \texttt{eaf81} & \texttt{gru} h256 & \num{394944} & \best{0.12439 (178)} & --- & \best{0.024378} & 0.3589 & 0.3482 & \best{0.4552} \\
+    C1 \emph{cap.} & \texttt{bcedf} & \texttt{gru} h537 & \num{1280937} & 0.12159 (174) & $-0.00280$ [$-.0119$, $+.0056$] & 0.023418 & 0.3773 & 0.3653 & 0.4556 \\
+    B & \texttt{07994} & \texttt{agga} h299 & \num{1281407} & 0.08595 (123) & $-0.03843$ [$-.0538$, $-.0231$] & 0.017558 & 0.3176 & 0.2639 & 0.4264 \\
+    E & \texttt{8cc2d} & \texttt{gagg} h259 & \num{1277321} & 0.08246 (118) & $-0.04193$ [$-.0566$, $-.0280$] & 0.021053 & 0.2704 & 0.2376 & 0.4310 \\
+    C & \texttt{dbe68} & \texttt{aggg} h256 & \num{1283008} & 0.07966 (114) & $-0.04472$ [$-.0601$, $-.0301$] & 0.021442 & \best{0.2626} & 0.2375 & 0.4324 \\
+    D & \texttt{d612e} & \texttt{gggg} h229 & \num{1282821} & 0.07687 (110) & $-0.04752$ [$-.0622$, $-.0328$] & 0.018529 & 0.2644 & 0.2326 & 0.4222 \\
+    A & \texttt{6e3bf} & \texttt{agag} h299 & \num{1281407} & 0.07058 (101) & $-0.05381$ [$-.0685$, $-.0391$] & 0.017374 & 0.2730 & \best{0.2335} & 0.4168 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+No arm meets any win clause. Every 4-stage arm loses recall \emph{and}
+holisticness by paired CI, and all five sit \textbf{below the mandatory
+\num{0.108} absolute recall floor} (\numrange{0.0706}{0.0860}). Derived
+per-baseline from the control's own \texttt{music@10} of \num{0.45519}, every
+4-stage arm is \SIrange{5.0}{8.4}{\percent} below the relevance floor too, so none
+is even relevance-neutral. The losses are $\numrange{2.5}{3.7}\times$ the measured
+half-width: this is not a noise-band question.
+
+\emph{Results, the walk surface.} Table~\ref{tab:stagestack-s2}, at the matched
+primary cell $a\num{0.4}$/$s\num{0.3}$, paired against the in-batch control on the
+walk metrics of Section~\ref{sec:walk-metrics}. \texttt{vibe} is always reported with
+\texttt{stride\_err} beside it, at matched stride, per the standing caveat that a
+vibe gain bought by taking shorter steps is not a gain.
+
+\begin{table}[ht]
+  \centering
+  \caption{The stage-stack batch on the generated walk: \num{40} held-out sessions
+  $\times$ \num{20} steps at artist cap 1, paired against the \emph{in-batch}
+  control C0 (\num{2000} resamples). The refuted clause is
+  ``$\Delta$\texttt{vibe} CI below zero \emph{and} $\Delta$\texttt{stride\_err}
+  not CI below zero''. \texttt{vibe}, \texttt{genres}, \texttt{ground}
+  higher-better; \texttt{stride\_err} lower-better; \texttt{drift} nearer zero
+  better. CI bounds are quoted where the interval clears zero.
+  \emph{Source: \texttt{2026-08-01-stage-stack-topology.md}.}}
+  \label{tab:stagestack-s2}
+  {\footnotesize\setlength{\tabcolsep}{2.6pt}\begin{tabular}{lccccclc}
+    \toprule
+    Arm & vibe & stride\_err & drift & genres & ground & $\Delta$vibe [95\% CI] & V2 \\
+    \midrule
+    GRU shipped $a$0.4 $s$0.0 & \best{0.609} & 0.399 & $-0.089$ & 9.925 & 0.345 & $+0.0376$ CI$>$0 & reference \\
+    shipped engine $a$0.4 $s$0.3 & 0.568 & 0.129 & $-0.080$ & \best{10.450} & \best{0.357} & $-0.0033$ straddles & instrument gate \\
+    \textbf{C0} $a$0.4 $s$0.3 & 0.571 & 0.116 & $-0.080$ & 10.325 & 0.344 & base & base \\
+    C1 \texttt{gru} h537 & 0.561 & 0.122 & $-0.082$ & 10.625 & 0.359 & $-0.0100$ straddles & indistinguishable \\
+    D \texttt{gggg} & 0.557 & 0.122 & $-0.071$ & 10.225 & 0.319 & $-0.0140$ [$-.0255$, $-.0022$] & REFUTED $\times2$ \\
+    C \texttt{aggg} & 0.548 & \best{0.113} & $-0.064$ & 10.250 & 0.340 & $-0.0231$ [$-.0381$, $-.0084$] & REFUTED \\
+    B \texttt{agga} & 0.545 & 0.126 & \best{$-0.061$} & 9.675 & 0.335 & $-0.0258$ [$-.0421$, $-.0108$] & REFUTED \\
+    E \texttt{gagg} & 0.540 & 0.109 & $-0.084$ & 9.225 & 0.335 & $-0.0316$ [$-.0494$, $-.0144$] & REFUTED \\
+    A \texttt{agag} & 0.534 & 0.117 & $-0.085$ & 9.125 & 0.336 & $-0.0375$ [$-.0559$, $-.0214$] & REFUTED \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+Every 4-stage arm fires the refuted clause. D fires it \emph{twice}, also failing
+the grounding floor ($\Delta$\texttt{ground} $-\num{0.0250}$ [$-\num{0.0474}$,
+$-\num{0.0048}$]), and A additionally loses genre variety ($-\num{1.200}$
+[$-\num{2.125}$, $-\num{0.300}$]). No arm approaches a win clause. Two robustness
+checks close the escape routes. A pre-registered \textbf{stride probe} over
+$s\in\{\num{0.2},\num{0.3},\num{0.4}\}$ was run for the only two arms with any
+directional movement toward a walk win, and \emph{both peak at $s\num{0.3}$ --- the
+cell they were already measured in} (C: vibe/stride\_err \num{0.586}/\num{0.183},
+\num{0.548}/\num{0.113}, \num{0.517}/\num{0.153}; E: \num{0.576}/\num{0.155},
+\num{0.540}/\num{0.109}, \num{0.516}/\num{0.174}); at $s\num{0.4}$ both lose vibe
+with the CI below zero while \texttt{stride\_err} gets \emph{worse}. And the single
+best arm was re-measured at the \textbf{deployed} cell $a\num{0.8}$/$s\num{0.5}$,
+where it is refuted again ($\Delta$\texttt{vibe} $-\num{0.0158}$
+[$-\num{0.0267}$, $-\num{0.0059}$], $\Delta$\texttt{stride\_err} straddling).
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_stage_stack}
+  \caption{\textbf{Left:} all five 4-stage arms fall \emph{through} the mandatory
+  absolute recall floor, while the $\num{3.24}\times$ capacity control ties the
+  anchor --- so the damage is depth, not capacity. Error bars are the paired
+  bootstrap CI against the in-batch control, mapped onto the hit scale.
+  \textbf{Middle:} the campaign's most interesting number. Arm B reaches the
+  \emph{best} validation InfoNCE in the batch and retrieves \num{55} fewer hits
+  than the control: the objective the whole family trains on and top-10 retrieval
+  quality come apart at depth, so any architecture search selecting on validation
+  loss would pick the wrong arm. \textbf{Right:} the two-surface closure. The walk
+  read at the matched primary cell refutes the same five arms that the one-shot
+  surface refutes; the capacity control ties on both. The axis does not merely fail
+  to close on one surface --- it closes on two.}
+  \label{fig:nexttrack-stage-stack}
+\end{figure}
+
+\emph{Interpretation.} \textbf{The axis is closed, and it is the first null in this
+arc to close on both surfaces.} All five 4-stage arms are refuted by paired CI on
+one-shot recall \emph{and} on the walk with the instrument gate green, and the
+capacity control is indistinguishable on both. This is the sixth consecutive
+architecture null on this corpus and, unlike the five before it, it satisfies the
+standing rule that a one-shot verdict says nothing about the surface the product
+serves.
+
+\textbf{The user's mechanism hypothesis is refuted, and that is the most reusable
+fact here.} Arm E put the MLP on a \emph{gated hidden state} rather than on raw
+signed PCA, which the rectifier story predicts should remove the harm. It does not:
+E reaches \num{118} of \num{1431}, ties two other arrangements, beats only the
+worst, and comes nowhere near the control's \num{178}. So half-wave rectification
+of the \emph{raw input} is not the mechanism --- whatever is wrong survives moving
+the rectifier downstream of a gate. One run bought a clean refutation of a
+plausible and cheap-to-believe story.
+
+\textbf{The damage is depth itself, and three controls close the alternatives
+simultaneously.} It is not capacity: the $\num{3.24}\times$ control ties on both
+surfaces. It is not regularization or early stopping: \emph{every} 4-stage arm
+trains \emph{longer} than the control (\numrange{21}{40} epochs against \num{14}),
+and two of five reach a \emph{lower} best validation loss, so the pre-authorized
+dropout-count contingency failed both of its trigger clauses and was not spent ---
+the four-fold dropout application is exonerated. And it is not the MLP: a leading
+per-step MLP at depth 4 is recall-neutral and \emph{holisticness-positive} against
+the pure-recurrent arrangement ($\Delta H$ $+\num{0.00291}$, CI above zero). What
+remains is the depth of the recurrent chain, and its cost is large ---
+\numrange{55}{77} hits of \num{1431}.
+
+\textbf{Bracketing beats interleaving at byte-identical capacity.}
+\texttt{ann+gru+gru+ann} beats \texttt{ann+gru+ann+gru} by $+\num{0.01537}$ recall
+with the CI above zero at \emph{the same parameter count by formula} --- the
+tightest-controlled topology comparison the campaign could make. Interposing a
+per-step MLP \emph{between} two recurrences is worse than putting MLPs on the
+outside, which is consistent with the depth reading: breaking the recurrent chain
+in the middle costs more than adding depth at the ends. Two further contrasts are
+flat: the number of recurrent stages (2 versus 3) straddles on recall, and the
+rectifier's position buys nothing beyond beating the worst arrangement.
+
+\textbf{A leading per-step MLP is \emph{not} harmful at depth 4, which narrows
+rather than confirms the $N=1$ result.} Section~\ref{sec:preencoder}'s ``leading
+MLP is harmful'' was measured at $N=1$ against a single GRU; at depth 4 the same
+addition is free-to-slightly-good. The pre-encoder pitfall should be scoped to the
+shallow case.
+
+\textbf{Objective and retrieval dissociate at depth, and this is the sharpest
+instance yet.} Arm B achieves the \emph{lowest} validation InfoNCE in the entire
+batch (\num{6.5378} against the control's \num{6.5832}) while retrieving
+\textbf{\num{55} fewer hits} (\num{123} against \num{178}). Every prior
+architecture null on this corpus was consistent with ``the extra machinery does
+nothing''; this one shows the extra machinery does something measurable to the loss
+and that it is the \emph{wrong} something. The operational consequence is blunt:
+select on Recall@10 and the walk, never on the training objective. One caveat rides
+with it --- B ran to the \num{40}-epoch cap with patience never triggering, so its
+recall is a \emph{lower bound}, and a longer re-run is the clean test of the
+dissociation (the prediction being a better validation loss and no better recall).
+
+\textbf{The eagerness facets improve monotonically as the arms get worse, and the
+floors caught it.} Every 4-stage arm de-eagers substantially (concentration
+\num{0.359}$\to$\numrange{0.263}{0.318}) and raises \texttt{ild}; under a naive
+holisticness-primary read some would look interesting. All are killed by the
+absolute recall floor and by the per-baseline relevance floor --- the same mechanism
+that has now saved four campaigns. Note that the canonical \emph{absolute}
+\num{0.43} relevance figure would have passed several of these arms, so the floor
+must be derived per baseline.
+
+\paragraph{Two by-products, and the governance line.} A previously closed $N=2$
+relative --- a dual tower with a pre-MLP on one side, closed on a one-shot recall
+tie --- was walk-evaluated for the first time here and is \textbf{refuted on the
+walk} ($\Delta$\texttt{vibe} $-\num{0.0255}$ [$-\num{0.0432}$, $-\num{0.0096}$]),
+its one real gain being less drift. That is the same signature a recurrent-cell
+variant showed earlier --- better stride and drift, worse vibe --- which now looks
+like a general property of adding pre-recurrence machinery rather than anything
+specific to either arm. Second, the grounding metric again discriminated almost
+nothing, separating one arm of nine, consistent with its recorded arithmetic
+(between-arm range \num{0.0060} against a per-session standard deviation of
+\num{0.1417}, needing ${\sim}\num{2140}$ sessions): it is a floor that catches
+degeneracy, not a ranking metric, and it was used only that way. Nothing was
+promoted as champion, nothing was registered as a crown claim and nothing was
+deployed; the seven arms were promoted \emph{for measurement only}, each carrying
+the verbatim note ``promoted to enable walk evaluation; not a crown claim'', which
+flooded the best-models group and was handed to the curation agent.
+
+\paragraph{Two process findings worth keeping.} First, the predictor-checksum gate
+fired \emph{on a file the design did not name for copying} --- it listed one module
+to copy and a shared module only to \emph{verify}, and the verification failed. The
+divergence turned out to be inert for this batch, but that is a \emph{post-hoc}
+judgement that required reading the diff; the rule that caught it is the one worth
+keeping. \textbf{Verify the checksum of every file in the family's import closure,
+not just the ones you copied.} Second, the approved launch body was rejected by the
+approved registry block: the design's JSON sent six hyperparameters the block does
+not declare, so the first posts failed outright. It was resolved by dropping the
+six keys \emph{after proving the drop is a no-op} --- the predictor's defaults supply
+exactly those values and the resolved hyperparameter dict is identical either way,
+verified by direct comparison --- and the registry block was left exactly as
+approved.
+\emph{Source: \texttt{2026-08-01-stage-stack-topology.md}.}
+
+\section{Parallel tower banks: the $N$-axis closed on both surfaces}
+\label{sec:towerbank}
+\emph{Rationale.} The walk reversal of Section~\ref{sec:walk-reversal} left this
+corpus with exactly one measured architecture \emph{win}, and with a stated
+mechanism for it: a dual tower whose second view is \texttt{cummean} holds a mood
+because it carries a \textbf{fixed reference never overwritten by recurrence}. A
+mechanism of that shape makes a testable prediction --- it should be
+\emph{dose-responsive}. If one fixed-reference tower buys a held vibe plus
+$+\num{1.5}$ genres, then $N$ towers, enough of them on the raw \texttt{latent}
+view to hold the recall floor and the rest on \texttt{cummean}, should buy
+\emph{more} of the same. This campaign runs that dose curve, and it is the
+follow-up the reversal itself asked for.
+
+The vehicle is a new predictor, \texttt{seq-bank}: $N$ \emph{parallel}
+single-layer bare GRU towers over configurable causal views, their per-step
+hidden states concatenated and read by \textbf{one linear head}. Its design
+choice is to collapse tower count and view multiset into a \emph{single}
+\texttt{views} hyperparameter, so $N$ is not a separate axis that can drift out of
+sync with the views. What the predictor \emph{cannot} express is as important as
+what it can: it declares exactly \num{15} hyperparameters and none of
+\texttt{fusion\_layers}, \texttt{fusion\_hidden}, \texttt{pre\_hidden},
+\texttt{pre\_layers}, \texttt{layers}, \texttt{num\_layers}, \texttt{arch},
+\texttt{bidirectional}, \texttt{residual} or \texttt{eager\_beta} is among them.
+Every mechanism this document has already refuted --- the MLP fusion head
+(Section~\ref{sec:dualtower}), the per-step pre-encoder
+(Section~\ref{sec:preencoder}), the soft anti-eager regularizer
+(Section~\ref{sec:holisticness}) --- is therefore \emph{structurally unreachable}
+rather than merely unused, and a \texttt{parse\_views} guard rejects any spec
+without a \texttt{latent} tower, which puts the registered
+\numrange{0.058}{0.087} \texttt{delta}/\texttt{cummean} pathologies out of reach
+as well.
+
+Two hypotheses were pre-registered. The primary one is the \emph{dose}
+hypothesis above. The independent sub-hypothesis is the mechanism the dual-tower
+scan had already established: if the raw \texttt{latent} view \emph{subsumes} its
+siblings, then $N$ identical \texttt{latent} towers should buy nothing, whatever
+$N$ is.
+
+\paragraph{Design and the two surfaces.} Ten runs on the canonical split
+\dsid{seq-20260715-131139} (\num{1431} test sessions, cold-item rate
+\num{0.5507}), \SI{84.2}{\minute} of compute, zero failures. Everything but
+\texttt{views} / \texttt{hidden} / \texttt{dropout} is held: \texttt{loss}
+InfoNCE, $\tau=\num{0.07}$, \num{40} epochs, patience \num{6}, lr \num{0.001},
+batch \num{128}, seed \num{1337}, MMR off, artist cap off. \textbf{Capacity is
+matched at \num{3.00}$\times$ the h256 baseline} for every bank arm \emph{and}
+for the single-GRU control C1 (h512), with the counts re-verified from the
+artifacts rather than trusted from the design --- \texttt{seq\_bank} emits
+\texttt{n\_params} into \texttt{metrics.json}, and the mutual spread across the
+seven \num{3.00}$\times$ arms including C1 is \SI{0.405}{\percent}. The decision
+rule was written on \emph{both} surfaces before launch, and both legs are
+load-bearing:
+\begin{description}
+  \item[S1, one-shot recall@10.] A win requires a paired $\Delta$ above zero
+  against \emph{both} the h256 anchor C0 \emph{and} the parameter-matched single
+  GRU C1. Two mandatory floors apply: an absolute recall floor
+  $\ge\num{0.108}$ (\num{155} of \num{1431}) and a per-baseline relevance floor
+  (paired $\Delta$\,music@10 vs C0 must not fall below zero).
+  \item[S2, the generated walk.] \num{40} held-out sessions $\times$ \num{20}
+  steps at artist cap 1, paired against the \emph{in-batch} C0, on the walk
+  metrics of Section~\ref{sec:walk-metrics}. The primary cell is anchor
+  \num{0.4} / stride \num{0.3}; a saved definition additionally requires
+  \textbf{the same sign at the deployed cell} $a\num{0.8}$ / $s\num{0.5}$.
+\end{description}
+
+\paragraph{The instrument was pinned before anything was measured.} All ten
+pre-registered gates came back green, and three of them are worth recording
+because they make the comparison unusually tight. A \emph{functional-equivalence}
+gate showed \texttt{seq-bank} to be a strict generalization of both incumbents
+rather than a new family: at \texttt{views="latent"} it reproduces
+\texttt{SeqNextLatent} and at \texttt{views="latent+latent"} it reproduces the
+\texttt{fusion\_layers}${}=0$ \texttt{DualTowerNextLatent}, with
+$\max|\Delta|$ \textbf{\texttt{0.00e+00}} on both \texttt{forward} and
+\texttt{predict\_next} at prefix lengths $T=1,2,5,17,40$ and identical parameter
+counts on both sides; an extra training-stream check matched per-epoch train
+\emph{and} validation loss to the last digit over three epochs and all ten
+state-dict tensors at $\max|\Delta|$ \texttt{0.00e+00}. Both bit-identity gates then
+hit exactly: C0 reproduced its on-record recall@10
+\num{0.12299091544374564} $=$ \num{176} of \num{1431} (a \textbf{10th}
+reproduction, with \texttt{music@10}, H@10 and MRR matching to the last digit)
+and R2 reproduced the dual-tower \texttt{latent/latent} f0 arm at
+\num{0.1187980433263452} $=$ \num{170} of \num{1431}, so the design's band
+fallback was never needed. And the walk instrument was checked against the
+shipped \texttt{gru.onnx}: $\Delta$\texttt{vibe} $+\num{0.0028}$ and
+$\Delta$\texttt{stride\_err} $+\num{0.0005}$ both straddle zero, so S2 verdicts
+against the in-batch C0 are not an artefact of the base.
+
+\emph{Results, S1.} Table~\ref{tab:towerbank-s1} is the batch. \textbf{No arm is
+bolded as a winner because there is none}: no arm achieves even the first leg of
+the win rule, all nine non-anchor arms are ties against C0, and \emph{five of the
+eight bank arms lose to the parameter-matched single GRU C1 with the CI below
+zero}. Both floors pass for every arm --- the worst is V1 at \num{162} hits,
+clear of the \num{155} floor, and the most negative relevance $\Delta$ is V2's
+$-\num{0.006109}$, straddling.
+
+\begin{table}[ht]
+  \centering
+  \caption{The tower-bank batch on S1, ten runs on \dsid{seq-20260715-131139}
+  (\num{1431} test sessions), sorted by hits. The batch was launched in four
+  chunks; every run id is \protect\runid{run-20260802-} plus the chunk time and
+  the hex suffix in the id column, in full: \texttt{182050-91b54},
+  \texttt{182050-2e6f2}, \texttt{183404-91e31},
+  \texttt{183404-62604}, \texttt{183404-67185},
+  \texttt{190415-1d662}, \texttt{190415-90866},
+  \texttt{190415-b5928}, \texttt{192627-17502},
+  \texttt{192627-836b1}. Paired $\Delta$ is a per-session paired
+  bootstrap (\num{2000} resamples, rng \num{1337}) computed from the stored
+  per-row \texttt{predictions.json}; a CI straddling zero is a \emph{tie}, and
+  \textsuperscript{$\ast$} marks a $\Delta$ vs C1 whose CI lies entirely
+  \emph{below} zero. d\num{0.1}\,/\,d\num{0.0} is the dropout of the
+  byte-identical D2\,/\,R2 pair. Capacity: the seven arms C1, B2, B3, B4, V1, V2
+  and V3 span \numrange{2.996}{3.007}$\times$ the h256 baseline (mutual spread
+  \SI{0.405}{\percent}), D2 and R2 sit at exactly \num{2.000}$\times$ and C0 at
+  \num{1.000}$\times$. View codes:
+  lat\,$=$\,\texttt{latent}, cum\,$=$\,\texttt{cummean},
+  del\,$=$\,\texttt{delta}. H@10 is the \emph{generation-3} holisticness
+  (Section~\ref{sec:power-generations}), in raw next-track units. R@10, H@10 and
+  mus@10 higher-better; a\_conc is lower-better but display-only and is
+  deliberately \emph{not} bolded --- no arm's eagerness is a claim in this
+  campaign. Best cell per metric bolded; C1 and B4 tie exactly on R@10 and both
+  are bolded.
+  \emph{Source: \texttt{2026-08-02-tower-bank-parallel-towers.md}.}}
+  \label{tab:towerbank-s1}
+  {\scriptsize\setlength{\tabcolsep}{1.9pt}\begin{tabular}{lllrlllccc}
+    \toprule
+    Arm & id & views / width & params & R@10 (raw) & $\Delta$ vs C0 [95\% CI] & $\Delta$ vs C1 & H@10 & mus@10 & a\_conc \\
+    \midrule
+    C1 \emph{ctrl} & \texttt{91e31} & 1$\times$GRU h512 & \num{1182912} & \best{0.12998 (186)} & $+0.0070$ [$-.002$, $+.016$] & --- & 0.02380 & 0.4581 & 0.3825 \\
+    B4 & \texttt{1d662} & lat$\times$4 h211 & \num{1187700} & \best{0.12998 (186)} & $+0.0070$ [$-.002$, $+.017$] & $+0.0000$ & 0.02446 & \best{0.4594} & 0.3716 \\
+    D2 & \texttt{62604} & lat$\times$2 h256 d\num{0.1} & \num{789696} & 0.12369 (177) & $+0.0007$ [$-.008$, $+.008$] & $-0.0063$ & 0.02426 & 0.4567 & 0.3698 \\
+    C0 \emph{base} & \texttt{91b54} & 1$\times$GRU h256 & \num{394944} & 0.12299 (176) & --- & $-0.0070$ & \best{0.02454} & 0.4558 & 0.3559 \\
+    B3 & \texttt{90866} & lat$\times$3 h256 & \num{1184448} & 0.12020 (172) & $-0.0028$ [$-.010$, $+.006$] & $\mathbf{-0.0098}$\textsuperscript{$\ast$} & 0.02358 & 0.4554 & 0.3764 \\
+    R2 & \texttt{2e6f2} & lat$\times$2 h256 d\num{0.0} & \num{789696} & 0.11880 (170) & $-0.0042$ [$-.013$, $+.004$] & $\mathbf{-0.0112}$\textsuperscript{$\ast$} & 0.02378 & 0.4554 & 0.3706 \\
+    B2 & \texttt{67185} & lat$\times$2 h334 & \num{1186560} & 0.11880 (170) & $-0.0042$ [$-.013$, $+.003$] & $\mathbf{-0.0112}$\textsuperscript{$\ast$} & 0.02336 & 0.4554 & 0.3799 \\
+    V3 & \texttt{17502} & lat$+$cum$+$cum h256 & \num{1184448} & 0.11880 (170) & $-0.0042$ [$-.016$, $+.006$] & $-0.0112$ & 0.02320 & 0.4497 & 0.3581 \\
+    V2 & \texttt{836b1} & lat$+$cum$+$del h256 & \num{1184448} & 0.11600 (166) & $-0.0070$ [$-.020$, $+.005$] & $\mathbf{-0.0140}$\textsuperscript{$\ast$} & 0.02245 & 0.4497 & 0.3547 \\
+    V1 & \texttt{b5928} & lat$\times$2$+$cum h256 & \num{1184448} & 0.11321 (162) & $-0.0098$ [$-.022$, $+.001$] & $\mathbf{-0.0168}$\textsuperscript{$\ast$} & 0.02299 & 0.4500 & 0.3572 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\paragraph{The sharpest number in the batch is a zero.} B4 --- four independent
+h211 \texttt{latent} towers, \num{1187700} parameters --- and C1 --- one h512
+GRU, \num{1182912} parameters --- return the \textbf{identical \num{186} hits of
+\num{1431}}, a paired $\Delta$ of precisely $\num{0.000000}$
+$[-\num{0.00839},+\num{0.00839}]$. At a matched ${\sim}\num{3.00}\times$ budget,
+\emph{topology and width are interchangeable on this corpus}: whatever four
+towers with different random initializations discover, a single wider recurrence
+already had. Figure~\ref{fig:nexttrack-tower-bank} (left) plots the $N$-axis at
+matched capacity, and the line through $\num{186}/\num{170}/\num{172}/\num{186}$
+is flat inside the split's own measured resolution
+(Section~\ref{sec:power-stats}).
+
+This is also the cleanest demonstration on record of \emph{why the
+parameter-matched control leg is mandatory}. Read against the h256 anchor alone,
+B4's $+\num{10}$ hits would have looked like a topology gain and the five arms
+that lose to C1 would all have read as ties --- the anchor cannot distinguish
+``the bank helped'' from ``the extra parameters helped, and the bank spent them
+worse than width would have''. The C1 leg does exactly that, and it is what turns
+a batch of nine ties into a closure. Note too what the flatness costs the
+\emph{other} direction: C1's $+\num{10}$ hits over C0 is itself not significant
+($+\num{0.006988}$ $[-\num{0.00210},+\num{0.01607}]$), the \textbf{seventh}
+parameter-matched width tie on record, so the campaign cannot claim h512 as an
+improvement either despite it holding the highest single-GRU hit count measured
+(\num{186} against h454's \num{179}). The single-GRU width points on PCA-192 now
+read h256\,$\to$\,\num{176}, h297\,$\to$\,\num{162}, h425\,$\to$\,\num{173},
+h454\,$\to$\,\num{179}, h512\,$\to$\,\num{186}, h537\,$\to$\,\num{174} ---
+non-monotone, spanning \num{0.0168}, with no trend.
+
+\emph{Results, S2.} Table~\ref{tab:towerbank-s2} is the walk. Two arms --- B2
+(\texttt{latent}$+$\texttt{latent} h334) and V3
+(\texttt{latent}$+$\texttt{cummean}$+$\texttt{cummean}) --- reached a genuine
+\textbf{TRADE} at the primary cell, each buying a drift improvement with the CI
+above zero while holding vibe. Both then \textbf{flip} at the deployed cell: the
+drift gain evaporates into a straddle and \texttt{vibe} --- the non-negotiable
+line --- goes below zero for both. Under the pre-agreed rule, \textbf{no
+definition was saved}.
+
+\begin{table}[ht]
+  \centering
+  \caption{The tower-bank batch on S2, the generated walk: \num{40} held-out
+  sessions $\times$ \num{20} steps at artist cap 1, paired against the
+  \emph{in-batch} C0 (\num{2000} resamples). The upper block is the primary cell
+  $a\num{0.4}$ / $s\num{0.3}$; the lower block re-measures the two TRADE arms at
+  the \emph{deployed} cell $a\num{0.8}$ / $s\num{0.5}$, where the save clause
+  requires the same sign. \texttt{vibe}, $\Delta$drift, $\Delta$genres and
+  $\Delta$ground higher-better; \texttt{stride\_err} lower-better. CI bounds are
+  quoted only where the interval clears zero, as in the source report, and
+  \textsuperscript{$\ast$} marks every such interval --- a \emph{gain} on
+  $\Delta$drift, a \emph{refutation} on $\Delta$vibe and $\Delta$genres.
+  \emph{Source: \texttt{2026-08-02-tower-bank-parallel-towers.md}.}}
+  \label{tab:towerbank-s2}
+  {\scriptsize\setlength{\tabcolsep}{2.6pt}\begin{tabular}{lccllllc}
+    \toprule
+    Arm & vibe & stride\_err & $\Delta$vibe & $\Delta$stride\_err & $\Delta$drift & $\Delta$genres & $\Delta$ground \\
+    \midrule
+    \multicolumn{8}{l}{\emph{Primary cell $a\num{0.4}$ / $s\num{0.3}$}} \\
+    C0 (base) & 0.566 & 0.130 & --- & --- & --- & --- & --- \\
+    \textbf{B2} \emph{TRADE} & 0.567 & 0.139 & $+0.0017$ & $+0.0099$ & $\mathbf{+0.0339}$ [$+.007$, $+.063$]\textsuperscript{$\ast$} & $-0.225$ & $+0.0044$ \\
+    \textbf{V3} \emph{TRADE} & 0.556 & 0.124 & $-0.0094$ & $-0.0045$ & $\mathbf{+0.0286}$ [$+.001$, $+.059$]\textsuperscript{$\ast$} & $-0.450$ & $-0.0024$ \\
+    C1 & 0.563 & 0.130 & $-0.0020$ & $+0.0015$ & $+0.0194$ & $-0.375$ & $+0.0008$ \\
+    D2 & 0.559 & 0.129 & $-0.0065$ & $+0.0005$ & $+0.0104$ & $-0.750$ & $+0.0003$ \\
+    B4 & 0.566 & 0.139 & $+0.0006$ & $+0.0103$ & $+0.0164$ & $-0.775$ & $+0.0004$ \\
+    B3 & 0.557 & 0.135 & $-0.0078$ & $+0.0060$ & $+0.0146$ & $\mathbf{-1.025}$\textsuperscript{$\ast$} & $+0.0154$ \\
+    V2 \emph{refuted} & 0.551 & 0.127 & $\mathbf{-0.0144}$ [$-.029$, $-.001$]\textsuperscript{$\ast$} & $-0.0019$ & $+0.0259$ & $-0.025$ & $-0.0148$ \\
+    V1 \emph{refuted} & 0.548 & 0.119 & $\mathbf{-0.0174}$ [$-.035$, $-.001$]\textsuperscript{$\ast$} & $-0.0099$ & $+0.0227$ & $\mathbf{-1.725}$\textsuperscript{$\ast$} & $+0.0017$ \\
+    \midrule
+    \multicolumn{8}{l}{\emph{Deployed cell $a\num{0.8}$ / $s\num{0.5}$ --- both TRADEs collapse}} \\
+    B2 \emph{refuted} & --- & --- & $\mathbf{-0.0064}$ [$-.012$, $-.001$]\textsuperscript{$\ast$} & $-0.0107$ & $-0.0052$ & $-0.175$ & $+0.0006$ \\
+    V3 \emph{refuted} & --- & --- & $\mathbf{-0.0112}$ [$-.017$, $-.006$]\textsuperscript{$\ast$} & $-0.0074$ & $+0.0043$ & $-0.400$ & $-0.0039$ \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.95\textwidth]{nexttrack_tower_bank}
+  \caption{The parallel-tower-bank axis, closed on both surfaces.
+  \textbf{Left:} the $N$-axis at matched capacity (${\sim}\num{3.00}\times$ the
+  h256 baseline). Error bars are the paired bootstrap CI against C0 mapped onto
+  the hit scale; the grey band is the split's measured resolution
+  ($\pm\num{0.0124}$ recall@10 $=$ $\pm\num{17.7}$ hits,
+  Figure~\ref{fig:nexttrack-power}), and every arm sits inside it. Four h211
+  towers (B4) and one h512 GRU (C1) return the same \num{186} hits, paired
+  $\Delta$ $\num{0.000000}$. \textbf{Middle:} the two arms that earned a walk
+  TRADE at the primary cell both flip at the deployed cell --- the drift gain
+  that bought the TRADE decays to a straddle while \texttt{vibe} goes below zero.
+  Grey markers are point estimates whose CI straddles (the source report quotes
+  bounds only for intervals clearing zero). \textbf{Right:} the campaign's one
+  positive result, and it is not about topology --- at byte-identical parameters
+  (\num{789696} both, \texttt{model.pt} \num{3162277} bytes both) dropout
+  \num{0.1} beats dropout \num{0.0}, CI above zero.}
+  \label{fig:nexttrack-tower-bank}
+\end{figure}
+
+\emph{Interpretation.} \textbf{The dose hypothesis is refuted, and it fails in
+the direction opposite to the prediction.} Adding fixed-reference
+\texttt{cummean} towers did not buy more of what $N=2$ bought; it monotonically
+destroyed the walk. Ranked by $\Delta$\texttt{vibe} at the primary cell the
+ordering is B4/B2 (all-\texttt{latent}, ${\approx}0$) $>$ B3 $>$ V3 (one
+\texttt{cummean}, $-\num{0.0094}$) $>$ V2 ($-\num{0.0144}$, CI below zero) $>$
+V1 ($-\num{0.0174}$, CI below zero), and the same ordering holds on S1, where the
+three \texttt{cummean}-bearing arms occupy the \emph{bottom three} places
+(\num{162}, \num{166}, \num{170} hits) and are the only arms whose
+$\Delta$\,music@10 point estimates fall past $-\num{0.005}$. The irony is worth
+stating plainly: \textbf{the tower added in order to hold a mood is the tower
+that made the walk's mood measure worse} --- the only two arms whose
+\texttt{vibe} is refuted outright are the two that carry the most
+\texttt{cummean}. Whatever the deployed $N=2$ \texttt{latent}/\texttt{cummean}
+engine is doing, ``more \texttt{cummean} is more mood-holding'' is not it, and
+the structural reading that motivated the design does not survive being dosed.
+
+\textbf{The sub-hypothesis is confirmed and extends cleanly from $N=2$ to
+$N=4$.} B2 (\num{170}), B3 (\num{172}) and B4 (\num{186}) all straddle C0 and
+show no trend distinguishable from width noise. This is the same mechanism the
+dual-tower scan found (Section~\ref{sec:dualtower}) --- the raw \texttt{latent}
+view subsumes its siblings --- now measured at three tower counts instead of two,
+which is what closing an axis by dose rather than by a single point requires.
+
+\textbf{The one positive finding is a by-product of the null, and it lands on the
+deployed engine.} D2 and R2 differ in \emph{one} hyperparameter: parameters are
+byte-identical (\num{789696} both, \texttt{model.pt} \num{3162277} bytes both),
+only \texttt{dropout} moves, and $\Delta$recall@10 is $+\num{0.004892}$
+$[+\num{0.000699},+\num{0.009783}]$, \textbf{CI above zero} --- dropout
+\num{0.1} \emph{beats} dropout \num{0.0} (\num{177} against \num{170} hits).
+Read carefully this does not overturn the record's three-times-confirmed ``f0
+beats f1'' result; it does something more awkward. Dropout enters
+\texttt{seq\_dualgru} only through a pre-MLP, an inter-layer gap or the fusion
+MLP, and at \texttt{fusion\_layers}${}=0$ with one layer and no pre-encoder
+\emph{all three are absent} --- the f0 path constructs \textbf{zero} dropout
+modules. So every f0 arm on record, \textbf{including the deployed showcase
+engine} (Section~\ref{sec:walk-limits}), trained under-regularized and was
+leaving ${\approx}+\num{0.005}$ recall on the table; and the three recorded
+f0-vs-f1 gaps ($+\num{0.016}$ / $+\num{0.020}$ / $+\num{0.0266}$) were measured
+against an f1 that \emph{had} regularization its f0 comparator lacked, so they
+are not like-for-like and the true topology advantage of f0 is if anything
+\emph{larger} than recorded. Wherever those three figures are quoted as clean
+topology measurements they should be re-stated as not like-regularized. The
+cheapest actionable follow-up on the whole board falls out of this: retrain the
+deployed engine at \texttt{dropout}${}=\num{0.1}$ and re-read both surfaces ---
+a free improvement, not an architecture bet.
+
+\textbf{The validation-loss dissociation gets a fourth confirmation, now as a
+rank correlation} (Figure~\ref{fig:nexttrack-bank-valloss}). Across the ten arms,
+Spearman(best validation InfoNCE, hits) $=-\num{0.2954}$, $p=\num{0.407}$ --- no
+usable predictive power, and if anything the wrong sign. The sharp instances are
+brutal: B4 and B2 differ by \num{0.0003} in validation loss and by \num{16}
+hits; V1 holds the fourth-best validation loss in the batch and the \emph{worst}
+hit count; C0 holds the \emph{worst} validation loss and beats six of the eight
+bank arms; and R2 reaches a better validation loss than D2 while retrieving seven
+fewer hits, which makes the dissociation and the dropout finding two faces of one
+coin. The decision rule never read validation loss, and this is why.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.8\textwidth]{nexttrack_bank_valloss}
+  \caption{The training objective does not rank retrieval --- fourth
+  confirmation, and its sharpest instance yet. Ten arms of the tower-bank batch:
+  best validation InfoNCE against hits of \num{1431}. Spearman
+  $=-\num{0.2954}$, $p=\num{0.407}$. B4 and B2 are \num{0.0003} apart in
+  validation loss and \num{16} hits apart; C0, the worst fit in the batch, beats
+  six of the eight banks. Every arm early-stopped (epoch \num{14} seven times,
+  then \num{21} and \num{24} twice), so no arm's recall is a lower bound imposed
+  by the epoch cap.}
+  \label{fig:nexttrack-bank-valloss}
+\end{figure}
+
+\textbf{Both walk TRADEs were cell-local, which is a methodological result in
+its own right.} B2 and V3 each earned a real $\Delta$drift above zero at
+$a\num{0.4}$/$s\num{0.3}$ with vibe held, and both flipped to a vibe below zero
+at $a\num{0.8}$/$s\num{0.5}$ with the drift gain gone. Had the design not
+pre-registered the secondary-cell requirement, this campaign would have reported
+two positive walk results and saved two definitions. \textbf{The secondary-cell
+clause is the clause that did the work here}, and it should stay mandatory in
+every future walk design. The pre-registered stride probe points the same way: at
+$a\num{0.4}$ over $s\in\{\num{0.2},\num{0.3},\num{0.4}\}$ all three
+\texttt{cummean} arms peak at $s\num{0.3}$, the cell they were already measured
+in --- the third campaign in a row in which re-tuning the stride rescues nothing
+--- and at $s\num{0.2}$ their $\Delta$\texttt{vibe} turns
+positive-straddling only by taking visibly shorter steps
+($\Delta$\texttt{stride\_err} above zero for all three) and shedding genre
+variety ($-\num{1.90}$ / $-\num{1.78}$ / $-\num{1.00}$, all below zero). That is
+precisely the trade the walk win clause exists to reject.
+
+\textbf{The failure signature is the opposite of the preceding architecture
+campaign's, and that is diagnostic.} No arm here was refuted by a floor: the
+recall floor and the relevance floor both pass for all ten runs, and eight of the
+nine non-anchor arms sit at \emph{higher} artist concentration than the anchor
+(\numrange{0.3547}{0.3799} against \num{0.3559}), i.e.\ the arms did not
+de-eager. The floors were therefore not the operative mechanism --- these arms
+are not degenerate, they are simply \textbf{flat}. That is a different failure
+mode from the immediately preceding depth-in-series campaign
+(Section~\ref{sec:stagestack}), in which all five arms fell \emph{through} the
+recall floor, and it is why this axis closes as a null rather than as a harm.
+
+\paragraph{The scope of the closure, precisely.} What closes is
+``$N\ge3$ parallel bare-GRU tower banks at \texttt{fusion\_layers}${}=0$'', and
+only that, to the standard Section~\ref{sec:stagestack} set for a closure on this
+corpus: both surfaces,
+walk instrument verified. It does \textbf{not} re-close the dual-tower family,
+which stays reopened (Section~\ref{sec:walk-reversal}) and remains the deployed
+engine. Nothing was promoted as champion, no definition was saved, and no
+dataset was built; the eight measurement arms were promoted for measurement only,
+each carrying the verbatim note ``promoted to enable walk evaluation; not a crown
+claim'', and the resulting flooding of the best-models group (to \num{15}
+entries) was disclosed up front and handed to the curation agent. Zero of the
+three pre-authorized contingency runs fired, and the epoch trace says why: the
+dropout-confound extension needed R2 to early-stop later than D2 and both stopped
+at epoch \num{14}; the epoch-cap contingency needed an arm to reach the \num{40}
+epoch cap and every arm early-stopped; the width-bracket contingency needed C1 to
+lose, and it did not.
+
+\paragraph{One limitation is inherited rather than introduced.} This campaign's
+premise --- the dose mechanism --- was read off a finding that has \emph{no
+campaign report of its own}: the walk-surface reopening of the dual-tower family
+(Section~\ref{sec:walk-reversal}) exists only as a \texttt{PROJECT-FACTS.md}
+roll-up, a git commit, and the transcription in this document. The
+harness-reproduction gate re-derived all ten of that reopening's recorded means
+exactly and re-derived its deltas, so the \emph{measurement} is reproducible and
+the instrument has not moved; what is missing is the primary write-up, and it
+should be backfilled from the commit and the facts entries.
+\emph{Source: \texttt{2026-08-02-tower-bank-parallel-towers.md}.}
+
 \section{Conclusions}
 \label{sec:conclusions}
-Fifteen campaigns (Jul 2026) on the next-track retrieval task converge on a clear
+Twenty-one campaigns and one research memo (Jul--Aug 2026) on the next-track
+retrieval task converge on a clear
 story. (1) A session sequence model, even at its best (GRU-infonce), only
 \emph{ties} the first-order Markov co-listening bar on Recall@10 and loses on
 MRR: predicting a next-item latent and retrieving by one cosine hop is a harder
@@ -2665,10 +4328,128 @@ controls are applied. It is deployed as the showcase's default engine; and
 \texttt{ground} straddles zero for every arm, so what is established is journey
 \emph{shape}, not next-track truth, on one split, one seed and \num{40}
 sessions, with nothing yet listened to and the primary metric unchanged.
+(15) A closing architecture campaign then tested the reversal's own stated
+mechanism --- ``holding a mood needs a fixed reference never overwritten by
+recurrence'' --- as a \emph{dose}, and closed the axis on both surfaces
+(Section~\ref{sec:towerbank}). A bank of $N$ parallel bare-GRU towers under one
+linear head, matched at \num{3.00}$\times$ the h256 baseline and dosed from
+$N=2$ to $N=4$, reaches no win on either surface: every arm \emph{ties} the
+baseline on one-shot recall while \textbf{five of eight lose to a
+parameter-matched single GRU} with the CI below zero, and the two arms that earn a
+walk trade at the primary cell both flip to \texttt{vibe} below zero at the
+deployed cell, so no definition was saved. The decisive datapoint is a zero: four
+h211 towers (\num{1187700} params) and one h512 GRU (\num{1182912} params)
+return the \emph{identical} \num{186} hits of \num{1431}, paired $\Delta$
+\num{0.000000} --- \emph{topology and width are interchangeable at this budget},
+which is also the cleanest demonstration on record of why the parameter-matched
+control leg is mandatory: against the anchor alone, five losing arms would have
+read as ties. The dose hypothesis is refuted \emph{ironically} --- the
+\texttt{cummean} towers added in order to hold a mood are the worst arms in the
+batch on both surfaces and the only two whose walk \texttt{vibe} is refuted
+outright --- and the one CI-clear result in the whole batch is a by-product about
+regularization, not topology: at byte-identical parameters dropout \num{0.1}
+beats dropout \num{0.0} by $+\num{0.0049}$ recall@10. That is consequential
+because the \texttt{fusion\_layers}${}=0$ path constructs \emph{zero} dropout
+modules, so every f0 arm on record, \textbf{including the deployed showcase
+engine}, trained under-regularized, the three recorded f0-vs-f1 gaps are not
+like-regularized, and the cheapest improvement on the board is a single retrain.
+
+(16) Three score-time campaigns then produced the arc's first genuine
+\emph{holisticness} lever and its largest \emph{recall} gain, neither of them a
+model change. The eval-time MMR $\lambda$ frontier (Section~\ref{sec:mmr}) is
+confirmed natively on both anchors: every one of eight $\lambda<1$ arms lifts
+holisticness@10 with the CI above zero, three single-GRU arms clear the prior
+all-time bar \num{0.024872} at a recall tie (best \num{0.030355} at
+$\lambda\num{0.7}$, pool~\num{50}), and the gain is legitimate rather than
+composite-gaming because \emph{three} of the four crown factors --- diversity,
+eagerness and \texttt{music@10} --- improve together. Its pre-registered mechanism
+question resolves unanimously to the responsive hypothesis (8 of 8 arms,
+$|\Delta\texttt{artist\_conc}|/|\Delta\texttt{artist\_adj}|$ between \num{1.59} and
+\num{3.06}), so same-artist tracks \emph{are} near-neighbours in the content
+metric, sonic MMR \emph{is} a de-eagering lever, and the explicit artist-penalty
+sequel is cancelled. Two by-products are durable: the binding facet
+\emph{switches} from concentration to adjacency as $\lambda$ falls, which locates
+the end of the lever; and the shared-weights pairing is $\numrange{3}{33}\times$
+sharper than the architecture-family noise floor (half-widths from
+\num{0.000382}), so eval-time levers must budget their minimum detectable effect
+from the pairing, not from Section~\ref{sec:power-stats}'s figure.
+(17) The largest single recall gain in the whole arc is then \texttt{markov\_gate}
+(Section~\ref{sec:markovgate}): make the Markov leg \emph{abstain} where the last
+prefix item has zero train-bigram support --- \SI{55.6}{\percent} of queries --- and
+Recall@10 rises to \num{0.23201} (\num{332} of \num{1431}), paired
+$+\num{0.02027}$ $[+\num{0.01048}, +\num{0.03075}]$ canonically and
+$+\num{0.01957}$ on a disjoint \SI{64}{\percent}-cold split, MRR up on both. The
+defect is the blend's \emph{scale-invariant} normalizer, which re-inflates an
+evidence-free artist/genre back-off to a full one-third vote; the fix has zero
+learned parameters and nine lines. The bucket decomposition is the argument: the
+whole effect sits in the zero-support bucket while both warm buckets are
+\textbf{byte-for-byte identical} on three independent control/arm pairs, which
+mechanically proves no global static leg weight could express it (dropping the leg
+globally is a $-\num{0.0070}$ tie, the two buckets cancelling) and therefore
+\emph{narrows} the four-times-confirmed learned-combiner pitfall to \emph{learned
+score-level fusion} rather than per-query evidence gating. Unpredicted, it is also
+a crown lever --- all four factors move the right way at once, and it is the first
+lever that de-eagers the champion \emph{without} paying mood coherence, because it
+removes a vote that had no business being cast rather than fighting the model's own
+scores. Composed with MMR $\lambda\num{0.7}$ it is recall-neutral against the
+champion ($+\num{0.00140}$, straddling) at holisticness \num{0.030980},
+$\num{3.6}\times$ the champion's. Nothing was promoted: this is a recommendation,
+and the one residual concern is that the zero-support \emph{boundary} was chosen
+with test knowledge.
+(18) Against those two positives, the training-time anti-eager lever is refuted
+with a mechanism, and the refutation is expressive rather than dosimetric
+(Section~\ref{sec:eagermargin}). The margins were calibrated from the
+item$\to$item transition cosine (p75 \num{0.584}, p90 \num{0.830}) but the hinge
+acts on prediction$\to$current, whose ceiling over training lies between
+\num{0.5843} and \num{0.70} --- so the calibrated margins fall \emph{outside the
+support of the penalized quantity} and four arms are provably inert, reproducing
+the control's loss to \num{16} significant digits at every epoch at $\beta$ up to
+the schema cap. Where the knob fires at margin zero it de-eagers spectacularly and
+destroys relevance in the same motion, because an InfoNCE prediction is a hedged
+near-average and eagerness is a \emph{ranking} property that an absolute cosine
+cannot express. The prior ``weak knob'' reading is sharpened rather than retired:
+the entire usable range at margin zero lies in an unexplored factor of \num{15}
+between $\beta\num{0.2}$ and $\beta\num{3}$.
+(19) Two campaigns about \emph{instruments} rather than models bracket these.
+A purpose-built rollout metric (Section~\ref{sec:rollout}) --- fade per legible
+axis, calibrated on \num{2135} real train sessions, with the anti-gaming term
+\emph{inside} the metric rather than bolted on as an external recall floor ---
+returns a sixth architecture null in the deployment regime, which is the strongest
+form available because the standing rebuttal to the earlier five was that Recall@10
+cannot see session quality. Its durable finding is that \emph{per-seed} variance
+dominates model identity ($\pm\num{0.3}$ per seed against a model-level difference
+of $+\num{0.004}$), so budget $\ge\num{40}$ seeds for any rollout comparison and
+prefer serving an ensemble; and its three retracted positives are a catalogue of
+how a generation metric goes wrong (a cross-split comparison read as architecture,
+mood-extreme seed selection inflating effects ${\sim}\num{2.5}\times$, and an
+anti-gaming term normalized by band width that scored a flatline \emph{above} a
+real generator). A research memo (Section~\ref{sec:memo}) is reported at a lower
+register --- nothing in it was run on the server, and its verified and provisional
+numbers are kept partitioned --- but its convergent thesis, that every proposal
+surviving adversarial screening is an \emph{evidence-conditioning} change rather
+than a capacity change, is what points at (17), and its graveyard is cheaper to
+reuse than to rediscover.
+(20) Finally, a stage-stack depth campaign (Section~\ref{sec:stagestack}) closes
+the \emph{serial} branch of the architecture axis to the two-surface standard the
+tower-bank campaign then inherits. Five arrangements of per-step MLP and recurrent
+stages, capacity-equalised at ${\sim}\num{1282000}$ parameters, all fall
+\emph{through} the mandatory recall floor (\numrange{0.0706}{0.0860} against
+\num{0.108}) and are refuted again on the walk at the matched cell, while a
+$\num{3.24}\times$ capacity control ties on both surfaces --- so the damage is depth
+itself, not capacity, not regularization (every deep arm trains \emph{longer} and
+two reach a \emph{lower} validation loss) and not the MLP (a leading per-step MLP
+is recall-neutral and holisticness-positive at depth 4, which \emph{narrows} the
+$N=1$ pre-encoder result to the shallow case). Two facts outlive the null:
+\emph{bracketing beats interleaving} at byte-identical capacity
+($+\num{0.01537}$, CI above zero), and the training objective \textbf{dissociates}
+from retrieval --- the arm with the best validation InfoNCE in the batch retrieves
+\num{55} fewer hits than the control, so any architecture search selecting on
+validation loss on this family will select the wrong arm.
 
 \section{Source reports}
-This synthesis consolidates fifteen next-track campaign reports from
-\texttt{experiments/}:
+This synthesis consolidates twenty-two next-track source documents from
+\texttt{experiments/} --- twenty-one campaign reports and one research memo, the
+latter flagged as such because nothing in it was run on the server:
 \begin{itemize}
   \item \texttt{2026-07-13-nexttrack-sequence-sweep.md} --- the founding
     next-track campaign: a GRU/LSTM sequence sweep against the first-order Markov
@@ -2741,6 +4522,50 @@ This synthesis consolidates fifteen next-track campaign reports from
     \texttt{frac\_negative\_coords} $=$ \num{0.5327}), plus the measured power
     analysis and the three holisticness generations
     (Sections~\ref{sec:preencoder} and~\ref{sec:power}).
+  \item \texttt{2026-07-26-nexttrack-mmr-lambda-frontier.md} --- the native
+    eval-time MMR $\lambda$ frontier on both anchors; \textbf{CONFIRMED} as the
+    first genuine holisticness lever on record (three TIER-1 ``free'' single-GRU
+    arms above the prior all-time bar at a recall tie, best $H$ \num{0.030355}),
+    with the pre-registered mechanism question resolved unanimously to the
+    responsive hypothesis (8 of 8 arms, ratio \numrange{1.59}{3.06}), the binding
+    facet shown to switch as $\lambda$ falls, the candidate-pool axis closed as a
+    fine-tuning knob, and the shared-weights pairing measured
+    $\numrange{3}{33}\times$ sharper than the architecture-family noise floor
+    (Section~\ref{sec:mmr}).
+  \item \texttt{2026-07-27-rollout-hold-metric.md} --- \texttt{hold@}$N$, a
+    generation metric for the autoregressive rollout regime (per-axis fade
+    calibrated on \num{2135} real train sessions, with the anti-gaming term inside
+    the metric), plus five sweeps and \num{240} journeys; \textbf{REFUTED} as a
+    model discriminator --- a sixth architecture null, obtained in the deployment
+    regime --- with per-seed variance shown to dominate model identity and three
+    retracted positives documented as a catalogue of generation-metric pitfalls
+    (Section~\ref{sec:rollout}).
+  \item \texttt{2026-07-27b-nexttrack-model-topology-research-memo.md} ---
+    \textbf{a research memo, not a campaign report}: nothing was run on the
+    server, nothing promoted, nothing registered, and its numbers come from
+    offline screens over frozen checkpoints. Consolidated at a lower register,
+    with its own verified/provisional partition preserved and its test-set
+    screening caveat stated; its reusable content is the convergent thesis that
+    every surviving proposal is an \emph{evidence-conditioning} change rather than
+    a capacity change, the mechanical explanation of the learned-combiner anomaly,
+    and the graveyard (Section~\ref{sec:memo}).
+  \item \texttt{2026-07-27c-nexttrack-markov-gate-confirm.md} --- the native
+    two-split confirm of \texttt{markov\_gate}; \textbf{CONFIRMED} and the largest
+    single recall gain in the arc (R@10 \num{0.23201} $=$ \num{332} of \num{1431},
+    paired $+\num{0.02027}$ canonically and $+\num{0.01957}$ on a disjoint
+    \SI{64}{\percent}-cold split, MRR up on both), with the warm evidence buckets
+    \emph{byte-for-byte identical}, an unpredicted crown gain in which all four
+    factors move the right way at once, a first recall-neutral crown arm when
+    composed with MMR, and the learned-combiner pitfall narrowed accordingly
+    (Section~\ref{sec:markovgate}).
+  \item \texttt{2026-07-30-eager-margin-calibrated-refutation.md} --- the
+    training-time eagerness regularizer at margins calibrated from the measured
+    transition tail; \textbf{REFUTED across the whole axis, with a mechanism}: the
+    margins were drawn from the item$\to$item cosine while the hinge acts on
+    prediction$\to$current, whose ceiling sits between \num{0.5843} and \num{0.70},
+    so four arms are provably inert (loss traces bit-identical at $\beta$ up to the
+    schema cap) and the arms that fire destroy relevance before they help
+    (Section~\ref{sec:eagermargin}).
   \item \texttt{2026-07-30c-artist-cap-measurement.md} --- the \emph{hard
     per-artist cap}, the first de-eagering lever that works, and it works because
     it cannot be outscored: \texttt{artist\_conc@10}
@@ -2756,6 +4581,26 @@ This synthesis consolidates fifteen next-track campaign reports from
     \texttt{walk\_dualgru.py}, \texttt{walk\_headtohead.py}), whose module
     docstrings are the authority for how each metric is computed; that material
     has no campaign report of its own yet.
+  \item \texttt{2026-08-01-stage-stack-topology.md} --- the stage-stack
+    topology campaign (arrangements of per-step MLP $\times$ recurrence at
+    equalised capacity, via the new \texttt{seq-stack} predictor);
+    \textbf{REFUTED on both surfaces} and the first closure on this corpus to that
+    standard: all five 4-stage arms fall \emph{through} the recall floor and are
+    refuted again on the walk, the $\num{3.24}\times$ capacity control ties on
+    both, the user's rectifier-position hypothesis is refuted, bracketing beats
+    interleaving at byte-identical capacity, and the best-fitting arm in the batch
+    retrieves \num{55} fewer hits than the control
+    (Section~\ref{sec:stagestack}).
+  \item \texttt{2026-08-02-tower-bank-parallel-towers.md} --- the
+    parallel-tower-bank dose campaign ($N$ bare-GRU towers under one linear head,
+    via the new \texttt{seq-bank} predictor), \textbf{CLOSED on both surfaces}:
+    no arm wins, five of eight lose to a parameter-matched single GRU, four h211
+    towers and one h512 GRU return the identical \num{186} hits (paired $\Delta$
+    \num{0.000000}), the \texttt{cummean} dose makes the walk strictly worse,
+    both walk trades are cell-local, and the batch's one CI-clear result is that
+    dropout \num{0.1} beats dropout \num{0.0} at byte-identical parameters ---
+    which implies every \texttt{fusion\_layers}${}=0$ arm on record, the deployed
+    engine included, trained under-regularized (Section~\ref{sec:towerbank}).
 \end{itemize}
 
 \end{document}
