@@ -2852,7 +2852,7 @@ name = "views"
 label = "the tower bank ('+'-joined causal views; one GRU tower per entry, >=1 must be `latent`)"
 type = "enum"
 default = "latent+latent"
-options = ["latent", "latent+latent", "latent+latent+latent", "latent+latent+latent+latent", "latent+latent+cummean", "latent+cummean+delta", "latent+cummean+cummean"]
+options = ["latent", "latent+latent", "latent+cummean", "latent+latent+latent", "latent+latent+latent+latent", "latent+latent+cummean", "latent+cummean+delta", "latent+cummean+cummean"]
 
 [[predictors.params]]
 name = "hidden"
