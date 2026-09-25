@@ -7,10 +7,10 @@ repository.workspace = true
 description = "Config-driven intake pipeline: data origins -> embeddings -> Qdrant + Postgres, built on the lvv crate"
 
 [dependencies]
-# The reusable pipeline library (Source/Sink traits, connectors, JobQueue).
-# 0.4.2 is required for QdrantDatabase::connect honouring the configured
-# Location (per-instance port-partitioning).
-lvv = { version = "0.4.2", features = ["postgres", "sql", "http"] }
+# The reusable pipeline library (Source/Sink traits, connectors, JobQueue,
+# embed_texts, embedding Cache, LLM transforms). 0.6 embeds text as given
+# (0.5 wrapped it in JSON quotes) and has typed errors.
+lvv = { version = "0.6.0", features = ["postgres", "sql", "http"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

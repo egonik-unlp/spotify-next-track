@@ -1,7 +1,8 @@
 //! Declarative pipeline configuration (`pipeline.toml`).
 //!
 //! A pipeline declares one `[embedding]` model, one `[source]` (the data
-//! origin) and one or more `[[sink]]`s (the destinations). Everything is
+//! origin), optional `[[transform]]` LLM rewrites applied to every row before
+//! embedding, and one or more `[[sink]]`s (the destinations). Everything is
 //! per-instance: URLs/ports come from the config, so instances stay
 //! port-partitioned and never share a destination by default.
 
@@ -13,6 +14,9 @@ use serde::Deserialize;
 pub struct PipelineConfig {
     pub embedding: EmbeddingConfig,
     pub source: SourceConfig,
+    /// LLM rewrites applied to every row, in listed order, before embedding.
+    #[serde(default)]
+    pub transform: Vec<TransformConfig>,
     /// Destinations. Written in listed order; put the authoritative store
     /// first (e.g. Postgres before Qdrant) — see the partial-failure semantics
     /// in `lvv`'s `JobQueue::run`.
@@ -35,10 +39,58 @@ pub struct EmbeddingConfig {
     /// Append to an already-populated target instead of skipping it.
     #[serde(default)]
     pub extends: bool,
+    /// Row fields whose values, joined by newlines, are the text that gets
+    /// embedded. Empty (the default) embeds each row's whole JSON.
+    #[serde(default)]
+    pub text_fields: Vec<String>,
+    /// Embedding cache file (JSON). Reruns over unchanged batches reuse the
+    /// stored vectors instead of calling the provider again.
+    #[serde(default)]
+    pub cache: Option<String>,
+    /// Base URL of an OpenAI-compatible server (vLLM, LM Studio, …). Only
+    /// used with `provider = "openai"`; the key comes from `OPENAI_API_KEY`.
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 fn default_distance() -> String {
     "cosine".to_string()
+}
+
+/// An LLM rewrite of every row: the model's reply to `prompt` (given the
+/// row's `input_field`, or its whole JSON) is written into `output_field`.
+/// Rows whose request fails are left unchanged and reported.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TransformConfig {
+    /// `ollama` or `openai`.
+    pub provider: String,
+    /// Chat model name (e.g. `llama3.2`, `gpt-4o-mini`).
+    pub model: String,
+    /// Base URL of an OpenAI-compatible server; only with `provider = "openai"`.
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// System prompt: what to do with each row.
+    pub prompt: String,
+    /// Field sent to the model. Omit to send the row's JSON.
+    #[serde(default)]
+    pub input_field: Option<String>,
+    /// Field the reply is written to (created if missing).
+    pub output_field: String,
+    /// Concurrent requests (default 1).
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize,
+    /// JSON Lines file of completed outputs; an interrupted or repeated run
+    /// only sends rows (or prompts) it hasn't seen.
+    #[serde(default)]
+    pub cache: Option<String>,
+    /// Fail the pipeline if any row's request fails, instead of embedding
+    /// that row without the output.
+    #[serde(default)]
+    pub required: bool,
+}
+
+fn default_concurrency() -> usize {
+    1
 }
 
 /// The data origin. `kind` selects the connector.
@@ -140,6 +192,8 @@ mod tests {
         let cfg: PipelineConfig = toml::from_str(toml_src).unwrap();
         assert_eq!(cfg.embedding.provider, "ollama");
         assert_eq!(cfg.embedding.distance, "cosine"); // default applied
+        assert!(cfg.embedding.text_fields.is_empty()); // whole-row JSON by default
+        assert!(cfg.transform.is_empty());
         assert_eq!(cfg.sink.len(), 2);
         match &cfg.source {
             SourceConfig::Postgres { identifier, .. } => assert_eq!(identifier, "tracks"),
@@ -148,6 +202,41 @@ mod tests {
         // Postgres sink first (authoritative), Qdrant second.
         assert!(matches!(cfg.sink[0], SinkConfig::Postgres { .. }));
         assert!(matches!(cfg.sink[1], SinkConfig::Qdrant { .. }));
+    }
+
+    #[test]
+    fn parses_text_fields_and_transforms() {
+        let cfg: PipelineConfig = toml::from_str(
+            r#"
+            [embedding]
+            provider = "ollama"
+            model = "nomic-embed-text"
+            dims = 768
+            text_fields = ["title", "summary"]
+            cache = "embeddings.json"
+
+            [source]
+            kind = "file"
+            path = "tracks.jsonl"
+            identifier = "tracks"
+
+            [[transform]]
+            provider = "ollama"
+            model = "llama3.2"
+            prompt = "Summarize in one sentence."
+            input_field = "body"
+            output_field = "summary"
+            concurrency = 4
+        "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.embedding.text_fields, ["title", "summary"]);
+        assert_eq!(cfg.embedding.cache.as_deref(), Some("embeddings.json"));
+        assert_eq!(cfg.transform.len(), 1);
+        let t = &cfg.transform[0];
+        assert_eq!(t.output_field, "summary");
+        assert_eq!(t.concurrency, 4);
+        assert!(!t.required);
     }
 
     #[test]
@@ -165,7 +254,9 @@ mod tests {
         )
         .unwrap();
         match h.source {
-            SourceConfig::Http { page_param, .. } => assert_eq!(page_param.as_deref(), Some("page")),
+            SourceConfig::Http { page_param, .. } => {
+                assert_eq!(page_param.as_deref(), Some("page"))
+            }
             _ => panic!("expected http source"),
         }
     }

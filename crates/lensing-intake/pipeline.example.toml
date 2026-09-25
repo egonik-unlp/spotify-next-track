@@ -11,6 +11,9 @@ model    = "nomic-embed-text"
 dims     = 768
 distance = "cosine"          # cosine | euclid | dot | manhattan
 extends  = false             # true = append to an already-populated target
+# text_fields = ["title", "summary"]  # embed these fields (newline-joined); default = whole row JSON
+# cache = "intake-embeddings.json"    # reuse vectors for unchanged batches across runs
+# base_url = "http://localhost:8000/v1"  # provider = "openai" against an OpenAI-compatible server
 
 # --- Source: where the data comes from (pick one `kind`) ---
 [source]
@@ -25,6 +28,17 @@ identifier = "tracks"
 #   kind = "sql-sqlite", path = "data.db",      query = "SELECT * FROM t", identifier = "t"
 #   kind = "http",       url  = "https://api.example.com/items", identifier = "i",
 #                        pointer = "/data/items", page_param = "page"
+
+# --- Transforms (optional): LLM rewrites of every row, before embedding ---
+# [[transform]]
+# provider     = "ollama"         # ollama | openai (+ base_url for compatible servers)
+# model        = "llama3.2"
+# prompt       = "Summarize the track in one sentence."
+# input_field  = "body"           # omit to send the row's JSON
+# output_field = "summary"        # reply lands here; list it in text_fields to embed it
+# concurrency  = 4
+# cache        = "summaries.jsonl" # resume / skip rows already done
+# required     = false            # true = fail the run if any row fails
 
 # --- Sinks: where it goes (list several; authoritative store first) ---
 [[sink]]

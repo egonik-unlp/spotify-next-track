@@ -23,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let text = std::fs::read_to_string(&cli.config)
         .map_err(|e| anyhow::anyhow!("reading config {}: {e}", cli.config.display()))?;
-    let config: lensing_intake::PipelineConfig =
-        toml::from_str(&text).map_err(|e| anyhow::anyhow!("parsing {}: {e}", cli.config.display()))?;
+    let config: lensing_intake::PipelineConfig = toml::from_str(&text)
+        .map_err(|e| anyhow::anyhow!("parsing {}: {e}", cli.config.display()))?;
     lensing_intake::run(config).await
 }

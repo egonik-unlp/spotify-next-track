@@ -2,25 +2,31 @@
 //!
 //! Reads a [`PipelineConfig`] (`pipeline.toml`), instantiates the corresponding
 //! `lvv` [`Source`] and [`Sink`]s, and runs a [`JobQueue`]: data origin →
-//! embeddings → Qdrant (+ the internal lensing Postgres). Destinations are
-//! declared per-instance, so nothing is shared across instances by default.
+//! optional LLM transforms → embeddings → Qdrant (+ the internal lensing
+//! Postgres). Destinations are declared per-instance, so nothing is shared
+//! across instances by default.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Context;
+use lvv::cache::cache_embeddings::Cache;
 use lvv::db::vector_database::{DatabaseParams, Location};
 use lvv::db::{Distance, PostgresSink, QdrantSink, Sink};
+use lvv::inference::EmbeddingProvider;
 use lvv::intake::{
-    FileFormat, FileSource, HttpSource, Pagination, PostgresSource, SqlSource, Source,
+    FileFormat, FileSource, HttpSource, Pagination, PostgresSource, Source, SqlSource,
 };
 use lvv::jobs::job_queue::JobQueue;
 use lvv::jobs::{JobBuilder, Provider};
+use lvv::transform::{Llm, Transform};
+use serde_json::Value;
 
 mod config;
-pub use config::{EmbeddingConfig, PipelineConfig, SinkConfig, SourceConfig};
+pub use config::{EmbeddingConfig, PipelineConfig, SinkConfig, SourceConfig, TransformConfig};
 
-/// Run a pipeline end to end: fetch from the source, embed each batch, and
-/// write to every configured sink.
+/// Run a pipeline end to end: fetch from the source, apply the transforms,
+/// embed each batch, and write to every configured sink.
 pub async fn run(config: PipelineConfig) -> anyhow::Result<()> {
     let provider = parse_provider(&config.embedding)?;
     let distance = parse_distance(&config.embedding.distance)?;
@@ -32,23 +38,73 @@ pub async fn run(config: PipelineConfig) -> anyhow::Result<()> {
     }
 
     let source = build_source(&config.source)?;
-    let datasets = source
+    let mut datasets = source
         .fetch()
         .await
         .context("fetching data from the configured source")?;
 
+    for transform in &config.transform {
+        for dataset in &mut datasets {
+            let rows = dataset.data.get_or_insert_with(Vec::new);
+            apply_transform(transform, rows).await.with_context(|| {
+                format!(
+                    "transform -> {:?} on {}",
+                    transform.output_field, dataset.identifier
+                )
+            })?;
+        }
+    }
+
+    // Embedding happens here rather than inside the queue so the embedded text
+    // is chosen by `text_fields` (the queue would embed each row's JSON) and
+    // vectors are reused across runs through the cache.
+    let embedder = build_embedder(&config.embedding)?;
+    let cache_path = config.embedding.cache.as_deref();
+    let mut cache = match cache_path {
+        Some(path) if Path::new(path).exists() => Cache::from_json_file(path)
+            .with_context(|| format!("loading embedding cache {path}"))?,
+        _ => Cache::new(),
+    };
+
     let mut jobs = Vec::with_capacity(datasets.len());
     for dataset in datasets {
+        let rows = dataset.data.as_deref().unwrap_or_default();
+        let texts = embedding_texts(rows, &config.embedding.text_fields)
+            .with_context(|| format!("building embedding text for {}", dataset.identifier))?;
+        let embeddings = match cache.get_embedding(config.embedding.model.clone(), texts.clone()) {
+            Some(cached) => cached.clone(),
+            None => {
+                let fresh = embedder
+                    .embed_texts(&texts)
+                    .await
+                    .with_context(|| format!("embedding {}", dataset.identifier))?;
+                cache.add_embedding(config.embedding.model.clone(), texts, fresh.clone());
+                fresh
+            }
+        };
+        if let Some(v) = embeddings.iter().find(|v| v.len() as u64 != dims) {
+            anyhow::bail!(
+                "model {:?} returned {}-dim vectors but [embedding] dims = {dims}",
+                config.embedding.model,
+                v.len()
+            );
+        }
+
         let job = JobBuilder::default()
             .dataset(dataset)
             .provider(provider.clone())
             .dims(dims)
             .extends(extends)
             .distance(distance)
+            .embedding(embeddings)
             .collection_name() // derives the name from provider/distance/dataset; must be last
-            .build()
-            .map_err(|e| anyhow::anyhow!("building job: {e}"))?;
+            .build()?;
         jobs.push(job);
+    }
+    if let Some(path) = cache_path {
+        cache
+            .to_json_file(path)
+            .with_context(|| format!("saving embedding cache {path}"))?;
     }
 
     let sinks = build_sinks(&config.sink, distance, dims)?;
@@ -58,6 +114,98 @@ pub async fn run(config: PipelineConfig) -> anyhow::Result<()> {
         queue.with_sink(sink);
     }
     queue.run().await.context("running the intake pipeline")
+}
+
+/// The text embedded for each row: `text_fields` joined by newlines (strings
+/// as is, other values as JSON, missing/null skipped), or the row's JSON when
+/// no fields are configured.
+fn embedding_texts(rows: &[Value], text_fields: &[String]) -> anyhow::Result<Vec<String>> {
+    rows.iter()
+        .enumerate()
+        .map(|(i, row)| {
+            if text_fields.is_empty() {
+                return Ok(row.to_string());
+            }
+            let text = text_fields
+                .iter()
+                .filter_map(|field| field_text(row, field))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if text.is_empty() {
+                anyhow::bail!("row {i} has none of the text_fields {text_fields:?}");
+            }
+            Ok(text)
+        })
+        .collect()
+}
+
+fn field_text(row: &Value, field: &str) -> Option<String> {
+    match row.get(field)? {
+        Value::Null => None,
+        Value::String(s) => Some(s.clone()),
+        other => Some(other.to_string()),
+    }
+}
+
+async fn apply_transform(config: &TransformConfig, rows: &mut [Value]) -> anyhow::Result<()> {
+    let llm = match (config.provider.as_str(), &config.base_url) {
+        ("ollama", _) => Llm::ollama(&config.model),
+        ("openai", None) => Llm::openai(&config.model)?,
+        ("openai", Some(url)) => {
+            Llm::openai_compatible(url, &config.model, std::env::var("OPENAI_API_KEY").ok())
+        }
+        (other, _) => {
+            anyhow::bail!("unknown transform provider {other:?} (expected ollama|openai)")
+        }
+    };
+
+    let output_field = config.output_field.clone();
+    let mut transform =
+        Transform::text(config.prompt.clone()).apply(move |row: &mut Value, reply| {
+            if let Value::Object(map) = row {
+                map.insert(output_field.clone(), Value::String(reply));
+            }
+        });
+    if let Some(input_field) = config.input_field.clone() {
+        transform =
+            transform.input(move |row: &Value| field_text(row, &input_field).unwrap_or_default());
+    }
+
+    let mut run = llm
+        .run(&transform, rows)
+        .concurrency(config.concurrency.max(1));
+    if let Some(cache) = &config.cache {
+        run = run.cache(cache);
+    }
+    let report = run.await?;
+
+    let counts = report.counts();
+    eprintln!(
+        "transform -> {}: {} applied, {} cached, {} failed",
+        config.output_field, counts.applied, counts.cached, counts.failed
+    );
+    for (index, error) in report.failures() {
+        eprintln!("  row {index}: {error}");
+    }
+    if config.required {
+        report.ensure_all()?;
+    }
+    Ok(())
+}
+
+fn build_embedder(embedding: &EmbeddingConfig) -> anyhow::Result<EmbeddingProvider> {
+    Ok(match (embedding.provider.as_str(), &embedding.base_url) {
+        ("ollama", _) => EmbeddingProvider::new(&embedding.model),
+        ("openai", None) => EmbeddingProvider::openai(&embedding.model)?,
+        ("openai", Some(url)) => EmbeddingProvider::openai_compatible(
+            url,
+            &embedding.model,
+            std::env::var("OPENAI_API_KEY").ok(),
+        ),
+        (other, _) => {
+            anyhow::bail!("unknown embedding provider {other:?} (expected ollama|openai)")
+        }
+    })
 }
 
 fn parse_provider(embedding: &EmbeddingConfig) -> anyhow::Result<Provider> {
@@ -171,4 +319,36 @@ fn build_sinks(
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn embeds_row_json_without_text_fields() {
+        let rows = [json!({"title": "Blue"})];
+        assert_eq!(
+            embedding_texts(&rows, &[]).unwrap(),
+            [r#"{"title":"Blue"}"#]
+        );
+    }
+
+    #[test]
+    fn joins_text_fields_as_plain_text() {
+        let rows = [json!({"title": "Blue", "artist": null, "year": 1971, "summary": "Folk"})];
+        let fields = ["title", "artist", "year", "summary"].map(String::from);
+        assert_eq!(
+            embedding_texts(&rows, &fields).unwrap(),
+            ["Blue\n1971\nFolk"]
+        );
+    }
+
+    #[test]
+    fn rejects_rows_with_no_text() {
+        let rows = [json!({"title": "Blue"}), json!({"other": 1})];
+        let err = embedding_texts(&rows, &["title".to_string()]).unwrap_err();
+        assert!(err.to_string().contains("row 1"), "{err}");
+    }
 }
