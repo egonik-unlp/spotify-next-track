@@ -118,6 +118,7 @@ redirect and completed on return, so it survives the round-trip.
 (Settings → Redirect URIs), exactly matching where the app is served, e.g.:
 - `http://localhost:8787/` (local `wrangler dev`)
 - `https://infinite-playlist.<your-subdomain>.workers.dev/` (deployed)
+- `https://bank-infinite-playlist.<your-subdomain>.workers.dev/` (preview alias, below)
 
 Without this, seeding + the journey still work; only the save button needs it.
 
@@ -129,6 +130,26 @@ wrangler secret put SPOTIFY_CLIENT_ID
 wrangler secret put SPOTIFY_CLIENT_SECRET
 # then add the deployed origin as a Redirect URI in the Spotify dashboard (above)
 ```
+
+### Preview deploys (research engines, no production traffic)
+
+`preview_urls = true` in `wrangler.toml` turns on per-version preview URLs, so an
+engine can be put in front of ears without shipping it to the live site:
+
+```sh
+npm run preview                                   # build:wasm + wrangler versions upload
+npx wrangler versions upload --preview-alias bank # same, at a STABLE hostname
+```
+
+A bare upload serves at `https://<version-prefix>-infinite-playlist.<subdomain>.workers.dev`
+— a fresh host per upload. `--preview-alias bank` *also* serves the same version at
+`https://bank-infinite-playlist.<subdomain>.workers.dev`, which is the one to use for
+anything needing sign-in: Spotify has no wildcard Redirect URIs, so a per-version host
+would need a new dashboard entry every upload, while the alias needs one, once. The
+`bank` alias is where the `bank_v1` / `bank_e1` walk-metric arms are auditioned.
+
+Neither command shifts production traffic — `wrangler deployments status` still shows
+the live version at 100%. To promote a preview afterwards: `wrangler versions deploy`.
 
 ## Rebaking the model assets (offline; needs the lab's Python venv + Qdrant)
 

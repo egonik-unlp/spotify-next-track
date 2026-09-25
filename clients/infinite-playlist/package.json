@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "npm run build:wasm && wrangler dev",
     "deploy": "npm run build:wasm && wrangler deploy",
+    "preview": "npm run build:wasm && wrangler versions upload",
     "copy:wasm": "mkdir -p public/wasm && cp worker-core/pkg/worker_core.js worker-core/pkg/worker_core_bg.wasm public/wasm/"
   },
   "devDependencies": {

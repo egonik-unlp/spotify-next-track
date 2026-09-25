@@ -2,6 +2,13 @@ name = "infinite-playlist"
 main = "worker/index.ts"
 compatibility_date = "2026-06-10"
 
+# Per-version preview URLs: `npm run preview` (wrangler versions upload) uploads a
+# version WITHOUT shifting production traffic and serves it at
+# https://<version-prefix>-infinite-playlist.<subdomain>.workers.dev — the way to put a
+# research engine (the bank_* arms) in front of ears without deploying it to the live
+# site. `npm run deploy` still goes straight to production.
+preview_urls = true
+
 [observability]
 enabled = true
 
