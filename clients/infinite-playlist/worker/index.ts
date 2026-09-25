@@ -5,6 +5,7 @@
 //
 //   POST /api/resolve  { url }  → { name, kind, tracks: [{uri,name,artist, latent?, genre?}] }
 //   POST /api/embed    { uris } → { tracks: [{uri, latent, genre}] }
+//   GET  /api/art?ids= id,id,…  → { art: { id: { url } } }        (album covers)
 //
 // Expands a Spotify playlist/album/track link (client-credentials, secret env).
 // /api/embed is the same cold-start, minus the expansion: the library browser
@@ -364,26 +365,69 @@ async function embedUris(env: Env, uris: unknown): Promise<any> {
   return { tracks, counts: { requested: uris.length, unknown: wanted.length, embedded: tracks.length } };
 }
 
+// ---- /api/art --------------------------------------------------------------
+// The baked catalog is a latent index — uri, name, artist, genre — with no
+// imagery, so the player has nothing to show. Covers come from the Spotify
+// catalog under CLIENT CREDENTIALS, not the user's token: artwork therefore
+// works in preview mode, before anyone signs in, which is the mode most
+// visitors stay in. Answers are immutable enough to cache for a week.
+const MAX_ART = 50;   // one Spotify /tracks call — the journey renders 8 at a time
+const ART_TTL = 604800;
+
+async function artFor(env: Env, ids: string[]): Promise<Record<string, { url: string }>> {
+  const out: Record<string, { url: string }> = {};
+  if (!ids.length) return out;
+  const r = await spotifyGet(env, "tracks", { ids: ids.join(",") });
+  for (const t of r.tracks ?? []) {
+    const imgs = t?.album?.images ?? [];
+    if (!t?.id || !imgs.length) continue;
+    // Spotify returns 640 / 300 / 64 px. The middle one is crisp at every size
+    // this UI draws (42-96 px, retina included) and keeps the journey cheap.
+    out[t.id] = { url: (imgs[1] ?? imgs[0]).url };
+  }
+  return out;
+}
+
 // ---- entry -----------------------------------------------------------------
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "content-type": "application/json",
-      "access-control-allow-origin": "*",
-      "access-control-allow-methods": "POST, OPTIONS",
-      "access-control-allow-headers": "content-type",
-    },
-  });
+function json(body: unknown, status = 200, cacheSeconds = 0): Response {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "content-type",
+  };
+  if (cacheSeconds) headers["cache-control"] = `public, max-age=${cacheSeconds}`;
+  return new Response(JSON.stringify(body), { status, headers });
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
-    const { pathname } = new URL(req.url);
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(req.url);
+    const { pathname } = url;
     // Public config for the browser PKCE save-to-playlist flow. The client_id is
     // public (safe to expose); null hides the Save button when auth isn't set up.
     if (pathname === "/api/config") {
       return json({ spotify_client_id: env.SPOTIFY_CLIENT_ID ?? null });
+    }
+    if (pathname === "/api/art") {
+      if (req.method === "OPTIONS") return json({}, 204);
+      // Sort + dedupe BEFORE building the cache key, so the same eight tracks
+      // requested in a different order are one cache entry, not two.
+      const ids = [...new Set((url.searchParams.get("ids") ?? "").split(",")
+        .filter((s) => /^[A-Za-z0-9]{22}$/.test(s)))].sort().slice(0, MAX_ART);
+      const key = new Request(`${url.origin}/api/art?ids=${ids.join(",")}`);
+      const hit = await caches.default.match(key);
+      if (hit) return hit;
+      try {
+        const res = json({ art: await artFor(env, ids) }, 200, ART_TTL);
+        ctx.waitUntil(caches.default.put(key, res.clone()));
+        return res;
+      } catch (e) {
+        // No credentials, or Spotify is down: the player falls back to its
+        // mood-tinted placeholders, so this is a soft failure, never cached.
+        console.warn("art lookup failed:", String(e));
+        return json({ art: {}, error: String((e as Error).message ?? e) });
+      }
     }
     if (pathname === "/api/resolve" || pathname === "/api/embed") {
       if (req.method === "OPTIONS") return json({}, 204);

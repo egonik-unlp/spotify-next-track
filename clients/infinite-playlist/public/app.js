@@ -32,12 +32,40 @@ let ANCHOR = null;                       // dominant-mood centroid of the seed c
 // stride_err -0.255 (CI<0), genres +1.50 (CI>0), drift +0.035 (CI>0) and vibe +0.001
 // (straddles: held, not traded). Pushing the single GRU to the same stride instead
 // COSTS vibe (-0.041, CI<0), which is why its default stride stays 0.
+// The two `bank_*` engines are DELIBERATELY not improvements — they are here so the walk
+// METRICS can be judged by ear. `bank_v1` is the arm those metrics refuted hardest
+// (vibe -0.0174 CI<0, genres -1.7250 CI<0), so if `vibe` measures anything audible this
+// journey should lose the seed's mood and narrow in genre. `bank_e1` is the deployed
+// tower pair with dropout actually applied (at fusion_layers=0 the shipped engine applies
+// none — a defect, though fixing it buys no recall: the 3-seed grid excluded that); it
+// holds vibe at the deployed cell but drifts late. If the ear DISAGREES with either
+// label, the walk surface is not tracking the experience — which matters, because three
+// campaigns' verdicts rest on it.
+//
+// `name` is what the UI says; `label` is the technical one the bake writes and the
+// research record uses. They are separate on purpose: a listener choosing a model
+// should not have to read a confidence interval, and a verdict should not be
+// softened to fit a dropdown. The measured verdict is shown verbatim under the
+// picker instead (see describeEngine).
 const ENGINES = {
-  gru:  { file: "gru.onnx",     anchor: 0.4, stride: 0.0,
-          label: "GRU — original" },
-  dual: { file: "dualgru.onnx", anchor: 0.8, stride: 0.5,
-          label: "Dual-tower — more variety, holds the vibe" },
+  gru:     { file: "gru.onnx",     anchor: 0.4, stride: 0.0,
+             name: "Original",
+             label: "GRU — original" },
+  dual:    { file: "dualgru.onnx", anchor: 0.8, stride: 0.5,
+             name: "Balanced",
+             label: "Dual-tower — more variety, holds the vibe" },
+  bank_e1: { file: "banke1.onnx",  anchor: 0.8, stride: 0.5,
+             name: "Regularized",
+             label: "Dual-tower, regularized — vibe held here, drifts late" },
+  // ⚠ Refuted at a0.4/s0.3, but it runs at a0.8/s0.5 — a cell never measured for THIS
+  // arm (only the two TRADE arms got the secondary cell), and a single-seed headless
+  // check there scored it best of the four. The label must not claim more than that.
+  bank_v1: { file: "bankv1.onnx",  anchor: 0.8, stride: 0.5,
+             name: "Triple tower",
+             label: "Bank ×3 + centroid — refuted at 0.4/0.3, this cell unmeasured" },
 };
+// ENGINES key -> the manifest block the bake writes its tuned cell into.
+const ENGINE_BLOCK = { dual: "dualgru", bank_e1: "bank_e1", bank_v1: "bank_v1" };
 const SESS = {};              // engine key -> InferenceSession (lazy)
 const SESS_PENDING = {};      // engine key -> in-flight load promise
 const URI2ROW = new Map();  // spotify uri → catalog row (for loading playlists)
@@ -64,10 +92,17 @@ async function load() {
   // The bake is the source of truth for the tuned retrieval params: export_dualgru_onnx.py
   // writes the head-to-head's chosen cell into manifest.dualgru, so re-tuning is a
   // re-bake rather than a code edit. Falls back to the defaults above.
-  if (man.dualgru) {
-    if (Number.isFinite(man.dualgru.anchor)) ENGINES.dual.anchor = man.dualgru.anchor;
-    if (Number.isFinite(man.dualgru.stride)) ENGINES.dual.stride = man.dualgru.stride;
-    if (man.dualgru.file) ENGINES.dual.file = man.dualgru.file;
+  // Same rule for every baked engine, so adding one is a re-bake and a manifest block
+  // rather than a code edit. An engine whose block is missing keeps its default above,
+  // which is what lets this ship before/without the extra graphs being present.
+  for (const [key, blk] of Object.entries(ENGINE_BLOCK)) {
+    const b = man[blk];
+    if (!b || !ENGINES[key]) continue;
+    if (Number.isFinite(b.anchor)) ENGINES[key].anchor = b.anchor;
+    if (Number.isFinite(b.stride)) ENGINES[key].stride = b.stride;
+    if (b.file) ENGINES[key].file = b.file;
+    if (b.label) ENGINES[key].label = b.label;
+    if (b.verdict) ENGINES[key].verdict = b.verdict;
   }
   DIM = man.dim; N = man.n;
   CAT = await (await fetch("./model/catalog.json")).json();
@@ -79,7 +114,8 @@ async function load() {
   for (let r = 0; r < N; r++) { let a = 0, o = r*DIM; for (let j=0;j<DIM;j++) a += RAW[o+j]*RAW[o+j]; NORM[r] = Math.sqrt(a) || 1; }
   for (let i = 0; i < N; i++) { const u = CAT[i]?.uri; if (u) URI2ROW.set(u, i); }
   NLIB = man.n_library ?? CAT.filter((c) => c && c.il !== 0).length;
-  $("#meta").textContent = `queue up anything from your Spotify · the journey travels your library of ${NLIB.toLocaleString()} · anti-eager GRU`;
+  $("#meta").textContent = `The journey is drawn from the ${NLIB.toLocaleString()} tracks in your listening history, and the model runs in this browser — nothing you pick is sent anywhere to be scored.`;
+  describeEngine();
   ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
   // NO eager session here. Graphs are pulled per engine by engineSession()/warmEngine();
   // the old `modelReady = ...` line assigned to an UNDECLARED binding, which in a module
@@ -88,7 +124,7 @@ async function load() {
   await configReady;   // already in flight since page load (see below)
   if (!CLIENT_ID) {   // no creds → full tracks can't work; fall back to previews
     $("#fulltoggle").checked = false; $("#fulltoggle").disabled = true;
-    setPlayMsg("deploy with Spotify credentials for full playback");
+    setPlayMsg("Full tracks aren't set up on this site — playing 30-second previews instead.");
   }
   // A permalink wins over a mid-OAuth restore: the user explicitly opened a link.
   if (!applyPermalink()) restoreSeeds();   // else bring back a mid-OAuth-redirect selection
@@ -136,9 +172,19 @@ async function predictNext(seqRows) {
 //
 // `counts` is a Map artist -> times used. cap 0 / Infinity = off. `prev` = the row just
 // played, or -1 for the first step.
-function nearest(pred, used, counts, cap, anchorL, stride, prev) {
+//
+// `diag`, when passed, collects the READOUT this UI shows per stop (see whyOf): the
+// catalogue rows nearest the model's raw prediction REGARDLESS of eligibility, and the
+// eligible shortlist by combined score. It is filled from the same arithmetic that makes
+// the decision, deliberately — a separate explain pass could drift from the real one and
+// then confidently describe a choice that never happened. The `diag` branches cost one
+// predictable test per row and nothing when it is null; the scoring itself is untouched.
+function nearest(pred, used, counts, cap, anchorL, stride, prev, diag) {
   let best = -1, bs = -Infinity;
   const capped = cap > 0 && Number.isFinite(cap);
+  // The uncapped retry below re-enters and refills these, so the surviving readout
+  // describes the pass that actually produced the pick.
+  if (diag) { diag.near = []; diag.best = []; }
   // Read prev through latOf/normOf, NOT RAW/NORM directly: when a pasted playlist
   // contains tracks outside the baked catalog they become VIRTUAL rows (index >= N,
   // latent in EXTRA), and the first step's `prev` is the last seed — so it can be one.
@@ -148,19 +194,95 @@ function nearest(pred, used, counts, cap, anchorL, stride, prev) {
   const pv = prev >= 0 ? latOf(prev) : null;
   const pvN = prev >= 0 ? normOf(prev) : 1;
   for (let r = 0; r < N; r++) {
-    if (used.has(r)) continue;
-    if (!CAT[r].il) continue;                                   // the journey travels YOUR library
-    if (capped && (counts.get(CAT[r].artist) || 0) >= cap) continue;
+    // Why the ineligible are scored at all when `diag` is on: "the model wanted X but
+    // couldn't have it" is the whole point of the readout, and X is usually ineligible.
+    const bar = used.has(r) ? "played"
+              : !CAT[r].il ? "outside"                          // the journey travels YOUR library
+              : (capped && (counts.get(CAT[r].artist) || 0) >= cap) ? "cap"
+              : null;
+    if (bar && !diag) continue;
     const o = r*DIM; let dot = 0; for (let j=0;j<DIM;j++) dot += RAW[o+j]*pred[j];
     let sc = dot / NORM[r];
+    if (diag) keepTop(diag.near, { r, m: sc, bar }, WHY_REGION, "m");
+    if (bar) continue;
     if (ANCHOR && anchorL) { let ad = 0; for (let j=0;j<DIM;j++) ad += RAW[o+j]*ANCHOR[j]; sc += anchorL * ad / NORM[r]; }  // hold the seed mood
     if (stride && pv) { let pd = 0; for (let j=0;j<DIM;j++) pd += RAW[o+j]*pv[j]; sc -= stride * pd / (NORM[r]*pvN); }  // and keep moving
+    if (diag) keepTop(diag.best, { r, sc }, WHY_SHORTLIST, "sc");
     if (sc > bs) { bs = sc; best = r; }
   }
   // The cap can genuinely exhaust the library (a small seed genre, a long walk).
   // Retry uncapped rather than ending the journey early.
-  if (best < 0 && capped) return nearest(pred, used, counts, 0, anchorL, stride, prev);
+  if (best < 0 && capped) return nearest(pred, used, counts, 0, anchorL, stride, prev, diag);
   return best;
+}
+
+// ---------- the per-stop readout: what the model was actually reaching for ----------
+// A stop is NOT the model's choice. The model emits a point in the 192-d space it was
+// trained in; retrieval then plays the best track it is ALLOWED to play — never played
+// before, in your library, inside the artist cap — scored by three competing terms. Every
+// one of those can move the answer away from the model's own favourite, and none of it
+// was visible: the journey just produced songs. This makes each step auditable.
+const WHY = [];              // order index -> the readout for that stop (aligned by genMore)
+const WHY_REGION = 40;       // nearest-to-the-prediction rows kept: defines the "region"
+const WHY_NEAR = 5;          //   …of which this many are listed by name
+const WHY_SHORTLIST = 4;     // eligible rows kept by combined score, for the runner-up
+
+// Insertion into a small descending top-k. Guarded by the tail comparison, so the common
+// case (a row that beats nothing) costs one compare and allocates nothing.
+function keepTop(arr, item, k, key) {
+  if (arr.length >= k && item[key] <= arr[arr.length - 1][key]) return;
+  let i = arr.length;
+  while (i > 0 && arr[i - 1][key] < item[key]) i--;
+  arr.splice(i, 0, item);
+  if (arr.length > k) arr.pop();
+}
+
+// The three forces on one candidate, in the units the score is actually made of, so the
+// bars in the panel add up to the number shown beside them.
+function termsOf(r, pred, prev, eng) {
+  const pv = prev >= 0 ? latOf(prev) : null;
+  const pvN = prev >= 0 ? normOf(prev) : 1;
+  const o = r*DIM;
+  let d = 0, ad = 0, pd = 0;
+  for (let j=0;j<DIM;j++) d += RAW[o+j]*pred[j];
+  if (ANCHOR) for (let j=0;j<DIM;j++) ad += RAW[o+j]*ANCHOR[j];
+  if (pv) for (let j=0;j<DIM;j++) pd += RAW[o+j]*pv[j];
+  const m = d / NORM[r];
+  const a = ANCHOR && eng.anchor ? eng.anchor * ad / NORM[r] : 0;
+  const p = pv && eng.stride ? eng.stride * pd / (NORM[r]*pvN) : 0;
+  return { m, a, p, sc: m + a - p };
+}
+
+function whyOf(diag, pick, pred, prev, eng) {
+  const terms = termsOf(pick, pred, prev, eng);
+  const near = diag.near.slice(0, WHY_NEAR).map((x) => ({
+    r: x.r, m: x.m, tag: x.r === pick ? "picked" : (x.bar || "passed"),
+  }));
+  // The played track can sit well outside the model's own top rows — that is exactly what
+  // a strong mood anchor does. Append it rather than leaving the list without it: a panel
+  // that never shows where the song you're hearing landed explains nothing.
+  if (!near.some((x) => x.r === pick)) near.push({ r: pick, m: terms.m, tag: "picked", gap: true });
+  const rank = diag.near.findIndex((x) => x.r === pick);
+  // Two very different reasons a closer track didn't play, and the headline must not
+  // conflate them: BARRED (already played / not yours / artist limit) means it was never
+  // available, while an eligible one that lost was simply outscored by the mood-anchor
+  // and stride terms. Saying "unavailable" for the second is a lie about the model.
+  const above = rank > 0 ? diag.near.slice(0, rank) : [];
+  const barred = above.filter((x) => x.bar).length;
+  // The genre mix of the neighbourhood is the one legible thing that can be said about a
+  // point in a latent space: not what the axes mean, but what LIVES where it is pointing.
+  const g = new Map();
+  for (const x of diag.near) { const k = CAT[x.r].genre || "—"; g.set(k, (g.get(k) || 0) + 1); }
+  const region = [...g.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+    .map(([genre, n]) => ({ genre, pct: Math.round(100 * n / (diag.near.length || 1)) }));
+  const up = diag.best.find((x) => x.r !== pick) || null;
+  return {
+    pick, rank: rank >= 0 ? rank + 1 : null,
+    above: above.length, barred, terms,
+    near, region,
+    runner: up ? { r: up.r, sc: up.sc } : null,
+    engine: eng.name, anchor: eng.anchor || 0, stride: eng.stride || 0,
+  };
 }
 // the dominant sub-cluster of a (possibly broad) seed set: medoid + everything
 // at least as similar to it as average → drops outlier sub-genres.
@@ -211,8 +333,12 @@ async function genMore(count) {
   for (let c = 0; c < count; c++) {
     const pred = await predictNext(seq);
     const prev = seq.length ? seq[seq.length - 1] : -1;
-    const r = nearest(pred, used, artistCounts, artistCap(), eng.anchor, eng.stride, prev);
+    const diag = { near: [], best: [] };
+    const r = nearest(pred, used, artistCounts, artistCap(), eng.anchor, eng.stride, prev, diag);
     if (r < 0) break;
+    // Pushed BEFORE the pick joins `used`, and one per pick, so WHY[oi] lines up with
+    // order[oi] — extend() appends `picks` to `order` in this same sequence.
+    WHY.push(whyOf(diag, r, pred, prev, eng));
     picks.push(r); seq.push(r); used.add(r);
     artistCounts.set(CAT[r].artist, (artistCounts.get(CAT[r].artist) || 0) + 1);
   }
@@ -302,7 +428,7 @@ async function fullStart(oi) {
 // flip into full mode: get consent (broader scope) if needed, spin up the SDK,
 // hand playback off from the preview iframe to the device.
 async function enableFull() {
-  if (!CLIENT_ID) { setPlayMsg("deploy with Spotify credentials for full playback"); $("#fulltoggle").checked = false; return; }
+  if (!CLIENT_ID) { setPlayMsg("Full tracks aren't set up on this site — playing 30-second previews instead."); $("#fulltoggle").checked = false; return; }
   const token = await getFreshToken(SP_SCOPE_FULL);
   if (!token) { localStorage.setItem("ip_full_pending", "1"); await connectSpotify(SP_SCOPE_FULL); return; }
   await initPlayer(token);
@@ -312,7 +438,10 @@ async function initPlayer(token) {
   if (!(await ensurePlayer())) return;   // false = not premium / init/auth error (message already set)
   playbackMode = "full";
   try { controller && controller.pause(); } catch (_) { /* preview may not exist yet */ }
-  $("#embed").hidden = true;
+  $("#embedwrap").hidden = true;
+  // The Spotify iframe carries its own cover, so ours only appears once the iframe
+  // is out of the way — one piece of artwork in the dock, never two.
+  $("#dock").classList.add("full");
   $("#dock-toggle").hidden = false; $("#dock-prog-wrap").hidden = false;
   $("#fulltoggle").checked = true;
   setPlayMsg("full tracks · playing on this tab");
@@ -320,7 +449,8 @@ async function initPlayer(token) {
 }
 function disableFull() {
   playbackMode = "preview";
-  $("#embed").hidden = false;
+  $("#embedwrap").hidden = false;
+  $("#dock").classList.remove("full");
   $("#dock-toggle").hidden = true; $("#dock-prog-wrap").hidden = true;
   setPlayMsg("");
   try { player && player.pause(); } catch (_) { /* no player */ }
@@ -331,14 +461,141 @@ $("#fulltoggle").addEventListener("change", (e) => { e.target.checked ? enableFu
 // model, seeded by everything played so far.
 $("#engine")?.addEventListener("change", () => {
   const eng = ENGINES[engine()];
-  setPlayMsg(`loading ${eng.label.split(" —")[0]}…`);
+  describeEngine();
+  setPlayMsg(`loading ${eng.name}…`);
   engineSession(engine())
-    .then(() => setPlayMsg(`${eng.label.split(" —")[0]} ready`))
-    .catch((e) => setPlayMsg(`engine failed to load (${(e && e.message) || e})`));
+    .then(() => setPlayMsg(`${eng.name} ready`))
+    .catch((e) => setPlayMsg(`the ${eng.name} model couldn't load — pick another (${(e && e.message) || e})`));
 });
+// The measured verdict, verbatim from the bake, under the picker. The dropdown says
+// what a listener needs; this says what was actually established, so a research arm
+// can sit in the UI without its label overclaiming.
+function describeEngine() {
+  const note = $("#enginenote");
+  if (!note) return;
+  const eng = ENGINES[engine()] || {};
+  note.textContent = eng.verdict
+    ? `Measured: ${eng.verdict}`
+    : `Retrieval: mood anchor ${eng.anchor ?? "—"}, step size ${eng.stride ?? "—"}.`;
+}
 $("#dock-toggle").addEventListener("click", () => { player && player.togglePlay(); });
 
+// ---------- album art ----------
+// The baked catalog is a latent index — uri, name, artist, genre, no imagery — so
+// covers are fetched from Spotify through the Worker, which uses CLIENT credentials.
+// That matters: artwork shows up in preview mode too, before anyone signs in, which
+// is the mode most listeners stay in. Anything we can't get keeps its mood-tinted
+// placeholder, so the journey never waits on, or breaks without, the network.
+const ART = new Map();        // spotify uri -> { url }
+const ART_MISS = new Set();   // asked, nothing came back — don't ask again
+const ART_CHUNK = 50;         // matches the worker's one-Spotify-call budget
+const trackId = (uri) => (typeof uri === "string" && uri.startsWith("spotify:track:") ? uri.slice(14) : null);
+
+async function fetchArt(uris) {
+  const want = [];
+  for (const u of uris) if (trackId(u) && !ART.has(u) && !ART_MISS.has(u) && !want.includes(u)) want.push(u);
+  if (!want.length) return;
+  for (let i = 0; i < want.length; i += ART_CHUNK) {
+    const chunk = want.slice(i, i + ART_CHUNK);
+    // Mark before awaiting: two batches rendered back to back must not both ask.
+    for (const u of chunk) ART_MISS.add(u);
+    try {
+      const r = await fetch(`./api/art?ids=${chunk.map(trackId).join(",")}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const art = (await r.json()).art || {};
+      for (const u of chunk) {
+        const a = art[trackId(u)];
+        if (a && a.url) { ART.set(u, a); ART_MISS.delete(u); }
+      }
+    } catch (_) { /* static host, no credentials, offline → placeholders */ }
+    paintArt();
+  }
+}
+// Covers arrive after the stops they belong to are already on screen, so painting
+// is a separate pass over whatever is currently rendered.
+function paintArt() {
+  for (const el of document.querySelectorAll("img.art[data-uri]")) {
+    const a = ART.get(el.dataset.uri);
+    if (a && !el.getAttribute("src")) el.setAttribute("src", a.url);
+  }
+  const cur = currentOi >= 0 && order[currentOi] !== undefined ? CAT[order[currentOi]]?.uri : null;
+  if (cur) setDockArt(cur);
+}
+function artImg(uri, cls) {
+  const a = ART.get(uri);
+  return `<img class="art ${cls}" data-uri="${esc(uri)}" alt=""${a ? ` src="${esc(a.url)}"` : ""} />`;
+}
+
 // ---------- render the journey ----------
+// Why each stop carries a readout. Every song here is a RETRIEVAL, and retrieval can
+// disagree with the model: the prediction is a point, the library is finite, and three
+// rules (never repeat, your library only, cap per artist) can all veto the model's
+// favourite. The panel says what was aimed at, what was reachable, and which of the
+// three forces actually decided — so a journey that sounds wrong can be read, not
+// guessed at. Nothing here re-runs the model; it is the decision's own arithmetic.
+const WHY_TAG = {
+  picked: "played",
+  played: "already played",
+  outside: "not in your library",
+  cap: "artist limit",
+  passed: "passed over",
+};
+const ORD = ["", "closest", "2nd-closest", "3rd-closest", "4th-closest", "5th-closest"];
+const sig = (v) => (v < 0 ? "−" : "+") + Math.abs(v).toFixed(2);
+
+function whyPanel(w) {
+  if (!w) return "";
+  const t = w.terms;
+  // One scale for all three bars, so their lengths are comparable to each other rather
+  // than each filling its own row.
+  const span = Math.max(Math.abs(t.m), Math.abs(t.a), Math.abs(t.p), 0.01);
+  const bar = (label, v, neg) =>
+    `<li><span>${label}</span><i class="wbar${neg ? " neg" : ""}" style="--w:${Math.round(100*Math.abs(v)/span)}%"></i><b>${sig(neg ? -v : v)}</b></li>`;
+
+  const rows = w.near.map((x) => {
+    const c = CAT[x.r];
+    return `<li class="${x.tag === "picked" ? "is-pick" : ""}${x.gap ? " is-gap" : ""}" style="--hue:${hue(c.genre)}">` +
+      `<i class="wsim">${x.m.toFixed(2)}</i>` +
+      `<span class="wname"><b>${esc(c.name)}</b> <em>${esc(c.artist)}</em></span>` +
+      `<span class="wtag">${WHY_TAG[x.tag]}</span></li>`;
+  }).join("");
+
+  const mix = w.region.map((g) =>
+    `<span class="wg" style="--hue:${hue(g.genre)}">${esc(g.genre)} <b>${g.pct}%</b></span>`).join("");
+
+  // The headline: the gap between what the model wanted and what it could have. When the
+  // played track IS the closest thing in the catalogue, say so — that is the honest case.
+  const nth = w.rank ? (ORD[w.rank] || `${w.rank}th-closest`) : "";
+  const why = w.barred === w.above ? "the closer ones were out of reach"
+            : w.barred === 0 ? "closer ones existed, but scored worse overall"
+            : "closer ones were out of reach or outscored";
+  const reach = w.rank === 1
+    ? "played the closest track in the catalogue"
+    : w.rank ? `played the ${nth} — ${why}`
+             : "played the best track the rules left it";
+  const teaser = `Aimed at ${w.region[0] ? esc(w.region[0].genre) : "this region"} · ${reach}`;
+
+  const runner = w.runner
+    ? ` · runner-up <b>${esc(CAT[w.runner.r].name)}</b> ${w.runner.sc.toFixed(2)}` : "";
+
+  return `<details class="why"><summary>${teaser}</summary><div class="why-body">` +
+    `<p class="why-lede">The model never names a song. It predicts a <em>point</em> — 192 numbers describing what should come next — and the journey plays the closest track it is allowed to touch.</p>` +
+    `<h4 class="why-h">Closest to that point <span>anywhere in the catalogue</span></h4>` +
+    `<ol class="why-near">${rows}</ol>` +
+    (mix ? `<h4 class="why-h">The neighbourhood it pointed at <span>nearest ${WHY_REGION}</span></h4><p class="why-mix">${mix}</p>` : "") +
+    `<h4 class="why-h">What decided this stop</h4>` +
+    `<ul class="why-terms">` +
+      bar("fits the prediction", t.m, false) +
+      (w.anchor ? bar(`holds the seed mood ×${w.anchor}`, t.a, false) : "") +
+      (w.stride ? bar(`keeps it moving ×${w.stride}`, t.p, true) : "") +
+    `</ul>` +
+    // The engine is named per stop, not once for the journey: switching models mid-walk
+    // is allowed, so two stops in the same list can come from different ones.
+    `<p class="why-total">score <b>${t.sc.toFixed(2)}</b> · ${esc(w.engine)}${runner}</p>` +
+    `</div></details>`;
+}
+
+const EXTEND_LABEL = "Play on — extend the journey";
 function stopEl(row, oi) {
   const c = CAT[row];
   const prev = oi > 0 ? hue(CAT[order[oi-1]].genre) : hue(c.genre);
@@ -348,9 +605,11 @@ function stopEl(row, oi) {
   el.innerHTML = `<span class="node"></span>` +
     `<div class="card" role="button" tabindex="0">` +
     `<span class="idx">${String(oi+1).padStart(2,"0")}</span>` +
+    `<span class="cover-slot">${artImg(c.uri, "stop-art")}<span class="eq" aria-hidden="true"><i></i><i></i><i></i></span></span>` +
     `<span class="info"><b>${esc(c.name)}</b><span>${esc(c.artist)}</span></span>` +
     `<span class="genre">${esc(c.genre || "")}</span>` +
-    `<button class="play" aria-label="Play from here">▶</button></div>`;
+    `<button class="play" aria-label="Play from here">▶</button></div>` +
+    whyPanel(WHY[oi]);
   const play = () => playOi(oi);
   el.querySelector(".card").addEventListener("click", play);
   el.querySelector(".card").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); play(); } });
@@ -360,9 +619,10 @@ function renderNew(fromOi) {
   const j = $("#journey"); $("#more")?.remove();
   for (let oi = fromOi; oi < order.length; oi++) j.appendChild(stopEl(order[oi], oi));
   const more = document.createElement("button");
-  more.id = "more"; more.className = "ghost more"; more.textContent = busy ? "…" : "Extend the journey";
+  more.id = "more"; more.className = "ghost more"; more.textContent = busy ? "…" : EXTEND_LABEL;
   more.addEventListener("click", () => extend());
   j.appendChild(more);
+  fetchArt(order.slice(fromOi).map((r) => CAT[r]?.uri).filter(Boolean));
 }
 // Failures here used to be invisible AND terminal: an engine that couldn't load (a
 // 404'd graph, a device where the wasm backend won't start) rejected into nothing, and
@@ -378,14 +638,21 @@ async function extend() {
     // A no-throw empty batch is its own failure mode: retrieval scored nothing eligible
     // (the virtual-prev NaN was exactly this, and library exhaustion looks the same).
     // Silence here left the page on "…charting the journey…" forever.
-    if (!picks.length) setPlayMsg(order.length ? "no further tracks left in your library for this journey"
-                                              : "couldn't chart a journey from these seeds — try another engine or more seeds");
+    if (!picks.length) setPlayMsg(order.length ? "That's everything — your library has no further tracks that fit this journey."
+                                              : "Couldn't chart a journey from those tracks. Try adding a few more, or a different model.");
     return picks.length;
   } catch (e) {
-    setPlayMsg(`the ${ENGINES[engine()].label} engine couldn't run here: ${(e && e.message) || e}`);
-    if (m) { m.textContent = "Extend the journey"; m.disabled = false; }
+    setPlayMsg(`the ${ENGINES[engine()].name} model couldn't run here: ${(e && e.message) || e}`);
     return 0;
-  } finally { busy = false; }
+  } finally {
+    // renderNew() runs while `busy` is still true, so the button it rebuilds is
+    // labelled "…" — and nothing rendered again afterwards, leaving every batch
+    // ending on an ellipsis. Settle the label here, on both paths, once the latch
+    // is actually released. `$("#more")` is re-queried: renderNew replaced the node.
+    busy = false;
+    const b = $("#more");
+    if (b) { b.textContent = EXTEND_LABEL; b.disabled = false; }
+  }
 }
 
 async function begin() {
@@ -417,25 +684,48 @@ async function begin() {
   // immediately spend the whole budget on that artist again.
   artistCounts = new Map();
   for (const r of core) artistCounts.set(CAT[r].artist, (artistCounts.get(CAT[r].artist) || 0) + 1);
-  order = []; currentOi = -1;
+  order = []; WHY.length = 0; currentOi = -1;   // WHY is indexed BY order; they reset together
   revealSave();
   const names = core.slice(0, 5).map((r) => `<b>${esc(CAT[r].name)}</b>`).join(", ");
-  const focus = core.length < seeds.length ? ` <span class="focus">· focusing on the ${core.length}-track core of ${seeds.length}</span>` : "";
-  $("#journey").innerHTML = `<p class="from">From ${names}${core.length > 5 ? ", …" : ""}${focus} — the GRU is charting the journey…</p>`;
+  const focus = core.length < seeds.length
+    ? ` <span class="focus">· ${seeds.length} tracks given, ${core.length} kept — the rest sat too far outside the mood</span>` : "";
+  $("#journey").innerHTML = `<p class="from">Travelling out from ${names}${core.length > 5 ? ", …" : ""}${focus}</p>`;
   if (await extend()) playOi(0);   // nothing generated (engine failed) → don't play a hole
 }
 function revealSave() {
   $("#savebar").hidden = false;
   const ok = !!CLIENT_ID;
   $("#save").disabled = !ok;
-  if (!ok) $("#savemsg").textContent = "deploy with Spotify credentials to enable saving";
+  if (!ok) $("#savemsg").textContent = "Saving to Spotify isn't set up on this site.";
+}
+// The cover does double duty in the dock: the crisp thumbnail, and — blurred and
+// dimmed behind everything — the atmosphere of whatever is playing. Without one it
+// falls back to the genre-hue wash, so the dock never shows an empty frame.
+function setDockArt(uri) {
+  const a = ART.get(uri), art = $("#dock-art"), bg = $("#dock-bg");
+  if (!art || !bg) return;
+  if (a && a.url) {
+    if (art.getAttribute("src") !== a.url) art.setAttribute("src", a.url);
+    bg.style.backgroundImage = `url("${a.url.replace(/"/g, "%22")}")`;
+    $("#dock").classList.add("has-art");
+  } else {
+    art.removeAttribute("src"); bg.style.backgroundImage = "";
+    $("#dock").classList.remove("has-art");
+  }
 }
 function showNowPlaying(oi) {
   const row = order[oi], c = CAT[row];
   document.body.style.setProperty("--amb-hue", hue(c.genre));  // the atmosphere travels with the mood
   document.querySelectorAll(".stop").forEach((s) => { const i = +s.dataset.oi; s.classList.toggle("current", i === oi); s.classList.toggle("past", i < oi); });
   document.querySelector(`.stop[data-oi="${oi}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-  $("#dock").hidden = false; $("#dock-n").textContent = oi + 1; $("#dock-title").textContent = `${c.name} — ${c.artist}`;
+  $("#dock").hidden = false;
+  $("#dock").style.setProperty("--hue", hue(c.genre));
+  $("#dock-n").textContent = oi + 1;
+  $("#dock-title").textContent = c.name;
+  $("#dock-artist").textContent = c.artist;
+  setDockArt(c.uri);
+  // The next few stops are already rendered; make sure their covers are on the way.
+  fetchArt(order.slice(oi, oi + 12).map((r) => CAT[r]?.uri).filter(Boolean));
 }
 async function playOi(oi) {
   if (oi >= order.length) { if (!(await extend())) return; }   // auto-extend → infinite
@@ -556,20 +846,20 @@ function applyPermalink() {
   if (n) SRC_NAME = n;
   renderSeeds();
   const dropped = Math.floor(s.length / ID_LEN) - rows.length;
-  setPlayMsg(`journey link loaded · ${rows.length} seeds${dropped ? ` (${dropped} not in this library)` : ""}`);
+  setPlayMsg(`Journey link loaded — ${rows.length} starting track${rows.length !== 1 ? "s" : ""}${dropped ? `, ${dropped} not in this library` : ""}.`);
   return true;
 }
 
 async function copyPermalink() {
   const url = permalink();
-  if (!url) { setPlayMsg("pick at least one seed first"); return; }
+  if (!url) { setPlayMsg("Choose at least one track first."); return; }
   try {
     await navigator.clipboard.writeText(url);
-    setPlayMsg(`link copied · ${seeds.length} seeds, ${engine()}, cap ${artistCap() || "off"}`);
+    setPlayMsg(`Link copied — ${seeds.length} starting track${seeds.length !== 1 ? "s" : ""}, the ${ENGINES[engine()].name} model. Whoever opens it hears the same journey.`);
   } catch (_) {
     // Clipboard needs a secure context / permission; fall back to showing it.
     location.hash = url.slice(url.indexOf("#") + 1);
-    setPlayMsg("link is in the address bar — copy it from there");
+    setPlayMsg("The link is in the address bar — copy it from there.");
   }
 }
 
@@ -604,7 +894,7 @@ function seedUri(tok) {
 }
 $("#load").addEventListener("click", async () => {
   const val = ($("#paste").value || "").trim();
-  if (!val) { $("#loadmsg").textContent = "paste a Spotify playlist, album or track link"; return; }
+  if (!val) { $("#loadmsg").textContent = "Paste a Spotify playlist, album or track link first."; return; }
   // fast path (no service needed): bare track links we already have get seeded instantly
   const toks = val.split(/[\n,\s]+/).filter(Boolean);
   const uris = toks.map(seedUri);
@@ -631,7 +921,7 @@ $("#load").addEventListener("click", async () => {
     renderSeeds();
     $("#loadmsg").textContent = `${data.name ? `“${data.name}” — ` : ""}seeded ${known + embedded} track${known + embedded !== 1 ? "s" : ""}${embedded ? ` (${embedded} embedded on the fly)` : ""}${skipped ? `, ${skipped} unavailable` : ""}`;
   } catch (e) {
-    $("#loadmsg").textContent = `couldn't resolve that link — run the app via the Worker (npx wrangler dev; see README). ${e.message}`;
+    $("#loadmsg").textContent = `Couldn't read that link. Check it's a Spotify playlist, album or track link. (${e.message})`;
   } finally { $("#load").disabled = false; }
 });
 // the CF Worker hosts this page, so /api/resolve is same-origin
@@ -972,7 +1262,7 @@ function openLib() {
 function closeLib() { $("#lib").hidden = true; document.body.style.overflow = ""; }
 $("#browse").addEventListener("click", async () => {
   await configReady;   // never report "no credentials" just because we asked too early
-  if (!CLIENT_ID) { $("#loadmsg").textContent = "deploy with Spotify credentials to browse your account"; return; }
+  if (!CLIENT_ID) { $("#loadmsg").textContent = "Browsing your Spotify isn't set up on this site — paste a link instead."; return; }
   $("#loadmsg").textContent = "connecting to Spotify…";
   const t = await browseToken("browse");
   if (!t) return;   // redirecting for consent
@@ -1101,8 +1391,8 @@ async function createPlaylist(token, uris, name) {
 function playlistName() { return `${SRC_NAME ? SRC_NAME + " " : ""}∞ Infinite Playlist`; }
 
 async function saveToSpotify(n) {
-  if (!CLIENT_ID) { $("#savemsg").textContent = "deploy with Spotify credentials to enable saving"; return; }
-  if (!order.length) { $("#savemsg").textContent = "start a journey first."; return; }
+  if (!CLIENT_ID) { $("#savemsg").textContent = "Saving to Spotify isn't set up on this site."; return; }
+  if (!order.length) { $("#savemsg").textContent = "Start a journey first."; return; }
   $("#save").disabled = true; $("#savemsg").textContent = "preparing the first " + n + " tracks…";
   try {
     await ensureLength(n);

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Infinite Playlist — a mood journey</title>
   <meta name="description" content="Seed a few tracks and travel an endless journey in the same mood — different songs, different artists, playing as you go." />
+  <meta name="theme-color" content="#1a1a24" />
   <link rel="stylesheet" href="./styles.css" />
   <script src="https://open.spotify.com/embed/iframe-api/v1" async></script>
   <script src="https://sdk.scdn.co/spotify-player.js" async></script>
@@ -14,62 +15,91 @@
   <main class="wrap">
     <header class="hero">
       <h1>Infinite&nbsp;Playlist</h1>
-      <p class="tag">Queue up <em>anything</em> from your Spotify — songs, albums, whole playlists. Then travel an endless journey <em>through your own library</em> that holds the mood while the songs and artists keep changing.</p>
+      <p class="tag">Give it a few songs you're in the mood for. A model trained on how you actually listen then plays your own library forever, holding that mood while the songs and artists keep changing.</p>
       <a class="hero-link" href="./how">How it works&nbsp;→</a>
     </header>
 
-    <section class="seedbox" aria-label="Seed the journey">
-      <label class="seed-label">Build the seed from your own Spotify
-        <span>— browse your playlists, albums and liked songs, drop what you feel like into a queue, then launch the model on all of it.</span></label>
-      <div class="controls first-row">
-        <button id="browse" class="go" type="button">Browse my Spotify</button>
-        <button id="surprise" class="ghost" type="button">Surprise me</button>
-        <span id="loadmsg" class="hint"></span>
-      </div>
+    <section class="seedbox" aria-label="Set up the journey">
+      <ol class="steps">
 
-      <div id="seeds" class="seeds" aria-label="Seed tracks"></div>
+        <li class="step">
+          <h2 class="step-h"><span class="step-n">1</span> Choose what it starts from</h2>
+          <p class="step-sub">Songs, albums or whole playlists from your Spotify. The model reads the mood of everything you pick — it never plays these back, it travels <em>outward</em> from them.</p>
 
-      <details class="loadbox">
-        <summary>or paste a Spotify link (works without signing in)</summary>
-        <textarea id="paste" class="paste" spellcheck="false"
-                  placeholder="https://open.spotify.com/playlist/…"></textarea>
-        <div class="controls">
-          <button id="load" class="ghost" type="button">Load link</button>
-        </div>
-      </details>
+          <div class="controls">
+            <button id="browse" class="go" type="button">Browse my Spotify</button>
+            <button id="surprise" class="ghost" type="button">Surprise me</button>
+            <span id="loadmsg" class="hint"></span>
+          </div>
 
-      <details class="loadbox">
-        <summary>or add individual songs from your library</summary>
-        <div class="search">
-          <input id="q" type="search" autocomplete="off" spellcheck="false"
-                 placeholder="Search any song or artist…" aria-label="Search tracks" />
-          <ul id="results" class="results" role="listbox" hidden></ul>
-        </div>
-      </details>
+          <div id="seeds" class="seeds" aria-label="Chosen starting tracks"></div>
 
-      <div class="controls start-row">
-        <button id="go" class="go" disabled>Start the journey</button>
-        <label class="playmode" title="Play full tracks on this tab (needs Spotify Premium). Off = 30-second previews, no login.">
-          <input type="checkbox" id="fulltoggle" checked /> <span>Full tracks</span>
-          <em class="premium-note">Premium</em>
-        </label>
-        <label class="variety" title="Which model drives the journey. Both run in your browser over the same track vectors, so switching costs one small download. Dual-tower measured better at holding the seed's mood while covering more genres, and it moves at the pace you really listen at; GRU — original is the previous behaviour, kept for comparison.">
-          engine
-          <select id="engine">
-            <option value="dual" selected>Dual-tower — more variety, holds the vibe</option>
-            <option value="gru">GRU — original</option>
-          </select>
-        </label>
-        <label class="variety" title="How many tracks one artist may take in the journey. Explore crosses your library; Continue follows the artist pairings you actually make.">
-          shape
-          <select id="artistcap">
-            <option value="1" selected>Explore — one track per artist</option>
-            <option value="3">Continue — up to 3 per artist</option>
-            <option value="2">Balanced — up to 2 per artist</option>
-            <option value="0">Blocks — uncapped (can sit on one artist)</option>
-          </select>
-        </label>
-        <button id="permalink" class="linkbtn" type="button" title="Copy a link that reproduces this exact journey — the seeds, engine and shape. Both engines walk deterministically, so anyone opening it gets the same playlist.">link</button>
+          <details class="loadbox">
+            <summary>Rather not sign in? Paste a link instead</summary>
+            <textarea id="paste" class="paste" spellcheck="false"
+                      placeholder="https://open.spotify.com/playlist/…"></textarea>
+            <div class="controls tight">
+              <button id="load" class="ghost" type="button">Load link</button>
+            </div>
+          </details>
+
+          <details class="loadbox">
+            <summary>Or search the library this model knows</summary>
+            <div class="search">
+              <input id="q" type="search" autocomplete="off" spellcheck="false"
+                     placeholder="Search any song or artist…" aria-label="Search tracks" />
+              <ul id="results" class="results" role="listbox" hidden></ul>
+            </div>
+          </details>
+        </li>
+
+        <li class="step">
+          <h2 class="step-h"><span class="step-n">2</span> Choose how it plays</h2>
+
+          <div class="opts">
+            <div class="opt">
+              <label class="opt-k" for="fulltoggle">Sound</label>
+              <label class="opt-ctl playmode">
+                <input type="checkbox" id="fulltoggle" checked />
+                <span>Play full tracks</span>
+                <em class="premium-note">Premium</em>
+              </label>
+              <p class="opt-h">Turn this off for 30-second previews with no Spotify sign-in.</p>
+            </div>
+
+            <div class="opt">
+              <label class="opt-k" for="artistcap">Same artist, again</label>
+              <select id="artistcap" class="opt-ctl">
+                <option value="1" selected>Never — a new artist every track</option>
+                <option value="3">Up to 3 times</option>
+                <option value="2">Up to twice</option>
+                <option value="0">As often as it likes</option>
+              </select>
+              <p class="opt-h">Fewer repeats crosses more of your library; more repeats follows the artist pairings you actually make.</p>
+            </div>
+          </div>
+
+          <details class="advbox">
+            <summary>Advanced — pick the model that drives the journey</summary>
+            <p class="adv-lede">Four trained models ship here. They share the same track vectors, so switching costs one small download and can even be done mid-journey.</p>
+            <select id="engine" class="opt-ctl wide" aria-label="Model">
+              <optgroup label="Recommended">
+                <option value="dual" selected>Balanced — holds the mood, keeps moving</option>
+                <option value="gru">Original — smaller steps, stays nearer the start</option>
+              </optgroup>
+              <optgroup label="Research arms — shipped to be judged by ear, not improvements">
+                <option value="bank_e1">Regularized — same mood, wanders further late on</option>
+                <option value="bank_v1">Triple tower — the metrics rated this one worst</option>
+              </optgroup>
+            </select>
+            <p id="enginenote" class="adv-note"></p>
+          </details>
+        </li>
+      </ol>
+
+      <div class="controls launch">
+        <button id="go" class="go big" disabled>Start the journey</button>
+        <button id="permalink" class="linkbtn" type="button" title="Copy a link that reproduces this exact journey — the same starting tracks, model and artist setting. Every model walks deterministically, so whoever opens it hears the identical playlist.">Copy link</button>
         <span id="playmsg" class="hint"></span>
       </div>
     </section>
@@ -90,26 +120,32 @@
     </div>
 
     <section id="journey" class="journey" aria-live="polite">
-      <p class="empty">Queue up some music from your Spotify above — or hit <b>Surprise me</b> — to begin.</p>
+      <p class="empty">Pick some music above — or hit <b>Surprise me</b> — and the journey appears here, one stop at a time.</p>
     </section>
 
 
     <!-- sticky now-playing player: the Spotify embed lives here -->
     <div id="dock" class="dock" hidden>
+      <div id="dock-bg" class="dock-bg" aria-hidden="true"></div>
       <div class="dock-inner">
+        <img id="dock-art" class="dock-art" alt="" />
         <div class="dock-meta">
-          <span class="dock-eyebrow">now playing · stop <b id="dock-n">1</b></span>
+          <span class="dock-eyebrow">stop <b id="dock-n">1</b></span>
           <span class="dock-title" id="dock-title"></span>
+          <span class="dock-artist" id="dock-artist"></span>
         </div>
-        <button id="dock-toggle" class="ghost small dock-toggle" title="Play / pause" hidden>⏸</button>
-        <div id="embed" class="embed"></div>
+        <button id="dock-toggle" class="ghost small dock-toggle" title="Play / pause" aria-label="Play or pause" hidden>⏸</button>
+        <!-- Spotify's iframe API REPLACES the element it is handed, id and class
+             included, so #embed cannot be the thing we show/hide or style. -->
+        <div id="embedwrap" class="embed"><div id="embed"></div></div>
         <div id="dock-prog-wrap" class="dock-prog-wrap" hidden><div id="dock-prog" class="dock-prog"></div></div>
-        <button id="dock-next" class="ghost small" title="Next stop">next ›</button>
+        <button id="dock-next" class="ghost small" title="Skip to the next stop">next ›</button>
       </div>
     </div>
 
     <footer class="foot">
-      <span id="meta"></span> · mood-coherent, from your library, no repeats, no eager same-artist runs · 30-second previews, or full tracks on Spotify Premium · <a href="./how">how it works ↗</a>
+      <p id="meta"></p>
+      <p>Every stop is a song you already own, never the same track twice. <a href="./how">How it works ↗</a></p>
     </footer>
   </main>
 
@@ -145,15 +181,15 @@
           </div>
         </section>
 
-        <aside class="cart" aria-label="Queue">
-          <h3>Queue <span id="cart-count" class="cart-count">0 tracks</span></h3>
+        <aside class="cart" aria-label="Chosen music">
+          <h3>Starting from <span id="cart-count" class="cart-count">0 tracks</span></h3>
           <div id="cart-items" class="cart-items">
-            <p class="cart-empty">Nothing queued yet. Add songs, albums or whole playlists — they all become the model's input.</p>
+            <p class="cart-empty">Nothing chosen yet. Add songs, albums or whole playlists — everything you add shapes the mood the journey holds.</p>
           </div>
-          <label class="cart-opt" title="Interleave the items round-robin instead of playing them one block after another">
-            <input type="checkbox" id="cart-mix" /> <span>Intersperse items</span>
+          <label class="cart-opt" title="Interleave the items round-robin instead of reading them one block after another">
+            <input type="checkbox" id="cart-mix" /> <span>Mix the items together</span>
           </label>
-          <button id="cart-go" class="go" type="button" disabled>Launch the model</button>
+          <button id="cart-go" class="go" type="button" disabled>Start the journey</button>
           <span id="cart-msg" class="hint"></span>
         </aside>
       </div>

@@ -4,57 +4,88 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Infinite Playlist — how it works</title>
-  <meta name="description" content="The model, the latent space, the generation loop, and the cold-start path behind Infinite Playlist." />
+  <meta name="description" content="The models, the latent space, the generation loop, what was measured, and the cold-start path behind Infinite Playlist." />
+  <meta name="theme-color" content="#1a1a24" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <main class="wrap doc">
     <p class="doc-back"><a href="./">← back to the player</a></p>
     <h1>How it works</h1>
-    <p class="doc-lede">You seed a mood; a sequential neural net walks your own library through it. Below is the actual machinery — the model, the space it reasons in, the generation loop, and how a song you don't own gets pulled into that space.</p>
+    <p class="doc-lede">You give it a mood; a sequential neural net walks your own library through it, one track at a time, forever. Below is the actual machinery — the models, the space they reason in, the generation loop, what was and wasn't measured about them, and how a song you don't own gets pulled into that space.</p>
 
     <section class="doc-sec">
-      <h2>1 · The model — an anti-eager next-track GRU</h2>
-      <p>The engine is <code>seq-nexttrack</code>, a single-layer <b>GRU</b> from the lab's next-track experiments. It doesn't classify over a track vocabulary; it <b>regresses the next track's embedding</b>. Given the sequence of latents played so far it emits a predicted next-latent, trained with a cosine / in-batch InfoNCE objective against the true next track.</p>
+      <h2>The short version</h2>
+      <p>The tracks you pick are turned into vectors and averaged into a <b>mood anchor</b>. A model reads the sequence played so far and predicts where the <em>next</em> track should sit in that same space. The app retrieves the nearest song in your library that hasn't played yet, plays it, feeds it back into the model, and repeats. Nothing is pre-computed: the playlist is being written while you listen, and it never ends.</p>
+    </section>
+
+    <section class="doc-sec">
+      <h2>1 · The model — anti-eager next-track prediction</h2>
+      <p>The engine family is <code>seq-nexttrack</code>, from the lab's next-track experiments. It doesn't classify over a track vocabulary; it <b>regresses the next track's embedding</b>. Given the sequence of latents played so far it emits a predicted next-latent, trained with a cosine / in-batch InfoNCE objective against the true next track.</p>
       <p>Left alone, a next-track model trained on real listening is <em>eager</em>: people play albums front-to-back, so the cheapest way to be "right" is to predict the rest of the current album. We train against that with an <b>anti-eager penalty</b> (<code>eager_beta = 0.1</code>): a term of the form <code>β · relu(cos(pred, x_current) − margin)</code> that punishes the prediction for being a near-copy of the track currently playing. The result is a model that stays in the mood without parroting the record — a GRU (short memory) beats an LSTM here precisely because the goal is <em>coherent drift</em>, not long-range album structure.</p>
     </section>
 
     <section class="doc-sec">
       <h2>2 · The space — a 192-d content latent</h2>
-      <p>Both the GRU's input and its retrieval target live in one space: <b>PCA-192</b> over a rich per-track feature vector — a 384-d multilingual text embedding of the track's metadata (<code>paraphrase-multilingual-MiniLM-L12-v2</code>) concatenated with normalized numeric, acoustic, and one-hot categorical features, projected to 192 principal components (~99% variance retained). Every track in the catalog is one unit-norm point here; in the browser they're shipped as <b>int16-quantized</b> latents (<code>latents.i16</code>) and dequantized on load.</p>
+      <p>Model input and retrieval target live in one space: <b>PCA-192</b> over a rich per-track feature vector — a 384-d multilingual text embedding of the track's metadata (<code>paraphrase-multilingual-MiniLM-L12-v2</code>) concatenated with normalized numeric, acoustic, and one-hot categorical features, projected to 192 principal components (~99% variance retained). Every track in the catalog is one unit-norm point here; in the browser they're shipped as <b>int16-quantized</b> latents (<code>latents.i16</code>) and dequantized on load.</p>
     </section>
 
     <section class="doc-sec">
       <h2>3 · The generation loop</h2>
-      <p>Playback is autoregressive:</p>
-      <pre class="doc-code">seq ← seed latents
+      <p>Playback is autoregressive, and three terms decide each step:</p>
+      <pre class="doc-code">seq    ← seed latents
+anchor ← centroid of the seed's dominant mood cluster
 loop:
-  p    ← GRU(seq)                       # predicted next-latent, L2-normalized
-  cand ← argmax over UNPLAYED library tracks of  cos(latent, p) − β·[same artist]
+  p    ← model(seq)                     # predicted next-latent, L2-normalized
+  cand ← argmax over UNPLAYED library tracks of
+             cos(latent, p)             # go where the model points
+           + α · cos(latent, anchor)    # …but stay in the seed's mood
+           − σ · cos(latent, prev)      # …and don't creep: take a real step
+         subject to  a hard per-artist cap
   seq  ← seq ⧺ latent(cand)             # feed the choice back in
   emit cand</pre>
-      <p>Two constraints shape the walk. Retrieval is restricted to <b>your library</b> (the discovery pool is seed-only), so the journey is always songs you own. And a <b>hard per-artist cap</b> bounds how many tracks one artist may take — the "shape" control. This used to be a soft penalty subtracted from the cosine score, but measurement showed that knob was effectively binary: at zero you got artist blocks (runs of up to 13 tracks), and at <em>any</em> setting above 0.25 every 30-step walk came back with 30 different artists. There was no middle. A cap reaches what the slider could not — <em>Explore</em> (1 per artist) crosses your library, <em>Continue</em> (3) follows the artist pairings you actually make — and, unlike a penalty, it cannot be outscored by a confident model. Because the chosen latent is fed back in, the context grows and the mood can evolve smoothly rather than snapping around a fixed seed centroid.</p>
+      <p><b>The anchor (α)</b> is the centroid of the seed's dominant sub-cluster — medoid plus everything at least as similar to it as average, which drops outlier sub-genres so one stray track can't drag the journey off. It applies to <em>any</em> seed, including a single track, where it is just that track's own vector. Gating it on larger seeds was measured worse on 1-track seeds (mood retention 0.064 gated vs 0.671 always-anchored).</p>
+      <p><b>The stride (σ)</b> exists because the walk was measured taking steps <b>2.5× tighter</b> than the user's real listening: median consecutive-track cosine 0.66 against a real 0.26. That is what "lots of artists but somehow flat" actually was — many small, safe moves. Subtracting similarity to the track just played makes each step a real move, while the anchor still holds the neighbourhood. The two are orthogonal: the anchor says where to stay, the stride says don't creep.</p>
+      <p><b>The artist cap</b> is a hard constraint, not a score penalty. That used to be a soft term subtracted from the cosine, but measurement showed the knob was effectively binary: at zero you got artist blocks (runs of up to 13 tracks), and at <em>any</em> setting above 0.25 every 30-step walk came back with 30 different artists. There was no middle. A cap reaches what the slider could not — "never" crosses your library, "up to 3" produces 16–23 artists with runs of 2–3 — and, unlike a penalty, it cannot be outscored by a confident model. If a cap genuinely exhausts your library mid-journey, the step retries uncapped rather than ending early.</p>
+      <p>Retrieval is restricted to <b>your library</b> (the discovery pool is seed-only), so every stop is a song you own. Because the chosen latent is fed back in, the context grows and the mood can evolve smoothly rather than orbiting a fixed centroid.</p>
     </section>
 
     <section class="doc-sec">
-      <h2>4 · Cold-start — seeds you don't own</h2>
-      <p>Seed tracks already in the catalog map straight to their baked latent. A seed that <em>isn't</em> — an arbitrary track in a pasted playlist — has to be placed into the same PCA-192 space with no training example. We can't run the original MiniLM featurizer in a Worker, so we learn a bridge:</p>
+      <h2>4 · Four models, and what was actually measured</h2>
+      <p>All four run in your browser over the same latents, so switching costs one small graph download — you can even switch mid-journey and the next batch comes from the new model, seeded by everything played so far. Each ships with its own tuned α and σ, written into the bake rather than the code.</p>
+      <p>The comparisons come from a matched-sample head-to-head over <b>40 identical held-out sessions with paired bootstrap confidence intervals</b>. Four things are scored per walk: <em>vibe</em> (does it hold the seed's mood), <em>genres</em> (how much of the library it crosses), <em>stride error</em> (does it step like a real listener), and <em>drift</em> (how far it travels by the end).</p>
+      <ul class="doc-list">
+        <li><b>Balanced</b> — a dual-tower model reading the latent sequence and its running mean. Against the previously shipped single GRU it gave stride error −0.255 (CI &lt; 0), genres +1.50 (CI &gt; 0) and drift +0.035 (CI &gt; 0), while vibe straddled zero at +0.001 — held, not traded. It is the default.</li>
+        <li><b>Original</b> — the single GRU that shipped first, kept for comparison. Its stride stays at 0 deliberately: pushing it to the dual tower's stride <em>costs</em> vibe (−0.041, CI &lt; 0).</li>
+        <li><b>Regularized</b> — the same tower pair with dropout actually applied (at <code>fusion_layers = 0</code> the shipped Balanced engine applies none, which is a defect, though fixing it buys no recall — a 3-seed grid excluded that gain at +4 / −4 / −13 hits). Measured at exactly the cell it runs in: vibe straddles at +0.0024 with stride error improving at the same time, but drift comes out −0.0226 (CI &lt; 0) at the secondary cell. Not a champion claim.</li>
+        <li><b>Triple tower</b> — three parallel towers, one of them reading the session centroid. The paired CIs <b>refuted</b> it: vibe −0.0174 (CI &lt; 0), genres −1.7250 (CI &lt; 0), and the lowest one-shot recall in its batch. It is shipped anyway, and honestly labelled, for one reason: it runs here at a cell (α 0.8 / σ 0.5) that the campaign never measured for this arm, where a single-seed check scored it best of the four. Unresolved.</li>
+      </ul>
+      <p>The last two are in the picker <em>because</em> the metrics disagree about them. If the arm the numbers rated worst sounds fine to you, that is evidence about the metric, not just about the model — and three campaigns' verdicts rest on that metric.</p>
+    </section>
+
+    <section class="doc-sec">
+      <h2>5 · Cold-start — seeds you don't own</h2>
+      <p>Seed tracks already in the catalog map straight to their baked latent. A seed that <em>isn't</em> — an arbitrary track in a pasted playlist, or anything from your account the model has never seen — has to be placed into the same PCA-192 space with no training example. We can't run the original MiniLM featurizer in a Worker, so we learn a bridge:</p>
       <ul class="doc-list">
         <li>The Worker fetches the track's Spotify metadata + <b>ReccoBeats</b> acoustic features and builds the same <code>contentDoc</code> text used at training time.</li>
         <li><b>Workers AI</b> embeds that doc with <code>@cf/baai/bge-m3</code> (1024-d).</li>
         <li>A small MLP — <code>[bge-m3(1024) ⊕ numeric ⊕ acoustic ⊕ missing-flags ⊕ genre-multihot ⊕ album-onehot] → 256 → 192</code>, then L2-normalize — maps that to a PCA-192 latent. It's baked offline (a cosine-loss fit over the corpus) and shipped as <code>projector.bin</code>, run in a <b>Rust→WASM</b> core inside the Worker.</li>
       </ul>
-      <p>The projector reconstructs a track's true PCA-192 latent at <b>~0.995 cosine</b> (self-recall@1 ≈ 0.999 on a held sample), so a cold-started seed lands essentially where it belongs, and the GRU can walk from it.</p>
+      <p>The projector reconstructs a track's true PCA-192 latent at <b>~0.995 cosine</b> (self-recall@1 ≈ 0.999 on a held sample), so a cold-started seed lands essentially where it belongs and the model can walk from it. Cold-started tracks seed the mood but never appear as stops — the journey still only plays your library.</p>
     </section>
 
     <section class="doc-sec">
-      <h2>5 · Runtime &amp; architecture</h2>
-      <p>The GRU is exported to <b>ONNX</b> and runs entirely in your browser via <b>onnxruntime-web</b> (WASM) — retrieval is a plain matrix–vector product over the in-memory latents, so generation is instant and offline after load. The backend is a <b>Cloudflare Worker</b> (TypeScript) that serves the static app and does the two things a page can't: expand a Spotify playlist/album/track link (client-credentials) and cold-start unknown seeds (Workers AI + the Rust projector). Seeding itself is a <b>library navigator</b>: sign in and browse your own playlists, saved albums, liked songs, top/recent tracks and Spotify-wide search, dropping whatever you like into a <b>queue</b>. On launch the queue is expanded (playlists and albums become their tracks — optionally <em>interspersed</em> round-robin rather than block after block), deduped, capped, and the whole thing becomes the GRU's seed sequence; anything the model has never seen is cold-started on the way in. "Save to Spotify" is a browser-side PKCE flow that creates a real playlist from the first N stops. Playback is 30-second previews via Spotify's iframe API.</p>
+      <h2>6 · Runtime &amp; architecture</h2>
+      <p>The models are exported to <b>ONNX</b> and run entirely in your browser via <b>onnxruntime-web</b> (WASM) — retrieval is a plain matrix–vector product over the in-memory latents, so generation is instant and offline after load. Nothing you pick is sent anywhere to be scored.</p>
+      <p>The backend is a <b>Cloudflare Worker</b> (TypeScript) that serves the static app and does the three things a page can't: expand a Spotify playlist/album/track link, cold-start unknown seeds (Workers AI + the Rust projector), and look up album covers. Artwork uses <em>client</em> credentials rather than your token, which is why the journey has sleeves even in preview mode before anyone signs in; anything Spotify has no cover for keeps a mood-tinted tile.</p>
+      <p>Seeding is a <b>library navigator</b>: sign in and browse your own playlists, saved albums, liked songs, top/recent tracks and Spotify-wide search, dropping whatever you like into a list. On launch that list is expanded (playlists and albums become their tracks — optionally interleaved round-robin rather than block after block), deduped, capped, and handed to the model as one seed sequence.</p>
+      <p>Playback has two modes: <b>30-second previews</b> through Spotify's iframe API, with no login at all, or <b>full tracks</b> through the Web Playback SDK, which turns this tab into a Spotify Connect device (Premium only). "Save to Spotify" is a browser-side PKCE flow that creates a real playlist from the first N stops, extending the journey first if it isn't that long yet.</p>
+      <p>Every model here walks <b>deterministically</b> — greedy argmax, fixed seed order, no sampling — so a journey is fully described by its recipe. That's what "Copy link" shares: the seed track ids, the model and the artist setting, packed into the URL fragment so it never reaches a server. Whoever opens it hears the identical playlist. It also means the playlist is reproducible rather than random, which is the trade: no sampling to loosen the walk, because the stride term does that job without breaking the guarantee.</p>
     </section>
 
     <section class="doc-sec">
-      <h2>6 · A known bias</h2>
-      <p>Because retrieval favours the nearest neighbour and the anti-artist term rewards dense clusters of distinct artists, the walk has a mild pull toward sonically homogeneous regions (steady-tempo electronic / house-family sits in one such cluster) — measured at roughly <b>1.5–1.6× over-representation</b> versus a library's own genre mix. It is not a universal attractor: seeds in rock, metal, classical, jazz, ambient, etc. stay put. Turning the variety slider up counters the lingering.</p>
+      <h2>7 · A known bias</h2>
+      <p>Because retrieval favours the nearest neighbour and the artist cap rewards dense clusters of distinct artists, the walk has a mild pull toward sonically homogeneous regions (steady-tempo electronic / house-family sits in one such cluster) — measured at roughly <b>1.5–1.6× over-representation</b> versus a library's own genre mix. It is not a universal attractor: seeds in rock, metal, classical, jazz, ambient and so on stay put. Loosening the artist cap counters the lingering, as does seeding with more tracks from further apart.</p>
     </section>
 
     <p class="doc-back"><a href="./">← back to the player</a></p>

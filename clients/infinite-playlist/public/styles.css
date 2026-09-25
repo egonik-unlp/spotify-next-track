@@ -45,8 +45,57 @@ body::before {
 .hero-link { display: inline-flex; align-items: center; gap: 0.4ch; margin: 0 0 1.6rem; padding: 0.4rem 0.9rem; border-radius: 999px; border: 1px solid hsl(var(--amb-hue) 45% 50% / 0.5); background: hsl(var(--amb-hue) 45% 22% / 0.35); color: hsl(var(--amb-hue) 60% 80%); font-size: 0.9rem; font-weight: 600; text-decoration: none; transition: background 0.18s, border-color 0.18s, transform 0.18s cubic-bezier(0.2,0.8,0.2,1); }
 .hero-link:hover { background: hsl(var(--amb-hue) 45% 28% / 0.5); border-color: hsl(var(--amb-hue) 55% 60% / 0.8); transform: translateY(-1px); }
 
-/* ---- seed box ---- */
-.seedbox { background: oklch(0.21 0.03 285 / 0.6); backdrop-filter: blur(8px); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; }
+/* ---- the setup panel ----
+   Everything needed to start used to sit in one flat row of controls, which read
+   as a settings screen rather than a sequence. It IS a sequence — choose music,
+   choose playback, go — so it is numbered, and the model picker (the part only a
+   few visitors care about) is folded away behind a disclosure. */
+.seedbox { background: oklch(0.21 0.03 285 / 0.6); backdrop-filter: blur(8px); border: 1px solid var(--line); border-radius: var(--radius); padding: 0.3rem 1.15rem 1.15rem; }
+.steps { list-style: none; margin: 0; padding: 0; }
+.step { padding: 1.15rem 0; }
+.step + .step { border-top: 1px solid var(--line); }
+.step-h { display: flex; align-items: center; gap: 0.7ch; font-size: 1.02rem; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 0.4rem; }
+.step-n {
+  display: grid; place-items: center; width: 1.55rem; height: 1.55rem; flex: none;
+  border-radius: 50%; font-size: 0.78rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: hsl(var(--amb-hue) 62% 84%); background: hsl(var(--amb-hue) 45% 30% / 0.55);
+  box-shadow: inset 0 0 0 1px hsl(var(--amb-hue) 45% 58% / 0.45);
+  transition: --amb-hue 1.6s cubic-bezier(0.4,0,0.2,1);
+}
+.step-sub { color: var(--ink-dim); font-size: 0.9rem; margin: 0 0 1rem; max-width: 58ch; text-wrap: pretty; }
+.step-sub em { color: var(--ink); font-style: normal; }
+
+/* the two playback choices, side by side while there's room */
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1.15rem 1.75rem; }
+.opt { display: grid; gap: 0.42rem; align-content: start; }
+.opt-k { font-size: 0.85rem; font-weight: 600; color: var(--ink); }
+.opt-h { color: var(--ink-dim); font-size: 0.8rem; line-height: 1.45; margin: 0; text-wrap: pretty; }
+select.opt-ctl {
+  width: 100%; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 8px; padding: 0.5rem 0.6rem; font: inherit; font-size: 0.9rem; cursor: pointer;
+  transition: border-color 0.15s;
+}
+select.opt-ctl:hover { border-color: var(--ink-dim); }
+select.opt-ctl:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.playmode.opt-ctl { justify-self: start; min-height: 2.45rem; }   /* sits level with the select beside it */
+
+/* the model picker — real research arms live in here, so it stays out of the way */
+.advbox { margin-top: 1.35rem; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.18 0.025 285 / 0.55); padding: 0 0.85rem; }
+.advbox summary { color: var(--ink-dim); font-size: 0.86rem; cursor: pointer; padding: 0.65rem 0; }
+.advbox summary:hover { color: var(--ink); }
+.advbox[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 0.85rem; }
+.advbox > :last-child { margin-bottom: 0.85rem; }
+.adv-lede { color: var(--ink-dim); font-size: 0.83rem; line-height: 1.5; margin: 0 0 0.7rem; text-wrap: pretty; }
+.adv-note {
+  color: var(--ink-dim); font-size: 0.78rem; line-height: 1.6; text-wrap: pretty;
+  margin: 0.7rem 0 0; padding: 0.6rem 0.75rem; background: var(--surface-2); border-radius: 8px;
+}
+.adv-note:empty { display: none; }
+
+.launch { padding-top: 1.2rem; border-top: 1px solid var(--line); }
+.go.big { padding: 0.8rem 1.6rem; font-size: 1.05rem; }
+.launch .hint { flex-basis: 100%; margin: 0; }
+
 .search { position: relative; }
 #q { width: 100%; padding: 0.75rem 0.9rem; font-size: 1rem; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; outline: none; }
 #q:focus { border-color: var(--accent); }
@@ -59,21 +108,14 @@ body::before {
 .chip { display: inline-flex; align-items: center; gap: 0.5ch; background: var(--surface-2); border: 1px solid var(--line); padding: 0.3rem 0.35rem 0.3rem 0.7rem; border-radius: 999px; font-size: 0.9rem; }
 .chip .x { cursor: pointer; border: 0; background: transparent; color: var(--ink-dim); font-size: 1.1rem; line-height: 1; padding: 0 0.3rem; }
 .chip .x:hover { color: var(--ink); }
-.controls { display: flex; align-items: center; gap: 1rem; margin-top: 1.1rem; flex-wrap: wrap; }
+.controls { display: flex; align-items: center; gap: 0.85rem 1rem; margin-top: 0.9rem; flex-wrap: wrap; }
+.controls.tight { margin-top: 0.6rem; }
 .go { background: var(--accent); color: var(--accent-ink); font-weight: 650; border: 0; border-radius: 9px; padding: 0.65rem 1.4rem; font-size: 1rem; cursor: pointer; transition: transform 0.14s cubic-bezier(0.2,0.8,0.2,1), opacity 0.14s; }
 .go:hover:not(:disabled) { transform: translateY(-1px); }
 .go:disabled { opacity: 0.4; cursor: not-allowed; }
 .ghost { background: transparent; color: var(--ink-dim); border: 1px solid var(--line); border-radius: 9px; padding: 0.6rem 1rem; cursor: pointer; }
 .ghost:hover { color: var(--ink); border-color: var(--ink-dim); }
 .ghost.small { padding: 0.35rem 0.7rem; font-size: 0.85rem; }
-.variety { margin-left: auto; color: var(--ink-dim); font-size: 0.85rem; display: flex; align-items: center; gap: 0.6ch; }
-.variety input { accent-color: var(--accent); }
-.variety select {
-  background: var(--panel, #16161a); color: var(--ink); border: 1px solid var(--line, #2a2a31);
-  border-radius: 6px; padding: 0.2em 0.5ch; font: inherit; font-size: 0.85rem; cursor: pointer;
-}
-.variety select:hover { color: var(--ink); border-color: var(--accent); }
-.variety select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .linkbtn {
   background: transparent; color: var(--ink-dim); border: 1px solid var(--line, #2a2a31);
   border-radius: 6px; padding: 0.2em 0.8ch; font: inherit; font-size: 0.85rem; cursor: pointer;
@@ -84,23 +126,15 @@ body::before {
 .playmode input { accent-color: var(--accent); width: 1.05em; height: 1.05em; }
 .playmode:hover { color: var(--ink); }
 .premium-note { font-style: normal; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0.05em 0.4ch; opacity: 0.8; }
-.start-row .hint { flex-basis: 100%; margin-top: 0.2rem; }
-/* primary seed: paste a playlist */
-.seed-label { display: block; color: var(--ink); font-weight: 600; margin: 0 0 0.55rem; }
-.seed-label span { color: var(--ink-dim); font-weight: 400; font-size: 0.9rem; }
 .paste { width: 100%; min-height: 3.1rem; resize: vertical; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 0.8rem 0.9rem; font: inherit; font-size: 0.95rem; outline: none; }
 .paste:focus { border-color: var(--accent); }
 .paste::placeholder { color: var(--ink-dim); }
 .hint { color: var(--ink-dim); font-size: 0.8rem; }
-.start-row { margin-top: 1.2rem; padding-top: 1.1rem; border-top: 1px solid var(--line); }
-
-/* secondary seed: search individual songs (demoted) */
 .loadbox { margin-top: 1rem; }
-.loadbox summary { color: var(--ink-dim); font-size: 0.88rem; cursor: pointer; width: max-content; }
+.loadbox summary { color: var(--ink-dim); font-size: 0.88rem; cursor: pointer; width: max-content; max-width: 100%; }
 .loadbox summary:hover { color: var(--ink); }
 .loadbox .search { margin-top: 0.6rem; }
 .loadbox .paste { margin-top: 0.6rem; }
-.first-row { margin-top: 0.9rem; }
 
 /* ---- the library navigator (browse your Spotify → a queue) ---- */
 .lib { position: fixed; inset: 0; z-index: 60; background: oklch(0.1 0.02 285 / 0.72); backdrop-filter: blur(6px); display: grid; place-items: center; padding: clamp(0.5rem, 3vw, 2rem); }
@@ -188,7 +222,7 @@ body::before {
 .savebar .hint { flex-basis: 100%; }
 .savebar .hint a { color: var(--accent); }
 
-.foot a { color: hsl(var(--amb-hue) 60% 70%); text-decoration: none; }
+.foot a { color: hsl(var(--amb-hue) 60% 70%); text-decoration: none; white-space: nowrap; }
 .foot a:hover { color: var(--ink); }
 
 /* how-it-works doc page (how.html) */
@@ -233,12 +267,35 @@ body::before {
   transition: transform 0.35s cubic-bezier(0.2,0.85,0.2,1), box-shadow 0.35s;
 }
 .card {
-  display: grid; grid-template-columns: 2.1ch 1fr auto auto; gap: 0.85rem; align-items: center;
+  display: grid; grid-template-columns: 2.1ch auto 1fr auto auto; gap: 0.85rem; align-items: center;
   padding: 0.5rem 0.7rem; border-radius: 10px; border: 1px solid transparent; cursor: pointer;
   transition: background 0.3s, border-color 0.3s, transform 0.4s cubic-bezier(0.2,0.85,0.2,1), padding 0.3s;
 }
 .card:hover { background: var(--surface); }
 .idx { color: var(--ink-dim); font-variant-numeric: tabular-nums; font-size: 0.82rem; }
+
+/* Album art. The baked catalog has none, so covers arrive from Spotify after the
+   stop is already on screen — the tile is a mood-tinted gradient until then, and
+   stays one for good when there's no worker to ask. Never an empty frame. */
+.cover-slot {
+  position: relative; width: 2.8rem; height: 2.8rem; flex: none; border-radius: 8px; overflow: hidden;
+  background: linear-gradient(145deg, hsl(var(--hue) 52% 40%), hsl(var(--hue) 44% 20%));
+  box-shadow: 0 2px 10px oklch(0 0 0 / 0.35);
+  transition: width 0.4s cubic-bezier(0.2,0.85,0.2,1), height 0.4s cubic-bezier(0.2,0.85,0.2,1),
+              border-radius 0.4s, box-shadow 0.4s;
+}
+.art { display: block; width: 100%; height: 100%; object-fit: cover; animation: fadein 0.4s ease both; }
+.art:not([src]) { visibility: hidden; }   /* no src at all → no broken-image glyph */
+@keyframes fadein { from { opacity: 0; } }
+
+/* playing indicator, drawn over the cover of the current stop only */
+.eq { position: absolute; inset: 0; display: none; align-items: flex-end; justify-content: center; gap: 3px; padding-bottom: 26%; background: oklch(0.1 0.02 285 / 0.45); }
+.stop.current .eq { display: flex; }
+.eq i { width: 3px; height: 22%; border-radius: 2px; background: var(--accent); transform-origin: bottom; animation: eqbar 1.15s ease-in-out infinite; }
+.eq i:nth-child(2) { height: 34%; animation-delay: 0.24s; }
+.eq i:nth-child(3) { height: 27%; animation-delay: 0.48s; }
+@keyframes eqbar { 0%, 100% { transform: scaleY(0.5); } 50% { transform: scaleY(2.1); } }
+
 .info { min-width: 0; }
 .info b { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: font-size 0.4s; }
 .info span { color: var(--ink-dim); font-size: 0.9rem; }
@@ -250,7 +307,9 @@ body::before {
 /* NOW-PLAYING hero: the current stop swells into the focus of the journey */
 .stop.current .node { transform: translate(-50%, -50%) scale(2); box-shadow: 0 0 0 4px var(--bg), 0 0 30px hsl(var(--hue) 85% 62% / 0.95); }
 .stop.current .card { background: hsl(var(--hue) 45% 16% / 0.55); border-color: hsl(var(--hue) 62% 55% / 0.55); padding: 1rem 0.9rem; box-shadow: 0 10px 44px hsl(var(--hue) 60% 25% / 0.45); transform: scale(1.015); }
+.stop.current .cover-slot { width: 4.6rem; height: 4.6rem; border-radius: 11px; box-shadow: 0 12px 32px hsl(var(--hue) 55% 14% / 0.8); }
 .stop.current .info b { font-size: 1.22rem; }
+.stop.current .info span { font-size: 0.95rem; }
 .stop.current .play { background: var(--accent); color: var(--accent-ink); }
 /* traveled stops recede behind you */
 .stop.past { opacity: 0.42; filter: saturate(0.7); }
@@ -260,24 +319,143 @@ body::before {
 @keyframes rise { from { opacity: 0; transform: translateY(12px); } }
 .more { margin: 1.5rem 0 0 2.4rem; }
 
-/* ---- sticky player dock ---- */
-.dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: oklch(0.17 0.03 285 / 0.82); backdrop-filter: blur(16px); border-top: 1px solid hsl(var(--amb-hue) 45% 40% / 0.4); transition: --amb-hue 1.6s cubic-bezier(0.4,0,0.2,1); }
-.dock-inner { max-width: 44rem; margin: 0 auto; padding: 0.5rem 1rem; display: flex; align-items: center; gap: 1rem; }
-.dock-meta { display: flex; flex-direction: column; min-width: 8rem; max-width: 12rem; }
-.dock-eyebrow { color: var(--ink-dim); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; }
-.dock-eyebrow b { color: hsl(var(--amb-hue) 60% 68%); }
-.dock-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ---- the per-stop readout ----
+   Collapsed, this is one dim line under a card — eight of them must not shout over the
+   journey itself. Open, it is a small technical panel: what the model pointed at, what
+   was reachable, and the three terms that settled it. */
+.why { margin: 0.15rem 0 0 0.7rem; }
+.why > summary {
+  list-style: none; cursor: pointer; width: max-content; max-width: 100%;
+  color: var(--ink-dim); font-size: 0.76rem; padding: 0.15rem 0; opacity: 0.75;
+  transition: color 0.18s, opacity 0.18s;
+}
+.why > summary::-webkit-details-marker { display: none; }
+.why > summary::before { content: "▸"; display: inline-block; margin-right: 0.5ch; transition: transform 0.18s; }
+.why[open] > summary::before { transform: rotate(90deg) translateX(-0.05em); }
+.why > summary:hover { color: var(--ink); opacity: 1; }
+.stop.current .why > summary { opacity: 1; color: hsl(var(--hue) 55% 76%); }
+/* A stop you've travelled past recedes to 42% — unreadable for a panel you deliberately
+   opened. Reading one pulls its stop back to full strength for as long as it is open. */
+.stop.past:has(.why[open]) { opacity: 1; filter: none; }
+
+.why-body {
+  margin: 0.5rem 0 0.3rem; padding: 0.85rem 0.95rem;
+  border: 1px solid var(--line); border-left: 2px solid hsl(var(--hue) 62% 55% / 0.7);
+  border-radius: 10px; background: oklch(0.18 0.025 285 / 0.6);
+  animation: fadein 0.25s ease both;
+}
+.why-lede { color: var(--ink-dim); font-size: 0.8rem; line-height: 1.5; margin: 0 0 0.9rem; text-wrap: pretty; }
+.why-lede em { color: var(--ink); font-style: normal; }
+.why-h {
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--ink-dim); margin: 0 0 0.45rem;
+}
+.why-h span { text-transform: none; letter-spacing: 0; font-weight: 400; opacity: 0.65; }
+.why-h + * { margin-top: 0; }
+.why-body > * + .why-h { margin-top: 1.05rem; }
+
+/* the model's own ranking — what it reached for, reachable or not */
+.why-near { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.why-near li {
+  display: grid; grid-template-columns: 2.6rem minmax(0, 1fr) auto; gap: 0.7rem; align-items: baseline;
+  font-size: 0.82rem; padding: 0.24rem 0.4rem; border-radius: 6px;
+  border-left: 2px solid hsl(var(--hue) 62% 58% / 0.55);
+  background: oklch(0.22 0.03 285 / 0.5); color: var(--ink-dim);
+}
+.why-near li.is-pick { background: hsl(var(--hue) 45% 20% / 0.6); color: var(--ink); }
+/* the played track when it fell outside the model's own top rows — the rank break is
+   the point, so it is drawn as a jump rather than quietly appended */
+.why-near li.is-gap { margin-top: 0.85rem; }
+.why-near li.is-gap::before {
+  content: "⋯"; position: absolute; margin-top: -0.95rem; margin-left: 0.15rem;
+  color: var(--ink-dim); font-size: 0.8rem; letter-spacing: 0.1em; opacity: 0.6;
+}
+.why-near { position: relative; }
+.why-near li { position: relative; }
+.wsim { font-style: normal; font-variant-numeric: tabular-nums; font-size: 0.78rem; opacity: 0.8; }
+.wname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wname b { font-weight: 600; color: var(--ink); }
+.why-near li:not(.is-pick) .wname b { color: inherit; }
+.wname em { font-style: normal; opacity: 0.7; }
+.wtag { font-size: 0.68rem; white-space: nowrap; opacity: 0.7; }
+.why-near li.is-pick .wtag {
+  color: var(--accent-ink); background: var(--accent); opacity: 1;
+  font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  border-radius: 4px; padding: 0.1em 0.45ch;
+}
+
+/* what lives around that point — the one legible thing a latent coordinate can say */
+.why-mix { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0; }
+.wg {
+  font-size: 0.75rem; color: hsl(var(--hue) 55% 78%); border: 1px solid hsl(var(--hue) 45% 50% / 0.45);
+  background: hsl(var(--hue) 45% 24% / 0.35); border-radius: 999px; padding: 0.14rem 0.6ch;
+}
+.wg b { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* the three competing terms, on one shared scale so the bars compare */
+.why-terms { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.why-terms li {
+  display: grid; grid-template-columns: minmax(0, 10.5rem) 1fr 3.1rem; gap: 0.7rem; align-items: center;
+  font-size: 0.78rem; color: var(--ink-dim);
+}
+.why-terms b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; text-align: right; font-size: 0.8rem; }
+.wbar {
+  display: block; height: 6px; width: var(--w); min-width: 2px; border-radius: 3px;
+  background: linear-gradient(90deg, hsl(var(--hue) 62% 52%), var(--accent));
+  animation: wgrow 0.45s cubic-bezier(0.2,0.85,0.2,1) both;
+}
+.wbar.neg { background: oklch(0.45 0.04 285); }
+@keyframes wgrow { from { transform: scaleX(0); transform-origin: left; } }
+.why-total { margin: 0.7rem 0 0; font-size: 0.78rem; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.why-total b { color: var(--ink); font-weight: 600; }
+
+@media (max-width: 30rem) {
+  .why-terms li { grid-template-columns: minmax(0, 1fr) 2.8rem; }
+  .why-terms .wbar { display: none; }
+}
+
+/* ---- sticky player dock ----
+   The cover of whatever is playing does double duty: a crisp tile, and — blurred
+   far past recognition behind everything — the dock's own atmosphere, so the bar
+   takes on the record rather than staying a neutral strip. A scrim sits between
+   the two so the title keeps its contrast over a bright sleeve. */
+.dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; overflow: hidden; background: oklch(0.17 0.03 285 / 0.82); backdrop-filter: blur(16px); border-top: 1px solid hsl(var(--amb-hue) 45% 40% / 0.4); transition: --amb-hue 1.6s cubic-bezier(0.4,0,0.2,1); }
+.dock-bg {
+  position: absolute; inset: -25%; z-index: 0; pointer-events: none;
+  background-size: cover; background-position: center; filter: blur(44px) saturate(1.45);
+  opacity: 0; transition: opacity 0.7s ease;
+}
+.dock.has-art .dock-bg { opacity: 0.42; }
+.dock::after {
+  content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(90deg, oklch(0.16 0.025 285 / 0.93), oklch(0.16 0.025 285 / 0.78) 45%, oklch(0.16 0.025 285 / 0.66));
+}
+.dock-inner { position: relative; z-index: 2; max-width: 44rem; margin: 0 auto; padding: 0.5rem 1rem; display: flex; align-items: center; gap: 0.9rem; }
+.dock-art {
+  display: none; width: 3.3rem; height: 3.3rem; flex: none; border-radius: 8px; object-fit: cover;
+  background: linear-gradient(145deg, hsl(var(--hue, 265) 52% 40%), hsl(var(--hue, 265) 44% 20%));
+  box-shadow: 0 4px 18px oklch(0 0 0 / 0.5);
+}
+.dock.full .dock-art { display: block; }   /* the Spotify iframe brings its own cover */
+.dock-meta { display: flex; flex-direction: column; justify-content: center; min-width: 8rem; max-width: 13rem; }
+.dock-eyebrow { color: var(--ink-dim); font-size: 0.72rem; letter-spacing: 0.01em; }
+.dock-eyebrow b { color: hsl(var(--amb-hue) 60% 72%); font-variant-numeric: tabular-nums; }
+.dock-title { font-weight: 650; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-artist { color: var(--ink-dim); font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the wrapper, not the element Spotify swaps out — see #embedwrap in the markup */
 .embed { flex: 1; min-width: 0; }
 .embed iframe { display: block; width: 100%; border: 0; border-radius: 10px; }
 .dock-toggle { min-width: 2.4rem; font-size: 1rem; line-height: 1; }
 .dock-prog-wrap { flex: 1; min-width: 0; height: 6px; border-radius: 999px; background: hsl(var(--amb-hue) 30% 45% / 0.28); overflow: hidden; }
 .dock-prog { height: 100%; width: 0; border-radius: 999px; background: hsl(var(--amb-hue) 65% 60%); }
 
-.foot { margin-top: 2.5rem; color: var(--ink-dim); font-size: 0.78rem; text-wrap: pretty; }
+.foot { margin-top: 2.5rem; display: grid; gap: 0.4rem; color: var(--ink-dim); font-size: 0.82rem; line-height: 1.5; text-wrap: pretty; }
+.foot p { margin: 0; max-width: 62ch; }
 
-@media (max-width: 620px) { .dock-meta { display: none; } #dock-next { display: none; } }
+@media (max-width: 560px) { .dock-meta { display: none; } #dock-next { display: none; } }
 @media (prefers-reduced-motion: reduce) {
-  body, body::before, .dock { transition: none; }
-  .stop, .card, .node, .info b { animation: none; transition: none; }
+  body, body::before, .dock, .dock-bg, .cover-slot { transition: none; }
+  .stop, .card, .node, .info b, .art { animation: none; transition: none; }
+  .eq i { animation: none; }
   .go:hover, .play:hover { transform: none; }
 }
